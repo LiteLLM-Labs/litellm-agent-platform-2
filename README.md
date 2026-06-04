@@ -111,6 +111,12 @@ general_settings:
 $ litellm-rust --config /app/config.yaml
 ```
 
+## Deployment
+
+Run it locally or deploy the UI + API to a host (e.g. Render) — see
+[deployment.md](deployment.md) for step-by-step instructions, the required env
+vars, and field-tested gotchas.
+
 ## Routes
 
 ```txt
