@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search, Check, Puzzle } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,7 +60,10 @@ export default function IntegrationsPage() {
             <Puzzle className="size-4" />
             <span className="text-sm font-semibold">Integrations</span>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ApiKeysButton />
+            <ThemeToggle />
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto">

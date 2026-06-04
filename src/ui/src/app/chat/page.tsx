@@ -30,6 +30,7 @@ import { ModelSelect } from "@/components/model-select";
 import { MessageBlock } from "@/components/message-block";
 import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
 import { getMessages, getSession, createSession, deleteSession, subscribeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval } from "@/lib/api";
@@ -393,6 +394,7 @@ function ChatInner() {
               <Activity className="size-3.5" />
               Inspect
             </Button>
+            <ApiKeysButton />
             <ThemeToggle />
           </div>
         </header>

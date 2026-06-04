@@ -12,6 +12,7 @@ pub struct Deployment {
     pub upstream_model: String,
     pub api_base: String,
     pub api_key: String,
+    pub credential_name: Option<String>,
 }
 
 impl Deployment {
@@ -56,13 +57,6 @@ impl Router {
                 GatewayError::InvalidConfig(format!("unsupported provider: {provider_id}"))
             })?;
 
-            let api_key = entry.litellm_params.api_key.clone().ok_or_else(|| {
-                GatewayError::InvalidConfig(format!(
-                    "{} is missing litellm_params.api_key",
-                    entry.model_name
-                ))
-            })?;
-
             let route = Route {
                 deployment: Deployment {
                     provider_id: provider_id.to_owned(),
@@ -72,7 +66,8 @@ impl Router {
                         .api_base
                         .clone()
                         .unwrap_or_else(|| provider.default_api_base.clone()),
-                    api_key,
+                    api_key: entry.litellm_params.api_key.clone().unwrap_or_default(),
+                    credential_name: entry.litellm_params.litellm_credential_name.clone(),
                 },
                 handler: provider.handler,
             };
@@ -156,6 +151,7 @@ mod tests {
                     model: "anthropic/claude-sonnet-4-5".to_owned(),
                     api_key: Some("sk".to_owned()),
                     api_base: None,
+                    litellm_credential_name: None,
                     extra: Default::default(),
                 },
             }],
@@ -182,6 +178,7 @@ mod tests {
                     model: "anthropic/*".to_owned(),
                     api_key: Some("sk".to_owned()),
                     api_base: None,
+                    litellm_credential_name: None,
                     extra: Default::default(),
                 },
             }],
@@ -208,6 +205,7 @@ mod tests {
                     model: "anthropic/*".to_owned(),
                     api_key: Some("sk".to_owned()),
                     api_base: None,
+                    litellm_credential_name: None,
                     extra: Default::default(),
                 },
             }],
@@ -234,6 +232,7 @@ mod tests {
                         model: "anthropic/claude-sonnet-4-5".to_owned(),
                         api_key: Some("sk".to_owned()),
                         api_base: None,
+                        litellm_credential_name: None,
                         extra: Default::default(),
                     },
                 },
@@ -243,6 +242,7 @@ mod tests {
                         model: "anthropic/*".to_owned(),
                         api_key: Some("sk".to_owned()),
                         api_base: None,
+                        litellm_credential_name: None,
                         extra: Default::default(),
                     },
                 },

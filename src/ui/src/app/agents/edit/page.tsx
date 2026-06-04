@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -102,7 +103,10 @@ function AgentEdit() {
             <span className="text-muted-foreground">/</span>
             <span className="text-sm font-semibold">Edit</span>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ApiKeysButton />
+            <ThemeToggle />
+          </div>
         </header>
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-2xl mx-auto px-4 py-8">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { KeyRound, Trash2, Pencil, Plus, Loader2, Eye, EyeOff } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +79,7 @@ export default function VaultPage() {
               <Plus className="size-4" />
               Add secret
             </Button>
+            <ApiKeysButton />
             <ThemeToggle />
           </div>
         </header>

@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Puzzle, FileText, Bot, Inbox, KeyRound } from "lucide-react";
+import { Plus, Trash2, Puzzle, FileText, Bot, Inbox, KeyRound, Settings } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { SettingsDialog } from "@/components/settings-dialog";
 import { readHarness } from "@/lib/use-harness";
 import { createSession, deleteSession, listSessions, listInbox } from "@/lib/api";
 import type { OpencodeSession } from "@/lib/types";
@@ -24,6 +23,11 @@ function timeAgo(ts?: number): string {
 export function Sidebar({ activeId }: { activeId?: string | null }) {
   const router = useRouter();
   const pathname = usePathname();
+  const agentsActive =
+    pathname === "/agents/" ||
+    pathname === "/agents" ||
+    pathname?.startsWith("/agents/detail") ||
+    pathname?.startsWith("/agents/edit");
   const [sessions, setSessions] = useState<OpencodeSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -85,9 +89,6 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           <span className="text-xl leading-none">🚄</span>
           <span className="hidden text-sm font-semibold sm:inline">LiteLLM</span>
         </div>
-        <div className="hidden sm:block">
-          <SettingsDialog />
-        </div>
       </div>
 
       <div className="space-y-2 border-b border-border px-2 py-3 sm:px-3">
@@ -118,7 +119,7 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
         </Button>
         <Button
           onClick={() => router.push("/agents/")}
-          variant={pathname?.startsWith("/agents") ? "secondary" : "ghost"}
+          variant={agentsActive ? "secondary" : "ghost"}
           className="w-full justify-center sm:justify-start"
           size="sm"
           aria-label="Agents"
@@ -200,6 +201,18 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
             </div>
           );
         })}
+      </div>
+      <div className="border-t border-border px-2 py-3 sm:px-3">
+        <Button
+          onClick={() => router.push("/settings/")}
+          variant={pathname?.startsWith("/settings") ? "secondary" : "ghost"}
+          className="w-full justify-center sm:justify-start"
+          size="sm"
+          aria-label="Settings"
+        >
+          <Settings className="size-4" />
+          <span className="hidden sm:inline">Settings</span>
+        </Button>
       </div>
     </aside>
   );

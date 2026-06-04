@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -427,6 +428,7 @@ function AgentDetail() {
                 </Button>
               </>
             )}
+            <ApiKeysButton />
             <ThemeToggle />
           </div>
         </header>

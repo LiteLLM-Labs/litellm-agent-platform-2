@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Clock, Plus, Play, Pencil, Trash2, X, Brain } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandIcon } from "@/components/brand-icons";
 import { Button } from "@/components/ui/button";
@@ -260,6 +261,7 @@ export default function AgentsPage() {
               <Plus className="size-4" />
               New agent
             </Button>
+            <ApiKeysButton />
             <ThemeToggle />
           </div>
         </header>

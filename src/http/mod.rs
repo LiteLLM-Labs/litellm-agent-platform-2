@@ -1,8 +1,13 @@
 pub mod agents;
+pub mod api_keys;
+pub mod capabilities;
+pub mod credential_overrides;
 pub mod health;
 pub mod llm;
 pub mod managed_agents;
 pub mod messages;
 pub mod openapi;
+pub mod provider_credentials;
+pub mod responses;
 pub mod routes;
 pub mod ui;

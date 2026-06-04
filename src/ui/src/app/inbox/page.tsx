@@ -12,6 +12,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
@@ -217,6 +218,7 @@ export default function InboxPage() {
             <Button variant="ghost" size="icon-sm" onClick={() => load(tab)} aria-label="Refresh inbox">
               <RefreshCw className="size-3.5" />
             </Button>
+            <ApiKeysButton />
             <ThemeToggle />
           </div>
         </header>

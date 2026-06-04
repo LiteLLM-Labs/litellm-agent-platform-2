@@ -11,6 +11,7 @@ use crate::{
         health::health,
         messages::messages,
         openapi::{openapi_json, swagger_ui},
+        responses::responses,
         ui,
     },
     mcp::route::{streamable_http, streamable_http_server},
@@ -24,7 +25,32 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/openapi.json", get(openapi_json))
         .route("/health", get(health))
         .route("/event", get(events))
+        .route(
+            "/api/capabilities",
+            get(crate::http::capabilities::capabilities),
+        )
+        .route(
+            "/api/keys",
+            get(crate::http::api_keys::list).post(crate::http::api_keys::create),
+        )
+        .route(
+            "/api/keys/{key_id}",
+            get(crate::http::api_keys::get)
+                .patch(crate::http::api_keys::update)
+                .delete(crate::http::api_keys::delete),
+        )
+        .route(
+            "/api/providers",
+            get(crate::http::provider_credentials::list),
+        )
+        .route(
+            "/api/providers/anthropic",
+            post(crate::http::provider_credentials::save_anthropic)
+                .delete(crate::http::provider_credentials::delete_anthropic),
+        )
+        .route("/v1/models", get(crate::http::capabilities::models))
         .route("/v1/messages", post(messages))
+        .route("/v1/responses", post(responses))
         .merge(crate::http::managed_agents::routes::router())
         .route(
             "/mcp",

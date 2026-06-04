@@ -3,6 +3,45 @@
 
 import type { ReactNode, SVGProps } from "react";
 
+function AnthropicIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        fill="currentColor"
+        d="M32.2 10h-5.8l10.6 28h5.8L32.2 10ZM15.8 10 5.2 38h5.9l2.2-6.2h11.4l2.2 6.2h5.9L22.2 10h-6.4Zm-.8 16.9L19 15.6l4 11.3h-8Z"
+      />
+    </svg>
+  );
+}
+
+function ClaudeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <rect width="32" height="32" rx="8" fill="#D97757" />
+      <path
+        fill="#171717"
+        d="M20.9 8h-3.5l6.4 16.8h3.5L20.9 8ZM11.1 8 4.7 24.8h3.6l1.3-3.7h6.8l1.3 3.7h3.6L14.9 8h-3.8Zm-.5 10.2L13 11.4l2.4 6.8h-4.8Z"
+      />
+    </svg>
+  );
+}
+
+function CodexIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <rect width="32" height="32" rx="8" fill="#0A0A0A" />
+      <path
+        fill="none"
+        stroke="#fff"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        d="M16 6.5 23.8 11v9.9L16 25.5l-7.8-4.6V11L16 6.5Zm0 0v8.8m7.8-4.3L16 15.3l-7.8-4.3M8.2 20.9l7.8-5.6 7.8 5.6"
+      />
+    </svg>
+  );
+}
+
 function GmailIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -74,6 +113,9 @@ function FallbackIcon(props: SVGProps<SVGSVGElement>) {
 }
 
 const ICONS: Record<string, (p: SVGProps<SVGSVGElement>) => ReactNode> = {
+  anthropic: AnthropicIcon,
+  claude: ClaudeIcon,
+  codex: CodexIcon,
   gmail: GmailIcon,
   linear: LinearIcon,
   pylon: PylonIcon,

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Upload, Trash2, FileText, Loader2, Pencil, Plus } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
+import { ApiKeysButton } from "@/components/api-keys-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,7 +92,10 @@ export default function SkillsPage() {
             <FileText className="size-4" />
             <span className="text-sm font-semibold">Skills</span>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <ApiKeysButton />
+            <ThemeToggle />
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto">
