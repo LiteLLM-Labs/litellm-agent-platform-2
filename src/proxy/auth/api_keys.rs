@@ -1,4 +1,5 @@
 use std::{
+    cmp::Reverse,
     collections::HashMap,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -41,7 +42,7 @@ impl ApiKeyStore {
             .values()
             .map(|stored| stored.entry.clone())
             .collect::<Vec<_>>();
-        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        entries.sort_by_key(|entry| Reverse(entry.created_at));
         entries
     }
 
