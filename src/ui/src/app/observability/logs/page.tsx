@@ -169,8 +169,8 @@ export default function ObservabilityLogsPage() {
           </div>
         </header>
 
-        <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden 2xl:grid-cols-[minmax(980px,1fr)_680px]">
-          <section className="flex min-h-0 flex-col border-r border-[#d7d7dc] bg-white">
+        <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_680px]">
+          <section className="flex min-h-0 min-w-0 flex-col border-r border-[#d7d7dc] bg-white">
             <div className="border-b border-[#e5e5ea] px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative w-[300px] max-w-full">
@@ -246,7 +246,7 @@ export default function ObservabilityLogsPage() {
             </div>
           </section>
 
-          <section className="min-h-0 overflow-y-auto bg-[#f5f5f7]">
+          <section className="min-h-0 min-w-0 overflow-y-auto border-l border-[#d7d7dc] bg-[#f5f5f7]">
             {selected ? (
               <LogDetail log={selected} error={selectedError} />
             ) : (
@@ -343,9 +343,9 @@ function StatusBadge({ status, compact = false }: { status: string | null; compa
 
 function LogDetail({ log, error }: { log: SpendLog; error: Record<string, unknown> | null }) {
   return (
-    <div className="mx-auto max-w-7xl space-y-5 px-6 py-5">
+    <div className="space-y-5 px-6 py-5">
       <div className="border-b border-[#d7d7dc] pb-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-semibold text-[#1d1d1f]">{log.model_group || log.model}</span>
@@ -373,7 +373,7 @@ function LogDetail({ log, error }: { log: SpendLog; error: Record<string, unknow
               <span className="text-sm text-[#86868b]">{formatDate(log.start_time)}</span>
             </div>
           </div>
-          <div className="grid min-w-[420px] grid-cols-4 overflow-hidden rounded-md border border-[#d7d7dc] bg-white">
+          <div className="grid overflow-hidden rounded-md border border-[#d7d7dc] bg-white sm:grid-cols-4">
             <DetailStat label="Cost" value={formatCost(log.spend)} />
             <DetailStat label="Tokens" value={log.total_tokens.toLocaleString()} />
             <DetailStat label="Latency" value={formatDuration(log.request_duration_ms)} />
