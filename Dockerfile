@@ -9,7 +9,7 @@ RUN npm run build
 
 FROM rust:1.85-bookworm AS rust-builder
 WORKDIR /build
-COPY Cargo.toml Cargo.lock build.rs model_prices_backup.json ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
 RUN cargo build --release --bin lite
 
