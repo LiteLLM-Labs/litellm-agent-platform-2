@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
@@ -21,6 +21,8 @@ import type { SpendLog } from "@/lib/types";
 const PAGE_SIZE = 50;
 const TABLE_COLUMNS =
   "grid-cols-[150px_96px_104px_136px_190px_104px_108px_92px_132px_150px_132px_180px_132px]";
+const LOG_URL_PARAM = "request_id";
+const MAX_PROMPT_JSON_CHARS = 12000;
 
 function formatCost(value: number | null | undefined): string {
   return `$${(value ?? 0).toFixed(8)}`;
@@ -47,6 +49,27 @@ function formatDuration(ms: number | null | undefined): string {
 function prettyJson(value: unknown): string {
   if (value == null) return "{}";
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function truncateForPrompt(value: string): string {
+  if (value.length <= MAX_PROMPT_JSON_CHARS) return value;
+  return `${value.slice(0, MAX_PROMPT_JSON_CHARS)}\n\n[truncated]`;
+}
+
+function currentLogUrl(requestId: string): string {
+  if (typeof window === "undefined") return `/observability/logs/?${LOG_URL_PARAM}=${encodeURIComponent(requestId)}`;
+  const url = new URL("/observability/logs/", window.location.origin);
+  url.searchParams.set(LOG_URL_PARAM, requestId);
+  return url.toString();
+}
+
+function setCurrentLogUrl(requestId: string): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.pathname = "/observability/logs/";
+  url.search = "";
+  url.searchParams.set(LOG_URL_PARAM, requestId);
+  window.history.replaceState(null, "", url.toString());
 }
 
 function shortValue(value: string | null | undefined, size = 14): string {
@@ -81,9 +104,56 @@ function errorInfo(log: SpendLog | null): Record<string, unknown> | null {
     : null;
 }
 
+function buildDebugPrompt(log: SpendLog, error: Record<string, unknown> | null): string {
+  const lines = [
+    "Debug this LiteLLM gateway request log and identify the likely root cause.",
+    "",
+    `Log URL: ${currentLogUrl(log.request_id)}`,
+    `Request ID: ${log.request_id}`,
+    `Status: ${log.status ?? "unknown"}`,
+    `Call type: ${log.call_type}`,
+    `Provider: ${log.custom_llm_provider ?? "-"}`,
+    `Model: ${log.model_group || log.model}`,
+    `API base: ${log.api_base ?? "-"}`,
+    `Started: ${log.start_time}`,
+    `Duration: ${formatDuration(log.request_duration_ms)}`,
+    `Input tokens: ${log.prompt_tokens}`,
+    `Output tokens: ${log.completion_tokens}`,
+    `Cost: ${formatCost(log.spend)}`,
+  ];
+
+  if (error) {
+    lines.push(
+      "",
+      "Captured error:",
+      "```json",
+      truncateForPrompt(prettyJson(error)),
+      "```",
+    );
+  }
+
+  lines.push(
+    "",
+    "Request payload:",
+    "```json",
+    truncateForPrompt(prettyJson(log.messages)),
+    "```",
+    "",
+    "Response payload:",
+    "```json",
+    truncateForPrompt(prettyJson(log.response)),
+    "```",
+    "",
+    "Explain what failed, where to look in the codebase, and propose the smallest safe fix. If you have repository access, implement the fix and run the relevant checks.",
+  );
+
+  return lines.join("\n");
+}
+
 export default function ObservabilityLogsPage() {
   const [logs, setLogs] = useState<SpendLog[]>([]);
   const [selected, setSelected] = useState<SpendLog | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(true);
   const [liveTail, setLiveTail] = useState(true);
   const [page, setPage] = useState(1);
@@ -91,7 +161,7 @@ export default function ObservabilityLogsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     else setLoading(true);
     try {
@@ -104,17 +174,19 @@ export default function ObservabilityLogsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
+    const initialRequestId = new URLSearchParams(window.location.search).get(LOG_URL_PARAM);
+    if (initialRequestId) setSelectedRequestId(initialRequestId);
     load();
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     if (!liveTail) return undefined;
     const timer = setInterval(() => load(true), 15_000);
     return () => clearInterval(timer);
-  }, [liveTail]);
+  }, [liveTail, load]);
 
   useEffect(() => {
     setPage(1);
@@ -126,20 +198,29 @@ export default function ObservabilityLogsPage() {
   const pageEnd = Math.min(currentPage * PAGE_SIZE, logs.length);
   const visibleLogs = logs.slice(pageStart === 0 ? 0 : pageStart - 1, pageEnd);
 
+  const selectRequest = useCallback(async (requestId: string, updateUrl = true) => {
+    const log = await getSpendLog(requestId);
+    setSelected(log);
+    setSelectedRequestId(log.request_id);
+    setDetailOpen(true);
+    if (updateUrl) setCurrentLogUrl(log.request_id);
+  }, []);
+
   useEffect(() => {
-    if (logs.length === 0) {
+    if (logs.length === 0 && !selectedRequestId) {
       setSelected(null);
       setDetailOpen(false);
       return;
     }
-    if (selected && logs.some((log) => log.request_id === selected.request_id)) {
-      return;
-    }
+    const requestId = selectedRequestId ?? logs[0]?.request_id;
+    if (!requestId || selected?.request_id === requestId) return;
+
     let cancelled = false;
-    getSpendLog(logs[0].request_id)
+    getSpendLog(requestId)
       .then((log) => {
         if (!cancelled) {
           setSelected(log);
+          setSelectedRequestId(log.request_id);
           setDetailOpen(true);
         }
       })
@@ -149,7 +230,7 @@ export default function ObservabilityLogsPage() {
     return () => {
       cancelled = true;
     };
-  }, [logs, selected]);
+  }, [logs, selected?.request_id, selectedRequestId]);
 
   const selectedError = errorInfo(selected);
 
@@ -232,10 +313,7 @@ export default function ObservabilityLogsPage() {
                     key={log.request_id}
                     log={log}
                     active={selected?.request_id === log.request_id}
-                    onSelect={async () => {
-                      setSelected(await getSpendLog(log.request_id));
-                      setDetailOpen(true);
-                    }}
+                    onSelect={() => void selectRequest(log.request_id)}
                   />
                 ))}
               </div>
@@ -358,6 +436,15 @@ function LogDetail({
   error: Record<string, unknown> | null;
   onClose: () => void;
 }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const logUrl = currentLogUrl(log.request_id);
+  const debugPrompt = buildDebugPrompt(log, error);
+  const copy = async (key: string, value: string) => {
+    await navigator.clipboard?.writeText(value);
+    setCopied(key);
+    window.setTimeout(() => setCopied(null), 1200);
+  };
+
   return (
     <div className="space-y-5 px-6 py-5">
       <div className="border-b border-[#d7d7dc] pb-4">
@@ -385,9 +472,9 @@ function LogDetail({
                 size="icon"
                 className="h-8 w-8 text-[#0a84ff]"
                 title="Copy request ID"
-                onClick={() => navigator.clipboard?.writeText(log.request_id)}
+                onClick={() => void copy("request", log.request_id)}
               >
-                <Copy className="size-4" />
+                {copied === "request" ? <Check className="size-4" /> : <Copy className="size-4" />}
               </Button>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -396,6 +483,24 @@ function LogDetail({
                 Env: {metadataString(log, "environment") ?? "default"}
               </span>
               <span className="text-sm text-[#86868b]">{formatDate(log.start_time)}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-[#d7d7dc] bg-white text-xs"
+                onClick={() => void copy("url", logUrl)}
+              >
+                {copied === "url" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                Copy URL
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-[#d7d7dc] bg-white text-xs"
+                onClick={() => void copy("prompt", debugPrompt)}
+              >
+                {copied === "prompt" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                Debug Prompt
+              </Button>
             </div>
           </div>
           <div className="grid overflow-hidden rounded-md border border-[#d7d7dc] bg-white sm:grid-cols-4">
