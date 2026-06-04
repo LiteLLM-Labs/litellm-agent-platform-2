@@ -1,35 +1,22 @@
-# Minimal boot-safe config for hosted deploys (e.g. Render).
-# Only references env vars the deploy sets, so boot never fails on a missing
-# optional integration. Provider keys + master key come from the platform's
-# secret env vars, never committed.
+# Hosted deploy config (e.g. Render).
 #
-# NOTE: this gateway supports exactly ONE wildcard ("provider/*") route. It is
-# reserved for anthropic here (Claude Code / /v1/messages). Other providers must
-# be listed as explicit models.
+# Provider API keys are NOT stored here. They live in the database, added via
+# the Settings UI (/settings -> POST /api/providers/{id}) and encrypted with the
+# master key. credential_overrides injects them per request.
+#
+# A database is required: it backs provider credentials AND the sessions/agents
+# UI. Without DATABASE_URL the server returns 503 "database is not configured"
+# on those routes.
+#
+# NOTE: the gateway supports exactly one "provider/*" wildcard route (reserved
+# for anthropic). Only anthropic is in the credential catalog today, so only it
+# is DB-credential-backed; other providers need a catalog entry first.
 model_list:
   - model_name: anthropic/*
     litellm_params:
       model: anthropic/*
-      api_key: os.environ/ANTHROPIC_API_KEY
       api_base: https://api.anthropic.com
-
-  # OpenAI (Codex /v1/responses) — explicit models, since the single wildcard
-  # route is taken by anthropic above.
-  - model_name: gpt-5.5
-    litellm_params:
-      model: openai/gpt-5.5
-      api_key: os.environ/OPENAI_API_KEY
-      api_base: https://api.openai.com
-  - model_name: gpt-5
-    litellm_params:
-      model: openai/gpt-5
-      api_key: os.environ/OPENAI_API_KEY
-      api_base: https://api.openai.com
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
-      api_base: https://api.openai.com
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
