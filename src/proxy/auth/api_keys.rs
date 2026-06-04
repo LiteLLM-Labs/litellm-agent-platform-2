@@ -48,7 +48,7 @@ impl ApiKeyStore {
 
     pub async fn create(&self, label: Option<String>) -> CreatedApiKey {
         let id = Uuid::new_v4().to_string();
-        let key = format!("ltag_{}", Uuid::new_v4().simple());
+        let key = format!("sk-{}", Uuid::new_v4().simple());
         let entry = ApiKeyEntry {
             id: id.clone(),
             label: clean_label(label),
@@ -108,4 +108,15 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApiKeyStore;
+
+    #[tokio::test]
+    async fn generated_keys_use_sk_prefix() {
+        let created = ApiKeyStore::default().create(None).await;
+        assert!(created.key.starts_with("sk-"));
+    }
 }
