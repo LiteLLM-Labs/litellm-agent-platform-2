@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod capabilities;
 pub mod credential_overrides;
+pub mod harness_proxy;
 pub mod health;
 pub mod llm;
 pub mod managed_agents;

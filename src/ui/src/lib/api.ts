@@ -10,6 +10,8 @@ import type {
 
 const BASE = "";
 const MASTER_KEY_STORAGE = "lite-harness-master-key";
+const HARNESS_SERVER_URL_STORAGE = "lite-harness-server-url";
+const HARNESS_SERVER_KEY_STORAGE = "lite-harness-server-key";
 
 export class ApiError extends Error {
   status: number;
@@ -48,6 +50,81 @@ export function clearStoredMasterKey(): void {
   }
 }
 
+export function normalizeHarnessServerUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed.includes("://") ? trimmed : `http://${trimmed}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    url.hash = "";
+    url.search = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+export function getHarnessServerUrl(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return normalizeHarnessServerUrl(
+      window.localStorage.getItem(HARNESS_SERVER_URL_STORAGE) ?? "",
+    );
+  } catch {
+    return "";
+  }
+}
+
+export function setHarnessServerUrl(value: string): string {
+  const normalized = normalizeHarnessServerUrl(value);
+  if (typeof window === "undefined") return normalized;
+  try {
+    if (normalized) window.localStorage.setItem(HARNESS_SERVER_URL_STORAGE, normalized);
+    else window.localStorage.removeItem(HARNESS_SERVER_URL_STORAGE);
+  } catch {
+    /* noop */
+  }
+  return normalized;
+}
+
+export function clearHarnessServerUrl(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(HARNESS_SERVER_URL_STORAGE);
+  } catch {
+    /* noop */
+  }
+}
+
+export function getHarnessServerKey(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.sessionStorage.getItem(HARNESS_SERVER_KEY_STORAGE) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setHarnessServerKey(value: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const trimmed = value.trim();
+    if (trimmed) window.sessionStorage.setItem(HARNESS_SERVER_KEY_STORAGE, trimmed);
+    else window.sessionStorage.removeItem(HARNESS_SERVER_KEY_STORAGE);
+  } catch {
+    /* noop */
+  }
+}
+
+export function clearHarnessServerKey(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(HARNESS_SERVER_KEY_STORAGE);
+  } catch {
+    /* noop */
+  }
+}
+
 function withAuth(init?: RequestInit): RequestInit {
   const key = getStoredMasterKey();
   if (!key) return { cache: "no-store", ...init };
@@ -68,6 +145,26 @@ async function req(path: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
+function harnessProxyPath(path: string, base = getHarnessServerUrl()): string {
+  const cleanPath = path.replace(/^\/+/, "");
+  const qs = new URLSearchParams({ base });
+  return `${BASE}/api/harness-proxy/${cleanPath}?${qs.toString()}`;
+}
+
+function withHarnessProxyAuth(init?: RequestInit, targetKey = getHarnessServerKey()): RequestInit {
+  const headers = new Headers(init?.headers);
+  const key = getStoredMasterKey();
+  if (key && !headers.has("authorization")) headers.set("authorization", `Bearer ${key}`);
+  if (targetKey.trim()) headers.set("x-lite-harness-target-key", targetKey.trim());
+  return { cache: "no-store", ...init, headers };
+}
+
+async function reqHarness(path: string, init?: RequestInit): Promise<Response> {
+  const base = getHarnessServerUrl();
+  if (!base) return req(path, init);
+  return fetch(harnessProxyPath(path, base), withHarnessProxyAuth(init));
+}
+
 export async function whoami(): Promise<void> {
   const res = await req("/whoami");
   if (!res.ok) {
@@ -85,7 +182,7 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 }
 
 export async function listSessions(): Promise<OpencodeSession[]> {
-  const res = await req("/session");
+  const res = await reqHarness("/session");
   if (!res.headers.get("content-type")?.includes("application/json")) return [];
   const list = await jsonOrThrow<OpencodeSession[]>(res);
   return [...list].sort(
@@ -94,10 +191,10 @@ export async function listSessions(): Promise<OpencodeSession[]> {
 }
 
 export async function createSession(title?: string, agent?: string): Promise<OpencodeSession> {
-  const res = await req("/session", {
+  const res = await reqHarness("/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title, ...(agent ? { agent } : {}) }),
+    body: JSON.stringify({ title, ...(agent ? { agent, harness: agent } : {}) }),
   });
   return jsonOrThrow<OpencodeSession>(res);
 }
@@ -157,7 +254,7 @@ export async function deleteProvider(providerId: string): Promise<void> {
 
 export async function deleteSession(id: string): Promise<void> {
   try {
-    await req(`/session/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await reqHarness(`/session/${encodeURIComponent(id)}`, { method: "DELETE" });
   } catch {
     /* swallow */
   }
@@ -175,6 +272,47 @@ export interface LiteLLMHealth {
 export async function testLiteLLMConnection(): Promise<LiteLLMHealth> {
   const res = await req("/_litellm/health");
   return jsonOrThrow<LiteLLMHealth>(res);
+}
+
+export interface HarnessServerHealth {
+  ok: boolean;
+  mode: "local" | "remote";
+  base?: string;
+  status?: number;
+  error?: string;
+}
+
+export async function testHarnessServer(
+  rawUrl?: string,
+  rawKey?: string,
+): Promise<HarnessServerHealth> {
+  const base = normalizeHarnessServerUrl(rawUrl ?? getHarnessServerUrl());
+  if (!base) return { ok: true, mode: "local" };
+
+  try {
+    const res = await fetch(
+      harnessProxyPath("/session", base),
+      withHarnessProxyAuth(undefined, rawKey ?? getHarnessServerKey()),
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return {
+        ok: false,
+        mode: "remote",
+        base,
+        status: res.status,
+        error: body || `HTTP ${res.status}`,
+      };
+    }
+    return { ok: true, mode: "remote", base, status: res.status };
+  } catch (err) {
+    return {
+      ok: false,
+      mode: "remote",
+      base,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export interface GatewayApiKey {
@@ -212,12 +350,12 @@ export async function deleteGatewayApiKey(id: string): Promise<void> {
 }
 
 export async function getSession(id: string): Promise<OpencodeSession> {
-  const res = await req(`/session/${encodeURIComponent(id)}`);
+  const res = await reqHarness(`/session/${encodeURIComponent(id)}`);
   return jsonOrThrow<OpencodeSession>(res);
 }
 
 export async function getMessages(sid: string): Promise<HarnessMessage[]> {
-  const res = await req(`/session/${encodeURIComponent(sid)}/message`);
+  const res = await reqHarness(`/session/${encodeURIComponent(sid)}/message`);
   return jsonOrThrow<HarnessMessage[]>(res);
 }
 
@@ -226,7 +364,7 @@ export async function sendMessage(opts: {
   text: string;
   model: string;
 }): Promise<void> {
-  const res = await req(
+  const res = await reqHarness(
     `/session/${encodeURIComponent(opts.sessionId)}/prompt_async`,
     {
       method: "POST",
@@ -245,7 +383,7 @@ export async function sendMessage(opts: {
 }
 
 export async function abortSession(id: string): Promise<void> {
-  await req(`/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
+  await reqHarness(`/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
 }
 
 export async function listModels(): Promise<string[]> {
@@ -498,9 +636,7 @@ export function subscribeEvents(opts: {
 }): () => void {
   let es: EventSource | null = null;
   try {
-    const key = getStoredMasterKey();
-    const qs = key ? `?key=${encodeURIComponent(key)}` : "";
-    es = new EventSource(BASE + "/event" + qs);
+    es = new EventSource(harnessEventSourceUrl());
   } catch (e) {
     opts.onError?.(e);
     return () => {};
@@ -525,6 +661,21 @@ export function subscribeEvents(opts: {
       /* noop */
     }
   };
+}
+
+export function harnessEventSourceUrl(): string {
+  const remoteBase = getHarnessServerUrl();
+  const localKey = getStoredMasterKey();
+  if (!remoteBase) {
+    const qs = localKey ? `?key=${encodeURIComponent(localKey)}` : "";
+    return `${BASE}/event${qs}`;
+  }
+
+  const qs = new URLSearchParams({ base: remoteBase });
+  if (localKey) qs.set("key", localKey);
+  const targetKey = getHarnessServerKey();
+  if (targetKey) qs.set("target_key", targetKey);
+  return `${BASE}/api/harness-proxy/event?${qs.toString()}`;
 }
 
 // ── Agent CRUD (/api/agents) ────────────────────────────────────────────────
