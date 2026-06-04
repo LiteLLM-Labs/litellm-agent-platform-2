@@ -7,7 +7,7 @@ RUN npm ci --no-audit --no-fund
 COPY src/ui/ ./
 RUN npm run build
 
-FROM rust:1.85-bookworm AS rust-builder
+FROM rust:1.90-bookworm AS rust-builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
