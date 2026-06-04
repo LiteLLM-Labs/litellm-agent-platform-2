@@ -12,6 +12,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,6 +24,33 @@ import {
 } from "@/lib/api";
 
 export function ApiKeysDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="API Key"
+            title="API Key"
+          />
+        }
+      >
+        <KeyRound className="size-4" />
+        <span className="hidden lg:inline">API Key</span>
+      </DialogTrigger>
+      <DialogContent className="max-h-[min(780px,calc(100vh-2rem))] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>API Keys</DialogTitle>
+          <DialogDescription>Create gateway keys for local CLIs and AI agents.</DialogDescription>
+        </DialogHeader>
+        <ApiKeysPanel />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function ApiKeysPanel() {
   const [open, setOpen] = useState(false);
   const [keys, setKeys] = useState<GatewayApiKey[] | null>(null);
   const [label, setLabel] = useState("");
@@ -38,13 +66,14 @@ export function ApiKeysDialog() {
     load().catch((error) => toast.error(error instanceof Error ? error.message : String(error)));
   }, [open]);
 
-  const updateOpen = (nextOpen: boolean) => {
-    setOpen(nextOpen);
-    if (!nextOpen) {
+  useEffect(() => {
+    setOpen(true);
+    return () => {
+      setOpen(false);
       setCreated(null);
       setLabel("");
-    }
-  };
+    };
+  }, []);
 
   const create = async () => {
     setCreating(true);
@@ -72,81 +101,60 @@ export function ApiKeysDialog() {
   };
 
   return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setOpen(true)}
-        aria-label="API Key"
-        title="API Key"
-      >
-        <KeyRound className="size-4" />
-        <span className="hidden lg:inline">API Key</span>
-      </Button>
-      <Dialog open={open} onOpenChange={updateOpen}>
-        <DialogContent className="max-h-[min(780px,calc(100vh-2rem))] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>API Keys</DialogTitle>
-            <DialogDescription>Create gateway keys for local CLIs and AI agents.</DialogDescription>
-          </DialogHeader>
+    <div className="grid gap-4">
+      <div className="rounded-lg border border-border bg-card p-3">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+            placeholder="Label, optional"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") create();
+            }}
+          />
+          <Button onClick={create} disabled={creating} className="shrink-0">
+            {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+            Create API Key
+          </Button>
+        </div>
+      </div>
 
-          <div className="grid gap-4">
-            <div className="rounded-lg border border-border bg-card p-3">
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  value={label}
-                  onChange={(event) => setLabel(event.target.value)}
-                  placeholder="Label, optional"
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") create();
-                  }}
-                />
-                <Button onClick={create} disabled={creating} className="shrink-0">
-                  {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                  Create API Key
+      {created && <CreatedKeyCard created={created} />}
+
+      <div className="rounded-lg border border-border">
+        <div className="border-b border-border px-4 py-3 text-sm font-medium">Existing keys</div>
+        {keys === null ? (
+          <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Loading
+          </div>
+        ) : keys.length === 0 ? (
+          <div className="px-4 py-6 text-sm text-muted-foreground">No API keys yet.</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {keys.map((key) => (
+              <div key={key.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{key.label || "Untitled key"}</div>
+                  <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                    {key.id} - {key.last_used_at ? new Date(key.last_used_at * 1000).toLocaleString() : "never used"}
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="shrink-0 text-destructive hover:text-destructive"
+                  onClick={() => remove(key.id)}
+                  aria-label="Delete API key"
+                >
+                  <Trash2 className="size-4" />
                 </Button>
               </div>
-            </div>
-
-            {created && <CreatedKeyCard created={created} />}
-
-            <div className="rounded-lg border border-border">
-              <div className="border-b border-border px-4 py-3 text-sm font-medium">Existing keys</div>
-              {keys === null ? (
-                <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading
-                </div>
-              ) : keys.length === 0 ? (
-                <div className="px-4 py-6 text-sm text-muted-foreground">No API keys yet.</div>
-              ) : (
-                <div className="divide-y divide-border">
-                  {keys.map((key) => (
-                    <div key={key.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{key.label || "Untitled key"}</div>
-                        <div className="mt-1 truncate font-mono text-xs text-muted-foreground">
-                          {key.id} - {key.last_used_at ? new Date(key.last_used_at * 1000).toLocaleString() : "never used"}
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="shrink-0 text-destructive hover:text-destructive"
-                        onClick={() => remove(key.id)}
-                        aria-label="Delete API key"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            ))}
           </div>
-        </DialogContent>
-      </Dialog>
-    </>
+        )}
+      </div>
+    </div>
   );
 }
 
