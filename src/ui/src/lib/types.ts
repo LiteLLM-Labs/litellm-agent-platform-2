@@ -107,3 +107,32 @@ export interface Memory {
   created_at: number;
   updated_at: number;
 }
+
+export interface SpendLog {
+  request_id: string;
+  call_type: string;
+  api_key: string;
+  spend: number;
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  start_time: string;
+  end_time: string;
+  request_duration_ms: number | null;
+  model: string;
+  model_id: string | null;
+  model_group: string | null;
+  custom_llm_provider: string | null;
+  api_base: string | null;
+  user: string | null;
+  metadata: Record<string, unknown> | null;
+  cache_hit: string | null;
+  cache_key: string | null;
+  request_tags: unknown[] | Record<string, unknown> | null;
+  end_user: string | null;
+  requester_ip_address: string | null;
+  messages: unknown;
+  response: unknown;
+  session_id: string | null;
+  status: string | null;
+}

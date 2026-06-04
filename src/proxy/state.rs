@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use reqwest::Client;
 use sqlx::PgPool;
 
 use crate::{
     agents::runs::AgentRunStore,
+    callbacks::{litellm_db::LiteLLMDBCallback, CallbackManager},
     errors::GatewayError,
     mcp::registry::McpServerRegistry,
     model_prices::ModelCostMap,
@@ -20,6 +23,7 @@ pub struct AppState {
     pub agent_runs: AgentRunStore,
     pub db: Option<PgPool>,
     pub api_keys: GatewayApiKeyStore,
+    pub callbacks: CallbackManager,
 }
 
 impl AppState {
@@ -39,6 +43,7 @@ impl AppState {
         model_cost_map: ModelCostMap,
         db: Option<PgPool>,
     ) -> Result<Self, GatewayError> {
+        let callbacks = callbacks(&config, db.clone());
         Ok(Self {
             mcp_servers: McpServerRegistry::from_config(&config)?,
             config,
@@ -48,6 +53,20 @@ impl AppState {
             agent_runs: AgentRunStore::default(),
             db,
             api_keys: GatewayApiKeyStore::default(),
+            callbacks,
         })
     }
+}
+
+fn callbacks(config: &GatewayConfig, db: Option<PgPool>) -> CallbackManager {
+    let Some(pool) = db else {
+        return CallbackManager::default();
+    };
+    if config.general_settings.disable_spend_logs {
+        return CallbackManager::default();
+    }
+    CallbackManager::new(vec![Arc::new(LiteLLMDBCallback::new(
+        pool,
+        &config.general_settings,
+    ))])
 }

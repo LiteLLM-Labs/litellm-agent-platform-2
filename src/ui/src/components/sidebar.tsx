@@ -159,8 +159,8 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
       label: "Observability",
       items: [
         {
-          label: "Overview",
-          href: "/observability/",
+          label: "Logs",
+          href: "/observability/logs/",
           icon: Activity,
           active: (path) => path.startsWith("/observability"),
         },

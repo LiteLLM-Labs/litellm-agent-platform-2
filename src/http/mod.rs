@@ -8,6 +8,7 @@ pub mod managed_agents;
 pub mod management;
 pub mod messages;
 pub mod models;
+pub mod observability;
 pub mod openapi;
 pub mod provider_credentials;
 pub mod responses;

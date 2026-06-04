@@ -25,13 +25,51 @@ pub struct GatewayConfig {
     pub agents: Vec<AgentDefinition>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct GeneralSettings {
     pub master_key: Option<String>,
     pub database_url: Option<String>,
+    #[serde(default)]
+    pub store_prompts_in_spend_logs: bool,
+    #[serde(default)]
+    pub disable_spend_logs: bool,
+    #[serde(default = "default_spend_logs_batch_interval_seconds")]
+    pub spend_logs_batch_interval_seconds: u64,
+    #[serde(default = "default_spend_logs_batch_size")]
+    pub spend_logs_batch_size: usize,
+    #[serde(default = "default_spend_logs_queue_capacity")]
+    pub spend_logs_queue_capacity: usize,
     pub sandbox_choice: Option<String>,
     #[serde(default)]
     pub e2b_sandbox_params: E2bSandboxParams,
+}
+
+impl Default for GeneralSettings {
+    fn default() -> Self {
+        Self {
+            master_key: None,
+            database_url: None,
+            store_prompts_in_spend_logs: false,
+            disable_spend_logs: false,
+            spend_logs_batch_interval_seconds: default_spend_logs_batch_interval_seconds(),
+            spend_logs_batch_size: default_spend_logs_batch_size(),
+            spend_logs_queue_capacity: default_spend_logs_queue_capacity(),
+            sandbox_choice: None,
+            e2b_sandbox_params: E2bSandboxParams::default(),
+        }
+    }
+}
+
+fn default_spend_logs_batch_interval_seconds() -> u64 {
+    10
+}
+
+fn default_spend_logs_batch_size() -> usize {
+    100
+}
+
+fn default_spend_logs_queue_capacity() -> usize {
+    10_000
 }
 
 #[derive(Debug, Clone, Deserialize)]
