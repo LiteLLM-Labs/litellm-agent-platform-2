@@ -4,15 +4,31 @@ How to run litellm-rust locally and deploy it (UI + API) to a host like Render.
 
 ## What you need
 
-- A LiteLLM-style `config.yaml` (`model_list` + `general_settings.master_key`).
-- Provider API keys for whatever you route to (e.g. `ANTHROPIC_API_KEY`,
-  `OPENAI_API_KEY`).
+- A LiteLLM-style `config.yaml` (`model_list` + `general_settings`).
 - A gateway master key (`LITELLM_MASTER_KEY`) — clients authenticate with it via
-  `Authorization: Bearer <key>` or `x-api-key`.
+  `Authorization: Bearer <key>` or `x-api-key`. It also encrypts stored creds.
+- A **Postgres database** (`DATABASE_URL`) — required for provider credentials
+  and the sessions/agents UI.
 
 Config values can reference env vars with `os.environ/NAME`. **Every referenced
 env var must be set at boot or startup fails.** Keep hosted configs minimal — see
 [`deploy/render.config.yaml`](deploy/render.config.yaml).
+
+### Provider credentials live in the database, not the config
+
+Do **not** put provider API keys in `config.yaml` / env vars. Add them through
+the **Settings UI** (`/settings`) or the API — they are stored encrypted in the
+DB and injected per request:
+
+```bash
+curl -X POST $BASE/api/providers/anthropic \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H "content-type: application/json" \
+  -d '{"api_key":"sk-ant-...","api_base":"https://api.anthropic.com"}'
+```
+
+A model route with no `api_key` is valid **as long as a database is configured**
+(the key comes from the DB). Today only **anthropic** is in the credential
+catalog; other providers need a catalog entry before they can be DB-backed.
 
 > **One wildcard only.** The router supports exactly one `provider/*` wildcard
 > route. Reserve it for your primary provider (e.g. `anthropic/*`) and list other
@@ -54,11 +70,13 @@ Create a **Web Service** (Docker) from this repo:
 | Health check path | `/health` |
 | Branch | `main` |
 
-Set these as service env vars (secrets):
+Add a **Postgres** instance and set these as service env vars (secrets):
 
-- `LITELLM_MASTER_KEY` — gateway auth key
-- `ANTHROPIC_API_KEY` — for `/v1/messages`
-- `OPENAI_API_KEY` — for `/v1/responses` (Codex)
+- `LITELLM_MASTER_KEY` — gateway auth key (also encrypts stored creds)
+- `DATABASE_URL` — Postgres connection string (provider creds + sessions UI)
+
+Provider API keys are **not** env vars — add them in the Settings UI after the
+service is up (see [Provider credentials](#provider-credentials-live-in-the-database-not-the-config)).
 
 Render injects `PORT`; `lite serve` reads it from the env (`HOST=0.0.0.0` is set
 in the image), so no port flags are needed in the command.
