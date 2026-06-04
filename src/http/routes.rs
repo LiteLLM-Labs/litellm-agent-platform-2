@@ -32,6 +32,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             any(crate::http::harness_proxy::proxy),
         )
         .route("/api/capabilities", get(capabilities))
+        .route("/api/usage/agents", get(crate::http::usage::agents))
         .route(
             "/api/providers",
             get(crate::http::provider_credentials::list),

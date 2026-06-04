@@ -2,6 +2,7 @@ import type {
   Agent,
   AgentFile,
   AgentRunStart,
+  AgentUsageSummary,
   HarnessMessage,
   Memory,
   OpencodeSession,
@@ -794,4 +795,10 @@ export async function deleteMemory(agentId: string, key: string): Promise<void> 
     `/api/agents/${encodeURIComponent(agentId)}/memory/${encodeURIComponent(key)}`,
     { method: "DELETE" },
   );
+}
+
+export async function listAgentUsage(): Promise<AgentUsageSummary[]> {
+  const res = await req("/api/usage/agents");
+  const data = await jsonOrThrow<{ agents: AgentUsageSummary[] }>(res);
+  return data.agents ?? [];
 }

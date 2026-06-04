@@ -136,3 +136,12 @@ export interface SpendLog {
   session_id: string | null;
   status: string | null;
 }
+
+export interface AgentUsageSummary {
+  agent_key: string;
+  request_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  last_used_at?: number | null;
+}

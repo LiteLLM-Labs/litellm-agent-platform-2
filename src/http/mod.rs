@@ -15,3 +15,4 @@ pub mod responses;
 pub mod routes;
 pub mod sessions;
 pub mod ui;
+pub mod usage;

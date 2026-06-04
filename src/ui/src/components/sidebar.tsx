@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Activity,
   Bot,
+  ChartNoAxesCombined,
   FileText,
   Inbox,
   KeyRound,
@@ -162,7 +163,13 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           label: "Logs",
           href: "/observability/logs/",
           icon: Activity,
-          active: (path) => path.startsWith("/observability"),
+          active: (path) => path === "/observability/",
+        },
+        {
+          label: "Usage",
+          href: "/observability/usage/",
+          icon: ChartNoAxesCombined,
+          active: (path) => path.startsWith("/observability/usage"),
         },
       ],
     },

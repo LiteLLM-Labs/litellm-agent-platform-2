@@ -92,7 +92,11 @@ impl StandardLoggingPayload {
             usage: Usage::default(),
             request: sanitize_value(request),
             response: None,
-            metadata: json!({ "user_api_key_hash": api_key_hash(headers) }),
+            metadata: json!({
+                "agent_key": agent_key(headers, call_type),
+                "source_header": source_header(headers),
+                "user_api_key_hash": api_key_hash(headers),
+            }),
             cache_hit: false,
             cache_key: None,
             request_tags: json!([]),
@@ -260,6 +264,37 @@ fn merge_metadata_error(metadata: Value, error: ErrorInformation) -> Value {
     let mut object = metadata.as_object().cloned().unwrap_or_default();
     object.insert("error_information".to_owned(), json!(error));
     Value::Object(object)
+}
+
+fn agent_key(headers: &HeaderMap, call_type: &str) -> &'static str {
+    if headers.get("originator").is_some()
+        || headers.get("x-codex-turn-metadata").is_some()
+        || header_contains(headers, "user-agent", "codex")
+    {
+        return "codex";
+    }
+    if call_type == "responses" {
+        return "codex";
+    }
+    "claude-code"
+}
+
+fn source_header(headers: &HeaderMap) -> Option<String> {
+    for name in [
+        "originator",
+        "x-codex-turn-metadata",
+        "anthropic-version",
+        "user-agent",
+    ] {
+        if let Some(value) = header_string(headers, name) {
+            return Some(format!("{name}: {value}"));
+        }
+    }
+    None
+}
+
+fn header_contains(headers: &HeaderMap, name: &str, needle: &str) -> bool {
+    header_string(headers, name).is_some_and(|value| value.to_ascii_lowercase().contains(needle))
 }
 
 fn request_id(headers: &HeaderMap) -> String {
