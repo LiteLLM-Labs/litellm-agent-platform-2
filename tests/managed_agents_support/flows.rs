@@ -2,7 +2,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use sqlx::PgPool;
 
-use super::{request_json, request_raw, AppFixture};
+use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
 pub async fn create_agent(fixture: &AppFixture) -> String {
     let created = request_json(
@@ -116,14 +116,20 @@ pub async fn exercise_runs(fixture: &AppFixture, agent_id: &str) {
         fixture.app.clone(),
         "POST",
         &format!("/api/agents/{agent_id}/run"),
-        Some(json!({})),
+        Some(json!({"prompt": "say hello"})),
     )
     .await;
     let run_id = run["run_id"].as_str().unwrap().to_owned();
+    assert_eq!(run["event_url"], "/event");
     assert!(run["logs_url"]
         .as_str()
         .unwrap()
         .contains(&format!("/api/agents/{agent_id}/runs/{run_id}/logs")));
+    let events = read_events_until_completed(fixture.app.clone(), "/event").await;
+    assert!(events.contains("\"type\":\"message.part.delta\""));
+    assert!(events.contains("\"delta\":\"hello \""));
+    assert!(events.contains("\"delta\":\"from managed agent\\n\""));
+    assert!(events.contains("\"type\":\"session.idle\""));
 
     let runs = request_json(
         fixture.app.clone(),
@@ -133,8 +139,10 @@ pub async fn exercise_runs(fixture: &AppFixture, agent_id: &str) {
     )
     .await;
     assert_eq!(runs["runs"].as_array().unwrap().len(), 1);
+    assert_eq!(runs["runs"][0]["status"], "completed");
+    assert_eq!(runs["runs"][0]["sandbox_id"], "sbx_managed_test");
 
-    request_raw(
+    let logs = request_raw(
         fixture.app.clone(),
         "GET",
         &format!("/api/agents/{agent_id}/runs/{run_id}/logs"),
@@ -143,6 +151,7 @@ pub async fn exercise_runs(fixture: &AppFixture, agent_id: &str) {
         StatusCode::OK,
     )
     .await;
+    assert!(logs.contains("from managed agent"));
 }
 
 pub async fn exercise_skills(fixture: &AppFixture) {
