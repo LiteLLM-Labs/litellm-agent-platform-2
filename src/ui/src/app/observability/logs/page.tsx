@@ -7,6 +7,8 @@ import {
   BarChart3,
   Check,
   Copy,
+  Database,
+  Loader2,
   PanelRightClose,
   PanelRightOpen,
   RefreshCw,
@@ -15,8 +17,13 @@ import {
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
-import { getSpendLog, listSpendLogs } from "@/lib/api";
-import type { SpendLog } from "@/lib/types";
+import {
+  getObservabilitySettings,
+  getSpendLog,
+  listSpendLogs,
+  updateObservabilitySettings,
+} from "@/lib/api";
+import type { ObservabilitySettings, SpendLog } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 const TABLE_COLUMNS =
@@ -90,6 +97,9 @@ export default function ObservabilityLogsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState<ObservabilitySettings | null>(null);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const load = async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -108,7 +118,28 @@ export default function ObservabilityLogsPage() {
 
   useEffect(() => {
     load();
+    getObservabilitySettings()
+      .then((next) => {
+        setSettings(next);
+        setSettingsError(null);
+      })
+      .catch((err) => {
+        setSettingsError(err instanceof Error ? err.message : String(err));
+      });
   }, []);
+
+  const saveSettings = async (input: Partial<ObservabilitySettings>) => {
+    setSettingsSaving(true);
+    try {
+      const next = await updateObservabilitySettings(input);
+      setSettings(next);
+      setSettingsError(null);
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!liveTail) return undefined;
@@ -184,25 +215,48 @@ export default function ObservabilityLogsPage() {
         <main className="relative min-h-0 flex-1 overflow-hidden">
           <section className="flex h-full min-h-0 min-w-0 flex-col bg-white">
             <div className="border-b border-[#e5e5ea] px-4 py-3">
-              <div className="flex flex-wrap items-center justify-end gap-4 text-sm text-[#53657d]">
-                <span>Showing {pageStart} - {pageEnd} of {logs.length} results</span>
-                <span>Page {currentPage} of {totalPages}</span>
-                <Button
-                  variant="outline"
-                  className="h-8 border-[#d7d7dc] bg-white text-sm"
-                  disabled={currentPage <= 1}
-                  onClick={() => setPage((value) => Math.max(1, value - 1))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-8 border-[#d7d7dc] bg-white text-sm"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
-                >
-                  Next
-                </Button>
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                <div className="flex flex-wrap items-center gap-3 text-sm text-[#53657d]">
+                  <Database className="size-4 text-[#53657d]" />
+                  <ToggleSetting
+                    label="Store spend logs"
+                    checked={settings?.store_spend_logs ?? false}
+                    disabled={!settings || settingsSaving}
+                    onChange={(checked) => saveSettings({ store_spend_logs: checked })}
+                  />
+                  <ToggleSetting
+                    label="Store prompts"
+                    checked={settings?.store_prompts_in_spend_logs ?? false}
+                    disabled={!settings || settingsSaving || settings?.store_spend_logs === false}
+                    onChange={(checked) =>
+                      saveSettings({ store_prompts_in_spend_logs: checked })
+                    }
+                  />
+                  {settingsSaving && <Loader2 className="size-4 animate-spin text-[#53657d]" />}
+                  {settingsError && (
+                    <span className="text-xs text-red-600">{settingsError}</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-4 text-sm text-[#53657d]">
+                  <span>Showing {pageStart} - {pageEnd} of {logs.length} results</span>
+                  <span>Page {currentPage} of {totalPages}</span>
+                  <Button
+                    variant="outline"
+                    className="h-8 border-[#d7d7dc] bg-white text-sm"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="h-8 border-[#d7d7dc] bg-white text-sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -266,6 +320,46 @@ export default function ObservabilityLogsPage() {
         </main>
       </div>
     </div>
+  );
+}
+
+function ToggleSetting({
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      className={`inline-flex h-8 items-center gap-2 rounded-md border px-2.5 text-xs font-medium transition ${
+        checked
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-[#d7d7dc] bg-white text-[#53657d]"
+      } ${disabled ? "cursor-not-allowed opacity-60" : "hover:bg-[#f8f8fa]"}`}
+      onClick={() => onChange(!checked)}
+    >
+      <span
+        className={`flex h-4 w-7 items-center rounded-full p-0.5 transition ${
+          checked ? "bg-emerald-500" : "bg-[#c7c7cc]"
+        }`}
+      >
+        <span
+          className={`size-3 rounded-full bg-white transition ${
+            checked ? "translate-x-3" : "translate-x-0"
+          }`}
+        />
+      </span>
+      {label}
+    </button>
   );
 }
 

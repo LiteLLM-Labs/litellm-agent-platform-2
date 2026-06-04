@@ -136,3 +136,8 @@ export interface SpendLog {
   session_id: string | null;
   status: string | null;
 }
+
+export interface ObservabilitySettings {
+  store_spend_logs: boolean;
+  store_prompts_in_spend_logs: boolean;
+}

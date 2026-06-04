@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS "LiteLLM_GatewaySettings" (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
