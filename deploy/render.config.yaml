@@ -9,13 +9,19 @@
 # on those routes.
 #
 # NOTE: the gateway supports exactly one "provider/*" wildcard route (reserved
-# for anthropic). Only anthropic is in the credential catalog today, so only it
-# is DB-credential-backed; other providers need a catalog entry first.
+# for anthropic). gpt-5.5 is listed explicitly so Codex can use the OpenAI
+# Responses API without adding a second wildcard route. Provider API keys are
+# loaded from the database at request time.
 model_list:
   - model_name: anthropic/*
     litellm_params:
       model: anthropic/*
       api_base: https://api.anthropic.com
+
+  - model_name: gpt-5.5
+    litellm_params:
+      model: openai/gpt-5.5
+      api_base: https://api.openai.com
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

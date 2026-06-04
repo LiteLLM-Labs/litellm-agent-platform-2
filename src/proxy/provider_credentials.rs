@@ -8,7 +8,9 @@ use crate::{
 };
 
 pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
+pub const OPENAI_PROVIDER_ID: &str = "openai";
 const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
+const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProviderCatalogEntry {
@@ -18,12 +20,20 @@ pub struct ProviderCatalogEntry {
     pub default_base_url: &'static str,
 }
 
-pub const PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[ProviderCatalogEntry {
-    id: ANTHROPIC_PROVIDER_ID,
-    name: "Anthropic",
-    description: "Claude models through the Anthropic Messages API",
-    default_base_url: DEFAULT_ANTHROPIC_BASE_URL,
-}];
+pub const PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
+    ProviderCatalogEntry {
+        id: ANTHROPIC_PROVIDER_ID,
+        name: "Anthropic",
+        description: "Claude models through the Anthropic Messages API",
+        default_base_url: DEFAULT_ANTHROPIC_BASE_URL,
+    },
+    ProviderCatalogEntry {
+        id: OPENAI_PROVIDER_ID,
+        name: "OpenAI",
+        description: "GPT models through the OpenAI Responses API",
+        default_base_url: DEFAULT_OPENAI_BASE_URL,
+    },
+];
 
 #[derive(Debug, Clone)]
 pub struct ProviderCredential {
@@ -104,4 +114,16 @@ fn decrypt_field(
         .and_then(Value::as_str)
         .ok_or_else(|| GatewayError::InvalidConfig(format!("credential is missing {field}")))?;
     credential_crypto::decrypt_value(encrypted, key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::catalog_entry;
+
+    #[test]
+    fn catalog_includes_openai() {
+        let provider = catalog_entry("openai").unwrap();
+        assert_eq!(provider.name, "OpenAI");
+        assert_eq!(provider.default_base_url, "https://api.openai.com");
+    }
 }

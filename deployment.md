@@ -77,6 +77,8 @@ Add a **Postgres** instance and set these as service env vars (secrets):
 
 Provider API keys are **not** env vars — add them in the Settings UI after the
 service is up (see [Provider credentials](#provider-credentials-live-in-the-database-not-the-config)).
+The hosted `gpt-5.5` route uses the OpenAI provider credentials stored in the
+database.
 
 Render injects `PORT`; `lite serve` reads it from the env (`HOST=0.0.0.0` is set
 in the image), so no port flags are needed in the command.
@@ -94,6 +96,11 @@ curl -s $BASE/v1/models -H "Authorization: Bearer $KEY" # configured models
 curl -s $BASE/v1/messages -H "Authorization: Bearer $KEY" -H "content-type: application/json" \
   -d '{"model":"anthropic/claude-sonnet-4-5","max_tokens":32,
        "messages":[{"role":"user","content":"Reply with exactly: ok"}]}'
+
+# /v1/responses (Codex)
+curl -s $BASE/v1/responses -H "Authorization: Bearer $KEY" -H "content-type: application/json" \
+  -d '{"model":"gpt-5.5","input":"Reply with exactly: ok",
+       "max_output_tokens":32}'
 ```
 
 ### Gotchas (field-tested)
