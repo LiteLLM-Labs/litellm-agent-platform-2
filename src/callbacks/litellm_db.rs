@@ -6,6 +6,9 @@ use tokio::{
 
 use crate::{
     callbacks::{base::BaseCallback, standard_logging::StandardLoggingPayload},
+    db::managed_agents::settings::{
+        repository as settings_repository, schema::ObservabilitySettings,
+    },
     proxy::config::GeneralSettings,
 };
 
@@ -15,14 +18,18 @@ pub struct LiteLLMDBCallback {
 }
 
 impl LiteLLMDBCallback {
-    pub fn new(pool: PgPool, settings: &GeneralSettings) -> Self {
+    pub fn new(
+        pool: PgPool,
+        settings: &GeneralSettings,
+        observability_settings_defaults: ObservabilitySettings,
+    ) -> Self {
         let (sender, receiver) = mpsc::channel(settings.spend_logs_queue_capacity);
         let writer = BatchWriter {
             pool,
             receiver,
             batch_size: settings.spend_logs_batch_size,
             interval: Duration::from_secs(settings.spend_logs_batch_interval_seconds),
-            store_bodies: settings.store_prompts_in_spend_logs,
+            observability_settings_defaults,
         };
         tokio::spawn(writer.run());
         Self { sender }
@@ -50,7 +57,7 @@ struct BatchWriter {
     receiver: mpsc::Receiver<StandardLoggingPayload>,
     batch_size: usize,
     interval: Duration,
-    store_bodies: bool,
+    observability_settings_defaults: ObservabilitySettings,
 }
 
 impl BatchWriter {
@@ -81,8 +88,25 @@ impl BatchWriter {
             return;
         }
         let batch = std::mem::take(pending);
+        let settings = match settings_repository::get_observability(
+            &self.pool,
+            &self.observability_settings_defaults,
+        )
+        .await
+        {
+            Ok(settings) => settings,
+            Err(error) => {
+                tracing::warn!("failed to load observability settings: {error}");
+                self.observability_settings_defaults.clone()
+            }
+        };
+        if !settings.store_spend_logs {
+            return;
+        }
         for payload in batch {
-            if let Err(error) = insert_payload(&self.pool, payload, self.store_bodies).await {
+            if let Err(error) =
+                insert_payload(&self.pool, payload, settings.store_prompts_in_spend_logs).await
+            {
                 tracing::warn!("failed to write spend log: {error}");
             }
         }

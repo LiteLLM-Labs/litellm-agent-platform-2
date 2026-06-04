@@ -4,9 +4,10 @@ import type {
   AgentRunStart,
   HarnessMessage,
   Memory,
+  ObservabilitySettings,
   OpencodeSession,
-  Skill,
   SpendLog,
+  Skill,
 } from "./types";
 
 const BASE = "";
@@ -417,6 +418,22 @@ export async function listSpendLogs(input?: {
 export async function getSpendLog(requestId: string): Promise<SpendLog> {
   const res = await req(`/api/observability/logs/${encodeURIComponent(requestId)}`);
   return jsonOrThrow<SpendLog>(res);
+}
+
+export async function getObservabilitySettings(): Promise<ObservabilitySettings> {
+  const res = await req("/api/observability/settings");
+  return jsonOrThrow<ObservabilitySettings>(res);
+}
+
+export async function updateObservabilitySettings(
+  input: Partial<ObservabilitySettings>,
+): Promise<ObservabilitySettings> {
+  const res = await req("/api/observability/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<ObservabilitySettings>(res);
 }
 
 export interface PendingApproval {

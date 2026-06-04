@@ -6,6 +6,7 @@ use sqlx::PgPool;
 use crate::{
     agents::runs::AgentRunStore,
     callbacks::{litellm_db::LiteLLMDBCallback, CallbackManager},
+    db::managed_agents::settings::schema::ObservabilitySettings,
     errors::GatewayError,
     mcp::registry::McpServerRegistry,
     model_prices::ModelCostMap,
@@ -24,6 +25,7 @@ pub struct AppState {
     pub db: Option<PgPool>,
     pub api_keys: GatewayApiKeyStore,
     pub callbacks: CallbackManager,
+    pub observability_settings_defaults: ObservabilitySettings,
 }
 
 impl AppState {
@@ -43,7 +45,9 @@ impl AppState {
         model_cost_map: ModelCostMap,
         db: Option<PgPool>,
     ) -> Result<Self, GatewayError> {
-        let callbacks = callbacks(&config, db.clone());
+        let observability_settings_defaults =
+            ObservabilitySettings::from_general_settings(&config.general_settings);
+        let callbacks = callbacks(&config, db.clone(), observability_settings_defaults.clone());
         Ok(Self {
             mcp_servers: McpServerRegistry::from_config(&config)?,
             config,
@@ -54,19 +58,22 @@ impl AppState {
             db,
             api_keys: GatewayApiKeyStore::default(),
             callbacks,
+            observability_settings_defaults,
         })
     }
 }
 
-fn callbacks(config: &GatewayConfig, db: Option<PgPool>) -> CallbackManager {
+fn callbacks(
+    config: &GatewayConfig,
+    db: Option<PgPool>,
+    observability_settings_defaults: ObservabilitySettings,
+) -> CallbackManager {
     let Some(pool) = db else {
         return CallbackManager::default();
     };
-    if config.general_settings.disable_spend_logs {
-        return CallbackManager::default();
-    }
     CallbackManager::new(vec![Arc::new(LiteLLMDBCallback::new(
         pool,
         &config.general_settings,
+        observability_settings_defaults,
     ))])
 }
