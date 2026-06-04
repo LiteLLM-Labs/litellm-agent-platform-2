@@ -27,7 +27,6 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  createSession,
   deleteAgent,
   deleteMemory,
   downloadAgentFile,
@@ -203,16 +202,6 @@ function AgentDetail() {
     try {
       await deleteAgent(id);
       router.push("/agents/");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const handleStartSession = async () => {
-    if (!agent) return;
-    try {
-      const sess = await createSession(agent.name, id);
-      router.push(`/chat/?id=${encodeURIComponent(sess.id)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -410,9 +399,9 @@ function AgentDetail() {
           <div className="flex items-center gap-2">
             {agent && (
               <>
-                <Button size="sm" variant="default" onClick={handleStartSession}>
+                <Button size="sm" variant="default" onClick={handleRunAgent}>
                   <Play className="size-3.5" />
-                  Start session
+                  Run
                 </Button>
                 <Button
                   size="sm"
@@ -905,9 +894,9 @@ function AgentDetail() {
                     <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Sessions ({sessions.length})
                     </h2>
-                    <Button size="sm" variant="outline" onClick={handleStartSession}>
+                    <Button size="sm" variant="outline" onClick={handleRunAgent}>
                       <Play className="size-3" />
-                      New session
+                      Run
                     </Button>
                   </div>
                   {sessions.length === 0 ? (

@@ -25,7 +25,6 @@ import {
   createAgent,
   updateAgent,
   deleteAgent,
-  createSession,
   listSkills,
   listIntegrationKeys,
   saveIntegrationKey,
@@ -240,13 +239,8 @@ export default function AgentsPage() {
     }
   };
 
-  const startSession = async (ag: Agent) => {
-    try {
-      const sess = await createSession(ag.name, ag.id);
-      router.push(`/chat/?id=${encodeURIComponent(sess.id)}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+  const openAgent = (ag: Agent) => {
+    router.push(`/agents/detail/?id=${encodeURIComponent(ag.id)}`);
   };
 
   return (
@@ -315,9 +309,9 @@ export default function AgentsPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <Button size="sm" variant="default" onClick={(e) => { e.stopPropagation(); startSession(ag); }}>
+                  <Button size="sm" variant="default" onClick={(e) => { e.stopPropagation(); openAgent(ag); }}>
                     <Play className="size-3.5" />
-                    Start session
+                    Run
                   </Button>
                   <Button
                     size="sm"
