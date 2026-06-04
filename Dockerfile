@@ -11,6 +11,7 @@ FROM rust:1.90-bookworm AS rust-builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
+COPY skills ./skills
 RUN cargo build --release --bin lite
 
 FROM debian:bookworm-slim AS runtime
