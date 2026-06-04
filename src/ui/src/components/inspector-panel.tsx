@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Activity, ChevronRight, X } from "lucide-react";
+import { harnessEventSourceUrl } from "@/lib/api";
 
 interface OcEvent {
   type: string;
@@ -136,7 +137,7 @@ export function InspectorPanel({
     setFrames(initialFrames.slice(-500));
     let es: EventSource | null = null;
     try {
-      es = new EventSource("/event");
+      es = new EventSource(harnessEventSourceUrl());
     } catch {
       return;
     }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    routing::{get, post},
+    routing::{any, get, post},
     Router,
 };
 
@@ -27,6 +27,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/openapi.json", get(openapi_json))
         .route("/health", get(health))
         .route("/event", get(events))
+        .route(
+            "/api/harness-proxy/{*path}",
+            any(crate::http::harness_proxy::proxy),
+        )
         .route("/api/capabilities", get(capabilities))
         .route(
             "/api/providers",
