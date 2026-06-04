@@ -21,12 +21,13 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=rust-builder /build/target/release/lite /usr/local/bin/lite
 COPY --from=ui-builder /build/src/ui/out /app/ui
+COPY config.render.yaml /app/config.render.yaml
 COPY config.yaml.example /app/config.yaml.example
 
 ENV HOST=0.0.0.0
 ENV PORT=4000
-ENV LITELLM_CONFIG=/app/config.yaml.example
+ENV LITELLM_CONFIG=/app/config.render.yaml
 ENV LITELLM_UI_DIR=/app/ui
 
 EXPOSE 4000
-CMD ["lite", "serve", "--host", "0.0.0.0", "--port", "4000", "--config", "/app/config.yaml.example"]
+CMD ["lite", "serve", "--host", "0.0.0.0", "--port", "4000", "--config", "/app/config.render.yaml"]
