@@ -22,6 +22,7 @@ WORKDIR /app
 COPY --from=rust-builder /build/target/release/lite /usr/local/bin/lite
 COPY --from=ui-builder /build/src/ui/out /app/ui
 COPY config.yaml.example /app/config.yaml.example
+COPY deploy/render.config.yaml /app/deploy.config.yaml
 
 ENV HOST=0.0.0.0
 ENV PORT=4000
