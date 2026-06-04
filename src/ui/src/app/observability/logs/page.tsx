@@ -10,6 +10,7 @@ import {
   Copy,
   RefreshCw,
   Search,
+  X,
 } from "lucide-react";
 
 import { Sidebar } from "@/components/sidebar";
@@ -27,8 +28,17 @@ import { getSpendLog, listSpendLogs } from "@/lib/api";
 import type { SpendLog } from "@/lib/types";
 
 const STATUS_OPTIONS = ["all", "success", "error"];
+const TIME_RANGE_OPTIONS = [
+  { label: "Last 1 Hour", value: "1h", ms: 60 * 60 * 1000 },
+  { label: "Last 24 Hours", value: "24h", ms: 24 * 60 * 60 * 1000 },
+  { label: "Last 7 Days", value: "7d", ms: 7 * 24 * 60 * 60 * 1000 },
+  { label: "All Time", value: "all", ms: null },
+] as const;
+const PAGE_SIZE = 50;
 const TABLE_COLUMNS =
   "grid-cols-[150px_96px_104px_136px_190px_104px_108px_92px_132px_150px_132px_180px_132px]";
+
+type TimeRange = (typeof TIME_RANGE_OPTIONS)[number]["value"];
 
 function formatCost(value: number | null | undefined): string {
   return `$${(value ?? 0).toFixed(8)}`;
@@ -92,8 +102,13 @@ function errorInfo(log: SpendLog | null): Record<string, unknown> | null {
 export default function ObservabilityLogsPage() {
   const [logs, setLogs] = useState<SpendLog[]>([]);
   const [selected, setSelected] = useState<SpendLog | null>(null);
+  const [detailOpen, setDetailOpen] = useState(true);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
+  const [timeRange, setTimeRange] = useState<TimeRange>("24h");
+  const [liveTail, setLiveTail] = useState(true);
+  const [page, setPage] = useState(1);
+  const [nowMs, setNowMs] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,16 +117,10 @@ export default function ObservabilityLogsPage() {
     if (silent) setRefreshing(true);
     else setLoading(true);
     try {
-      const next = await listSpendLogs({ q: query, status, limit: 100 });
+      const next = await listSpendLogs({ q: query, status, limit: 250 });
       setLogs(next);
+      setNowMs(Date.now());
       setError(null);
-      if (next.length === 0) {
-        setSelected(null);
-        return;
-      }
-      const current = selected?.request_id;
-      const pick = next.find((item) => item.request_id === current) ?? next[0];
-      setSelected(await getSpendLog(pick.request_id));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -122,24 +131,67 @@ export default function ObservabilityLogsPage() {
 
   useEffect(() => {
     load();
-    const timer = setInterval(() => load(true), 10_000);
-    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, status]);
 
-  const totals = useMemo(
-    () =>
-      logs.reduce(
-        (acc, log) => ({
-          cost: acc.cost + (log.spend ?? 0),
-          tokens: acc.tokens + (log.total_tokens ?? 0),
-          errors: acc.errors + (log.status === "error" ? 1 : 0),
-        }),
-        { cost: 0, tokens: 0, errors: 0 },
-      ),
-    [logs],
-  );
+  useEffect(() => {
+    if (!liveTail) return undefined;
+    const timer = setInterval(() => load(true), 15_000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTail, query, status]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, status, timeRange]);
+
+  const filteredLogs = useMemo(() => {
+    const range = TIME_RANGE_OPTIONS.find((option) => option.value === timeRange);
+    if (!range?.ms) return logs;
+    if (nowMs == null) return logs;
+    const cutoff = nowMs - range.ms;
+    return logs.filter((log) => {
+      if (!log.start_time) return false;
+      const time = new Date(log.start_time).getTime();
+      return !Number.isNaN(time) && time >= cutoff;
+    });
+  }, [logs, nowMs, timeRange]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = filteredLogs.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredLogs.length);
+  const visibleLogs = filteredLogs.slice(pageStart === 0 ? 0 : pageStart - 1, pageEnd);
+
+  useEffect(() => {
+    if (filteredLogs.length === 0) {
+      setSelected(null);
+      setDetailOpen(false);
+      return;
+    }
+    if (selected && filteredLogs.some((log) => log.request_id === selected.request_id)) {
+      return;
+    }
+    let cancelled = false;
+    getSpendLog(filteredLogs[0].request_id)
+      .then((log) => {
+        if (!cancelled) {
+          setSelected(log);
+          setDetailOpen(true);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredLogs, selected]);
+
   const selectedError = errorInfo(selected);
+  const rangeLabel = (
+    TIME_RANGE_OPTIONS.find((option) => option.value === timeRange) ?? TIME_RANGE_OPTIONS[1]
+  );
 
   return (
     <div className="flex h-screen bg-[#f5f5f7] text-[#1d1d1f]">
@@ -169,11 +221,11 @@ export default function ObservabilityLogsPage() {
           </div>
         </header>
 
-        <main className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden xl:grid-cols-[minmax(0,1fr)_680px]">
-          <section className="flex min-h-0 min-w-0 flex-col border-r border-[#d7d7dc] bg-white">
+        <main className="relative min-h-0 flex-1 overflow-hidden">
+          <section className="flex h-full min-h-0 min-w-0 flex-col bg-white">
             <div className="border-b border-[#e5e5ea] px-4 py-3">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-[300px] max-w-full">
+                <div className="relative w-[390px] max-w-full">
                   <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-[#86868b]" />
                   <Input
                     value={query}
@@ -182,16 +234,31 @@ export default function ObservabilityLogsPage() {
                     className="h-9 rounded-md border-[#d7d7dc] bg-white pl-9 text-sm shadow-none"
                   />
                 </div>
-                <Button variant="outline" className="h-9 border-[#d7d7dc] bg-white text-sm">
-                  <CalendarDays className="size-4" />
-                  Last 24 Hours
-                </Button>
-                <div className="flex h-9 items-center gap-2 rounded-md border border-[#d7d7dc] bg-white px-3 text-sm">
+                <Select value={timeRange} onValueChange={(value) => setTimeRange(value as TimeRange)}>
+                  <SelectTrigger className="h-9 w-[170px] rounded-md border-[#d7d7dc] bg-white">
+                    <CalendarDays className="mr-2 size-4" />
+                    <SelectValue>{rangeLabel.label}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIME_RANGE_OPTIONS.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  className="flex h-9 items-center gap-2 rounded-md border border-[#d7d7dc] bg-white px-3 text-sm"
+                  onClick={() => setLiveTail((value) => !value)}
+                >
                   <span className="font-medium text-[#1d1d1f]">Live Tail</span>
-                  <span className="relative h-5 w-9 rounded-full bg-[#0a84ff]">
-                    <span className="absolute right-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm" />
+                  <span className={`relative h-5 w-9 rounded-full transition ${liveTail ? "bg-[#0a84ff]" : "bg-[#c7c7cc]"}`}>
+                    <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition ${
+                      liveTail ? "right-0.5" : "left-0.5"
+                    }`} />
                   </span>
-                </div>
+                </button>
                 <Select value={status} onValueChange={(value) => value && setStatus(value)}>
                   <SelectTrigger className="h-9 w-[120px] rounded-md border-[#d7d7dc] bg-white">
                     <SelectValue />
@@ -205,21 +272,35 @@ export default function ObservabilityLogsPage() {
                   </SelectContent>
                 </Select>
                 <div className="ml-auto flex items-center gap-4 text-sm text-[#53657d]">
-                  <span>Showing 1 - {logs.length} of {logs.length} results</span>
-                  <span>Page 1 of 1</span>
-                  <Button variant="outline" className="h-8 border-[#d7d7dc] bg-white text-sm" disabled>
+                  <span>Showing {pageStart} - {pageEnd} of {filteredLogs.length} results</span>
+                  <span>Page {currentPage} of {totalPages}</span>
+                  <Button
+                    variant="outline"
+                    className="h-8 border-[#d7d7dc] bg-white text-sm"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                  >
                     Previous
                   </Button>
-                  <Button variant="outline" className="h-8 border-[#d7d7dc] bg-white text-sm">
+                  <Button
+                    variant="outline"
+                    className="h-8 border-[#d7d7dc] bg-white text-sm"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                  >
                     Next
                   </Button>
                 </div>
               </div>
             </div>
 
-            <div className="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
-              Auto-refreshing every 15 seconds
-              <button className="float-right text-emerald-700">Stop</button>
+            <div className={`border-b px-4 py-2 text-sm font-medium ${
+              liveTail ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-[#e5e5ea] bg-[#fbfbfd] text-[#6e6e73]"
+            }`}>
+              {liveTail ? "Auto-refreshing every 15 seconds" : "Live tail paused"}
+              <button className="float-right" onClick={() => setLiveTail((value) => !value)}>
+                {liveTail ? "Stop" : "Start"}
+              </button>
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto">
@@ -234,27 +315,26 @@ export default function ObservabilityLogsPage() {
               )}
               <div className="min-w-[1660px]">
                 <TableHeader />
-                {logs.map((log) => (
+                {visibleLogs.map((log) => (
                   <LogRow
                     key={log.request_id}
                     log={log}
                     active={selected?.request_id === log.request_id}
-                    onSelect={async () => setSelected(await getSpendLog(log.request_id))}
+                    onSelect={async () => {
+                      setSelected(await getSpendLog(log.request_id));
+                      setDetailOpen(true);
+                    }}
                   />
                 ))}
               </div>
             </div>
           </section>
 
-          <section className="min-h-0 min-w-0 overflow-y-auto border-l border-[#d7d7dc] bg-[#f5f5f7]">
-            {selected ? (
-              <LogDetail log={selected} error={selectedError} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-[#6e6e73]">
-                Select a request log.
-              </div>
-            )}
-          </section>
+          {selected && detailOpen && (
+            <aside className="absolute inset-y-0 right-0 z-20 w-[min(760px,calc(100vw-320px))] min-w-[520px] overflow-y-auto border-l border-[#c7c7cc] bg-[#f5f5f7] shadow-[-18px_0_45px_rgba(15,23,42,0.12)]">
+              <LogDetail log={selected} error={selectedError} onClose={() => setDetailOpen(false)} />
+            </aside>
+          )}
         </main>
       </div>
     </div>
@@ -341,7 +421,15 @@ function StatusBadge({ status, compact = false }: { status: string | null; compa
   );
 }
 
-function LogDetail({ log, error }: { log: SpendLog; error: Record<string, unknown> | null }) {
+function LogDetail({
+  log,
+  error,
+  onClose,
+}: {
+  log: SpendLog;
+  error: Record<string, unknown> | null;
+  onClose: () => void;
+}) {
   return (
     <div className="space-y-5 px-6 py-5">
       <div className="border-b border-[#d7d7dc] pb-4">
@@ -350,6 +438,15 @@ function LogDetail({ log, error }: { log: SpendLog; error: Record<string, unknow
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-semibold text-[#1d1d1f]">{log.model_group || log.model}</span>
               <span className="text-sm text-[#86868b]">{log.custom_llm_provider || "-"}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="ml-auto h-8 w-8 text-[#53657d]"
+                title="Close request details"
+                onClick={onClose}
+              >
+                <X className="size-4" />
+              </Button>
             </div>
             <div className="mt-4 flex min-w-0 items-center gap-2">
               <h2 className="truncate font-mono text-[22px] font-semibold leading-tight text-[#1d1d1f]">
