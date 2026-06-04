@@ -2,12 +2,38 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Puzzle, FileText, Bot, Inbox, KeyRound, Settings } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  FileText,
+  Inbox,
+  KeyRound,
+  Plus,
+  Puzzle,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  Users,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { readHarness } from "@/lib/use-harness";
 import { createSession, deleteSession, listSessions, listInbox } from "@/lib/api";
 import type { OpencodeSession } from "@/lib/types";
+
+type NavItem = {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  active: (pathname: string) => boolean;
+  badge?: number;
+};
+
+type NavSection = {
+  label: string;
+  items: NavItem[];
+};
 
 function timeAgo(ts?: number): string {
   if (!ts) return "";
@@ -74,6 +100,74 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
     if (id === activeId) router.push("/sessions/");
   };
 
+  const currentPath = pathname ?? "";
+  const sections: NavSection[] = [
+    {
+      label: "AI Gateway",
+      items: [
+        {
+          label: "Agents",
+          href: "/agents/",
+          icon: Bot,
+          active: (path) => path.startsWith("/agents"),
+        },
+        {
+          label: "Inbox",
+          href: "/inbox/",
+          icon: Inbox,
+          active: (path) => path.startsWith("/inbox"),
+          badge: inboxCount,
+        },
+        {
+          label: "Integrations",
+          href: "/integrations/",
+          icon: Puzzle,
+          active: (path) => path.startsWith("/integrations"),
+        },
+        {
+          label: "Skills",
+          href: "/skills/",
+          icon: FileText,
+          active: (path) => path.startsWith("/skills"),
+        },
+        {
+          label: "Vault",
+          href: "/vault/",
+          icon: KeyRound,
+          active: (path) => path.startsWith("/vault"),
+        },
+      ],
+    },
+    {
+      label: "Access Control",
+      items: [
+        {
+          label: "Keys",
+          href: "/keys/",
+          icon: ShieldCheck,
+          active: (path) => path.startsWith("/keys"),
+        },
+        {
+          label: "Teams",
+          href: "/teams/",
+          icon: Users,
+          active: (path) => path.startsWith("/teams"),
+        },
+      ],
+    },
+    {
+      label: "Observability",
+      items: [
+        {
+          label: "Overview",
+          href: "/observability/",
+          icon: Activity,
+          active: (path) => path.startsWith("/observability"),
+        },
+      ],
+    },
+  ];
+
   return (
     <aside className="flex h-screen w-16 shrink-0 flex-col border-r border-border bg-background sm:w-64">
       <div className="flex h-12 items-center justify-center border-b border-border px-2 sm:justify-between sm:px-4">
@@ -86,7 +180,7 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
         </div>
       </div>
 
-      <div className="space-y-2 border-b border-border px-2 py-3 sm:px-3">
+      <div className="space-y-3 border-b border-border px-2 py-3 sm:px-3">
         <Button
           onClick={onNew}
           disabled={creating}
@@ -97,64 +191,46 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           <Plus className="size-4" />
           <span className="hidden sm:inline">New session</span>
         </Button>
-        <Button
-          onClick={() => router.push("/inbox/")}
-          variant={pathname?.startsWith("/inbox") ? "secondary" : "ghost"}
-          className="relative w-full justify-center sm:justify-start"
-          size="sm"
-          aria-label="Inbox"
-        >
-          <Inbox className="size-4" />
-          <span className="hidden sm:inline">Inbox</span>
-          {inboxCount > 0 && (
-            <span className="absolute ml-7 mt-[-18px] flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white sm:static sm:ml-auto sm:mt-0 sm:h-5 sm:min-w-5 sm:px-1.5 sm:text-[11px]">
-              {inboxCount}
-            </span>
-          )}
-        </Button>
-        <Button
-          onClick={() => router.push("/agents/")}
-          variant={pathname?.startsWith("/agents") ? "secondary" : "ghost"}
-          className="w-full justify-center sm:justify-start"
-          size="sm"
-          aria-label="Agents"
-        >
-          <Bot className="size-4" />
-          <span className="hidden sm:inline">Agents</span>
-        </Button>
-        <Button
-          onClick={() => router.push("/integrations/")}
-          variant={pathname?.startsWith("/integrations") ? "secondary" : "ghost"}
-          className="w-full justify-center sm:justify-start"
-          size="sm"
-          aria-label="Integrations"
-        >
-          <Puzzle className="size-4" />
-          <span className="hidden sm:inline">Integrations</span>
-        </Button>
-        <Button
-          onClick={() => router.push("/skills/")}
-          variant={pathname?.startsWith("/skills") ? "secondary" : "ghost"}
-          className="w-full justify-center sm:justify-start"
-          size="sm"
-          aria-label="Skills"
-        >
-          <FileText className="size-4" />
-          <span className="hidden sm:inline">Skills</span>
-        </Button>
-        <Button
-          onClick={() => router.push("/vault/")}
-          variant={pathname?.startsWith("/vault") ? "secondary" : "ghost"}
-          className="w-full justify-center sm:justify-start"
-          size="sm"
-          aria-label="Vault"
-        >
-          <KeyRound className="size-4" />
-          <span className="hidden sm:inline">Vault</span>
-        </Button>
+        <div className="space-y-3">
+          {sections.map((section) => (
+            <div key={section.label} className="space-y-1">
+              <div className="hidden px-2 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground sm:block">
+                {section.label}
+              </div>
+              <div className="space-y-1">
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  const badge = item.badge ?? 0;
+                  return (
+                    <Button
+                      key={item.href}
+                      onClick={() => router.push(item.href)}
+                      variant={item.active(currentPath) ? "secondary" : "ghost"}
+                      className="relative w-full justify-center sm:justify-start"
+                      size="sm"
+                      aria-label={item.label}
+                      title={item.label}
+                    >
+                      <Icon className="size-4" />
+                      <span className="hidden sm:inline">{item.label}</span>
+                      {badge > 0 && (
+                        <span className="absolute ml-7 mt-[-18px] flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold text-white sm:static sm:ml-auto sm:mt-0 sm:h-5 sm:min-w-5 sm:px-1.5 sm:text-[11px]">
+                          {badge}
+                        </span>
+                      )}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="hidden flex-1 overflow-y-auto py-2 sm:block">
+        <div className="px-4 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          Agent Sessions
+        </div>
         {error && (
           <div className="px-3 py-2 text-xs text-destructive">{error}</div>
         )}
