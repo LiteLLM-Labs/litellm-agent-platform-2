@@ -1,0 +1,19 @@
+# Minimal boot-safe config for hosted deploys (e.g. Render).
+# Only references env vars that the deploy sets, so boot never fails on a
+# missing optional integration. Provider keys + master key come from the
+# platform's secret env vars, never committed.
+model_list:
+  - model_name: anthropic/*
+    litellm_params:
+      model: anthropic/*
+      api_key: os.environ/ANTHROPIC_API_KEY
+      api_base: https://api.anthropic.com
+
+  - model_name: openai/*
+    litellm_params:
+      model: openai/*
+      api_key: os.environ/OPENAI_API_KEY
+      api_base: https://api.openai.com
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
