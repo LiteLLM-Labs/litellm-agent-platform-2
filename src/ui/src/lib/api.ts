@@ -6,6 +6,7 @@ import type {
   Memory,
   OpencodeSession,
   Skill,
+  SpendLog,
 } from "./types";
 
 const BASE = "";
@@ -392,6 +393,30 @@ export async function listModels(): Promise<string[]> {
   const data = await res.json().catch(() => null);
   const items: Array<{ id: string }> = data?.data ?? [];
   return items.map((m) => m.id).filter(Boolean);
+}
+
+export async function listSpendLogs(input?: {
+  q?: string;
+  status?: string;
+  model?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<SpendLog[]> {
+  const params = new URLSearchParams();
+  if (input?.q) params.set("q", input.q);
+  if (input?.status) params.set("status", input.status);
+  if (input?.model) params.set("model", input.model);
+  if (input?.limit) params.set("limit", String(input.limit));
+  if (input?.offset) params.set("offset", String(input.offset));
+  const qs = params.toString();
+  const res = await req(`/api/observability/logs${qs ? `?${qs}` : ""}`);
+  const data = await jsonOrThrow<{ logs: SpendLog[] }>(res);
+  return data.logs ?? [];
+}
+
+export async function getSpendLog(requestId: string): Promise<SpendLog> {
+  const res = await req(`/api/observability/logs/${encodeURIComponent(requestId)}`);
+  return jsonOrThrow<SpendLog>(res);
 }
 
 export interface PendingApproval {

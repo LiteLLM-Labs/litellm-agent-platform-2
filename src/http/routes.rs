@@ -44,20 +44,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/messages", post(messages))
         .route("/v1/responses", post(responses))
         .route("/v1/models", get(models))
-        .route("/session", get(sessions::list).post(sessions::create))
-        .route(
-            "/session/{session_id}",
-            get(sessions::get).delete(sessions::delete),
-        )
-        .route(
-            "/session/{session_id}/message",
-            get(sessions::messages).post(sessions::send_message),
-        )
-        .route(
-            "/session/{session_id}/prompt_async",
-            post(sessions::prompt_async),
-        )
-        .route("/session/{session_id}/abort", post(sessions::abort))
+        .merge(session_routes())
+        .merge(crate::http::observability::routes::router())
         .merge(crate::http::management::routes::router())
         .merge(crate::http::managed_agents::routes::router())
         .route(
@@ -74,4 +62,22 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .fallback_service(ui::static_files())
         .with_state(state)
+}
+
+fn session_routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/session", get(sessions::list).post(sessions::create))
+        .route(
+            "/session/{session_id}",
+            get(sessions::get).delete(sessions::delete),
+        )
+        .route(
+            "/session/{session_id}/message",
+            get(sessions::messages).post(sessions::send_message),
+        )
+        .route(
+            "/session/{session_id}/prompt_async",
+            post(sessions::prompt_async),
+        )
+        .route("/session/{session_id}/abort", post(sessions::abort))
 }
