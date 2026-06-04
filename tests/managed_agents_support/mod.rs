@@ -110,7 +110,11 @@ pub async fn request_json(
     serde_json::from_slice(&body).unwrap_or_else(|_| json!({}))
 }
 
-pub async fn read_events_until_completed(app: axum::Router, event_url: &str) -> String {
+pub async fn read_events_until_completed(
+    app: axum::Router,
+    event_url: &str,
+    session_id: &str,
+) -> String {
     let response = request(
         app,
         "GET",
@@ -126,7 +130,10 @@ pub async fn read_events_until_completed(app: axum::Router, event_url: &str) -> 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.unwrap();
             body.push_str(std::str::from_utf8(&chunk).unwrap());
-            if body.contains("\"type\":\"session.idle\"") {
+            if body
+                .lines()
+                .any(|line| line.contains(session_id) && line.contains("\"type\":\"session.idle\""))
+            {
                 break;
             }
         }
@@ -170,8 +177,9 @@ async fn mock_e2b() -> MockServer {
         .and(path("/process.Process/Start"))
         .respond_with(ResponseTemplate::new(200).set_body_bytes(connect_json_frames(&[
             br#"{"event":{"start":{"pid":1470}}}"#,
-            br#"{"stdout":"eyJ0eXBlIjoidGV4dF9kZWx0YSIsInRleHQiOiJoZWxsbyAifQo="}"#,
-            br#"{"stdout":"eyJ0eXBlIjoidGV4dF9kZWx0YSIsInRleHQiOiJmcm9tIG1hbmFnZWQgYWdlbnRcbiJ9Cg=="}"#,
+            br#"{"stdout":"eyJ0eXBlIjoic3RyZWFtX2V2ZW50Iiwic2Vzc2lvbl9pZCI6InNieF9tYW5hZ2VkX3Rlc3QiLCJldmVudCI6eyJ0eXBlIjoiY29udGVudF9ibG9ja19kZWx0YSIsImluZGV4IjowLCJkZWx0YSI6eyJ0eXBlIjoidGV4dF9kZWx0YSIsInRleHQiOiJoZWxsbyAifX19Cg=="}"#,
+            br#"{"stdout":"eyJ0eXBlIjoic3RyZWFtX2V2ZW50Iiwic2Vzc2lvbl9pZCI6InNieF9tYW5hZ2VkX3Rlc3QiLCJldmVudCI6eyJ0eXBlIjoiY29udGVudF9ibG9ja19kZWx0YSIsImluZGV4IjowLCJkZWx0YSI6eyJ0eXBlIjoidGV4dF9kZWx0YSIsInRleHQiOiJmcm9tIG1hbmFnZWQgYWdlbnRcbiJ9fX0K"}"#,
+            br#"{"stdout":"eyJ0eXBlIjoicmVzdWx0Iiwic3VidHlwZSI6InN1Y2Nlc3MiLCJzZXNzaW9uX2lkIjoic2J4X21hbmFnZWRfdGVzdCIsImR1cmF0aW9uX21zIjoxLCJkdXJhdGlvbl9hcGlfbXMiOjEsImlzX2Vycm9yIjpmYWxzZSwibnVtX3R1cm5zIjoxLCJ0b3RhbF9jb3N0X3VzZCI6MCwidXNhZ2UiOnt9LCJyZXN1bHQiOiJoZWxsbyBmcm9tIG1hbmFnZWQgYWdlbnRcbiJ9Cg=="}"#,
             br#"{"event":{"end":{"exited":true,"status":"exit status 0"}}}"#,
         ])))
         .mount(&server)

@@ -77,7 +77,7 @@ function ChatInner() {
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
-  const [sessionHarness, setSessionHarness] = useState<string>("opencode");
+  const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionTitle, setSessionTitle] = useState<string>("");
   const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -119,7 +119,7 @@ function ChatInner() {
   const activeAgentName =
     activeAgent?.name || sessionTitle || BUILTIN_AGENTS[sessionHarness] || sessionHarness;
   const baseRuntime =
-    String(activeAgent?.harness ?? activeAgent?.base_agent ?? sessionHarness ?? "opencode");
+    String(activeAgent?.harness ?? activeAgent?.base_agent ?? sessionHarness ?? "claude-code");
   const skills = Array.isArray(activeAgent?.skills) ? activeAgent.skills : [];
   const vaultKeys = Array.isArray(activeAgent?.vault_keys) ? activeAgent.vault_keys : [];
   const hasStarted = Boolean(messages && messages.length > 0);

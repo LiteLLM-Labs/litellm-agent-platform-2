@@ -5,4 +5,5 @@ pub mod managed_agents;
 pub mod messages;
 pub mod openapi;
 pub mod routes;
+pub mod sessions;
 pub mod ui;
