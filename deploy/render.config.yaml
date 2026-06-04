@@ -1,7 +1,11 @@
 # Minimal boot-safe config for hosted deploys (e.g. Render).
-# Only references env vars that the deploy sets, so boot never fails on a
-# missing optional integration. Provider keys + master key come from the
-# platform's secret env vars, never committed.
+# Only references env vars the deploy sets, so boot never fails on a missing
+# optional integration. Provider keys + master key come from the platform's
+# secret env vars, never committed.
+#
+# NOTE: this gateway supports exactly ONE wildcard ("provider/*") route. It is
+# reserved for anthropic here (Claude Code / /v1/messages). Other providers must
+# be listed as explicit models.
 model_list:
   - model_name: anthropic/*
     litellm_params:
@@ -9,9 +13,21 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
       api_base: https://api.anthropic.com
 
-  - model_name: openai/*
+  # OpenAI (Codex /v1/responses) — explicit models, since the single wildcard
+  # route is taken by anthropic above.
+  - model_name: gpt-5.5
     litellm_params:
-      model: openai/*
+      model: openai/gpt-5.5
+      api_key: os.environ/OPENAI_API_KEY
+      api_base: https://api.openai.com
+  - model_name: gpt-5
+    litellm_params:
+      model: openai/gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+      api_base: https://api.openai.com
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
       api_base: https://api.openai.com
 
