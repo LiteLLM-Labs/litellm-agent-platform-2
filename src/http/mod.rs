@@ -11,4 +11,5 @@ pub mod openapi;
 pub mod provider_credentials;
 pub mod responses;
 pub mod routes;
+pub mod sessions;
 pub mod ui;
