@@ -40,6 +40,9 @@ general_settings:
   #   timeout_seconds: 1800
   #   execd_port: 44772                       # in-sandbox execd port
   #   secure_access: false                    # set true for k8s ingress gateway mode
+  #   use_server_proxy: false                 # route execd through the lifecycle
+  #                                           # server (one reachable URL; useful
+  #                                           # for remote/Docker deployments)
   #   envs:
   #     ANTHROPIC_API_KEY: os.environ/ANTHROPIC_API_KEY
 

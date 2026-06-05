@@ -200,14 +200,18 @@ impl OpenSandboxClient {
         sandbox_id: &str,
     ) -> Result<(String, HashMap<String, String>), GatewayError> {
         let api_key = self.api_key()?;
+        let mut url = format!(
+            "{}/sandboxes/{}/endpoints/{}",
+            self.api_base(),
+            sandbox_id,
+            self.settings.execd_port
+        );
+        if self.settings.use_server_proxy {
+            url.push_str("?use_server_proxy=true");
+        }
         let response = self
             .http
-            .get(format!(
-                "{}/sandboxes/{}/endpoints/{}",
-                self.api_base(),
-                sandbox_id,
-                self.settings.execd_port
-            ))
+            .get(url)
             .header(API_KEY_HEADER, api_key)
             .send()
             .await

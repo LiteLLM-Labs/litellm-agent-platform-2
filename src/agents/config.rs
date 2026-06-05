@@ -79,6 +79,8 @@ pub struct OpenSandboxParams {
     pub execd_access_token: Option<String>,
     #[serde(default)]
     pub secure_access: bool,
+    #[serde(default)]
+    pub use_server_proxy: bool,
     #[serde(default = "default_opensandbox_ready_timeout_seconds")]
     pub ready_timeout_seconds: u64,
     #[serde(default = "default_opensandbox_poll_interval_ms")]
@@ -101,6 +103,7 @@ impl Default for OpenSandboxParams {
             execd_port: default_opensandbox_execd_port(),
             execd_access_token: None,
             secure_access: false,
+            use_server_proxy: false,
             ready_timeout_seconds: default_opensandbox_ready_timeout_seconds(),
             poll_interval_ms: default_opensandbox_poll_interval_ms(),
             envs: HashMap::new(),
