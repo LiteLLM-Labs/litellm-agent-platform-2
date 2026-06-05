@@ -1,11 +1,14 @@
 pub mod e2b;
 pub mod local;
+pub mod opensandbox;
 
 use futures_util::{stream::BoxStream, StreamExt};
 use reqwest::Client;
 
 use crate::{
-    agents::sandboxes::{e2b::E2bSandboxClient, local::LocalSandboxClient},
+    agents::sandboxes::{
+        e2b::E2bSandboxClient, local::LocalSandboxClient, opensandbox::OpenSandboxClient,
+    },
     errors::GatewayError,
     proxy::config::GeneralSettings,
 };
@@ -17,7 +20,7 @@ pub fn default_provider() -> &'static str {
 }
 
 pub fn is_supported_provider(provider: &str) -> bool {
-    matches!(provider, e2b::PROVIDER)
+    matches!(provider, e2b::PROVIDER | opensandbox::PROVIDER)
 }
 
 #[derive(Debug, Clone)]
@@ -88,12 +91,14 @@ impl ExecutionTargetKind {
 #[derive(Debug, Clone)]
 enum SandboxTarget {
     E2b(e2b::E2bSandbox),
+    OpenSandbox(opensandbox::OpenSandbox),
     Local(local::LocalSandbox),
 }
 
 #[derive(Debug, Clone)]
 pub enum SandboxRunner {
     E2b(E2bSandboxClient),
+    OpenSandbox(OpenSandboxClient),
     Local(LocalSandboxClient),
 }
 
@@ -103,6 +108,10 @@ impl SandboxRunner {
             e2b::PROVIDER => Ok(Self::E2b(E2bSandboxClient::new(
                 http,
                 settings.e2b_sandbox_params.clone(),
+            ))),
+            opensandbox::PROVIDER => Ok(Self::OpenSandbox(OpenSandboxClient::new(
+                http,
+                settings.opensandbox_sandbox_params.clone(),
             ))),
             local::PROVIDER => Ok(Self::Local(LocalSandboxClient::new(
                 settings.e2b_sandbox_params.clone(),
@@ -122,6 +131,15 @@ impl SandboxRunner {
                     target_kind: ExecutionTargetKind::Sandbox,
                     sandbox_id: Some(sandbox.id.clone()),
                     target: SandboxTarget::E2b(sandbox),
+                })
+            }
+            Self::OpenSandbox(client) => {
+                let sandbox = client.create(run_id).await?;
+                Ok(SandboxSession {
+                    provider: opensandbox::PROVIDER,
+                    target_kind: ExecutionTargetKind::Sandbox,
+                    sandbox_id: Some(sandbox.id.clone()),
+                    target: SandboxTarget::OpenSandbox(sandbox),
                 })
             }
             Self::Local(client) => {
@@ -145,6 +163,9 @@ impl SandboxRunner {
             (Self::E2b(client), SandboxTarget::E2b(sandbox)) => {
                 client.start_command(sandbox, command).await
             }
+            (Self::OpenSandbox(client), SandboxTarget::OpenSandbox(sandbox)) => {
+                client.start_command(sandbox, command).await
+            }
             (Self::Local(client), SandboxTarget::Local(sandbox)) => {
                 client.start_command(sandbox, command).await
             }
@@ -157,6 +178,9 @@ impl SandboxRunner {
     pub async fn terminate(&self, session: &SandboxSession) -> Result<(), GatewayError> {
         match (self, &session.target) {
             (Self::E2b(client), SandboxTarget::E2b(sandbox)) => client.terminate(&sandbox.id).await,
+            (Self::OpenSandbox(client), SandboxTarget::OpenSandbox(sandbox)) => {
+                client.terminate(&sandbox.id).await
+            }
             (Self::Local(client), SandboxTarget::Local(sandbox)) => {
                 client.terminate(&sandbox.id).await
             }
@@ -174,6 +198,13 @@ fn selected_provider(settings: &GeneralSettings) -> &str {
             .is_some_and(|key| !key.trim().is_empty())
         {
             e2b::PROVIDER
+        } else if settings
+            .opensandbox_sandbox_params
+            .api_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty())
+        {
+            opensandbox::PROVIDER
         } else {
             local::PROVIDER
         }

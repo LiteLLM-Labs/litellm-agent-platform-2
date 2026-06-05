@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs, path::Path};
 use serde::Deserialize;
 
 use crate::{
-    agents::config::{validate_agents, AgentDefinition, E2bSandboxParams},
+    agents::config::{validate_agents, AgentDefinition, E2bSandboxParams, OpenSandboxParams},
     errors::GatewayError,
     proxy::mcp_config::{is_mcp_sequence_error, validate_mcp_servers},
 };
@@ -42,6 +42,8 @@ pub struct GeneralSettings {
     pub sandbox_choice: Option<String>,
     #[serde(default)]
     pub e2b_sandbox_params: E2bSandboxParams,
+    #[serde(default)]
+    pub opensandbox_sandbox_params: OpenSandboxParams,
 }
 
 impl Default for GeneralSettings {
@@ -56,6 +58,7 @@ impl Default for GeneralSettings {
             spend_logs_queue_capacity: default_spend_logs_queue_capacity(),
             sandbox_choice: None,
             e2b_sandbox_params: E2bSandboxParams::default(),
+            opensandbox_sandbox_params: OpenSandboxParams::default(),
         }
     }
 }
@@ -158,6 +161,38 @@ fn expand_env(config: &mut GatewayConfig) -> Result<(), GatewayError> {
         *value = expand_env_value(value)?;
     }
 
+    if let Some(api_key) = config
+        .general_settings
+        .opensandbox_sandbox_params
+        .api_key
+        .as_deref()
+    {
+        config.general_settings.opensandbox_sandbox_params.api_key =
+            Some(expand_env_value(api_key)?);
+    }
+    if let Some(token) = config
+        .general_settings
+        .opensandbox_sandbox_params
+        .execd_access_token
+        .as_deref()
+    {
+        config
+            .general_settings
+            .opensandbox_sandbox_params
+            .execd_access_token = Some(expand_env_value(token)?);
+    }
+    config.general_settings.opensandbox_sandbox_params.api_base = expand_env_value(
+        &config.general_settings.opensandbox_sandbox_params.api_base,
+    )?;
+    for value in config
+        .general_settings
+        .opensandbox_sandbox_params
+        .envs
+        .values_mut()
+    {
+        *value = expand_env_value(value)?;
+    }
+
     Ok(())
 }
 
@@ -172,6 +207,7 @@ fn validate(config: &GatewayConfig) -> Result<(), GatewayError> {
         &config.agents,
         config.general_settings.sandbox_choice.as_deref(),
         &config.general_settings.e2b_sandbox_params,
+        &config.general_settings.opensandbox_sandbox_params,
     )?;
     Ok(())
 }
