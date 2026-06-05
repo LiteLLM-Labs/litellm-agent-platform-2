@@ -364,7 +364,7 @@ function ChatInner() {
                   <SelectContent>
                     <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
                     <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
-                    <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
+                    <SelectItem value="codex" className="text-xs font-mono">codex</SelectItem>
                     {savedAgents.length > 0 && (
                       <>
                         <div className="px-2 py-1.5 text-[10px] text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">Saved agents</div>

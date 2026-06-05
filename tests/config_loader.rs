@@ -297,3 +297,62 @@ agents:
         Some("anthropic-test")
     );
 }
+
+#[test]
+fn loads_opensandbox_agent_and_expands_keys() {
+    std::env::set_var("OPEN_SANDBOX_API_KEY", "osb-test");
+    std::env::set_var("ANTHROPIC_API_KEY", "anthropic-test");
+
+    let file = write_config(
+        r#"
+general_settings:
+  sandbox_choice: opensandbox
+  opensandbox_sandbox_params:
+    api_key: os.environ/OPEN_SANDBOX_API_KEY
+    api_base: http://localhost:8080/v1
+    image: node:20-bookworm
+    execd_port: 44772
+    envs:
+      ANTHROPIC_API_KEY: os.environ/ANTHROPIC_API_KEY
+agents:
+  - name: Codex agent
+    model: gpt-5.1-codex
+    harness: codex
+    system: You are a coding agent.
+    mcp_servers: []
+    tools: []
+    skills: []
+"#,
+    );
+
+    let config = load_config(file.path()).unwrap();
+    let params = &config.general_settings.opensandbox_sandbox_params;
+    assert_eq!(params.api_key.as_deref(), Some("osb-test"));
+    assert_eq!(params.image, "node:20-bookworm");
+    assert_eq!(params.execd_port, 44772);
+    assert_eq!(
+        params.envs.get("ANTHROPIC_API_KEY").map(String::as_str),
+        Some("anthropic-test")
+    );
+    assert_eq!(config.agents[0].resolved_harness(), "codex");
+}
+
+#[test]
+fn rejects_opensandbox_agent_without_api_key() {
+    let file = write_config(
+        r#"
+general_settings:
+  sandbox_choice: opensandbox
+agents:
+  - name: Coder
+    model: claude-sonnet-4-6
+    harness: opencode
+    system: You are a coding agent.
+"#,
+    );
+    let err = load_config(file.path()).unwrap_err().to_string();
+    assert!(
+        err.contains("opensandbox_sandbox_params.api_key is required"),
+        "got: {err}"
+    );
+}

@@ -128,7 +128,7 @@ async fn execute_managed_agent_run(
     emit_events(
         &state,
         pool,
-        &agent_id,
+        agent_id,
         run_id,
         harness_run.events.start(&context),
     )
@@ -161,7 +161,7 @@ async fn execute_managed_agent_run(
                 continue;
             }
             let events = harness_run.events.output(&context, output);
-            emit_events(&state, pool, &agent_id, run_id, events).await?;
+            emit_events(&state, pool, agent_id, run_id, events).await?;
         }
         Ok::<(), GatewayError>(())
     }
@@ -177,7 +177,7 @@ async fn execute_managed_agent_run(
     emit_events(
         &state,
         pool,
-        &agent_id,
+        agent_id,
         run_id,
         harness_run.events.complete(&context),
     )

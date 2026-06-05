@@ -94,9 +94,49 @@ the SSE stream for agent runs and emits `agent.run.started`,
 payloads include `agent_id` and `run_id` so clients can filter the stream.
 
 Sandbox provisioning is owned by the proxy. The agent does not receive a
-sandbox provisioning tool; `src/agents/sandboxes/e2b.rs` creates the E2B
-sandbox, starts the Claude Code process, streams process output, and terminates
-the sandbox when the run ends.
+sandbox provisioning tool; the selected sandbox provider creates the sandbox,
+starts the harness process, streams process output, and terminates the sandbox
+when the run ends.
+
+## Sandbox providers
+
+`general_settings.sandbox_choice` picks the runtime that executes a harness.
+Each provider lives in its own module under `src/agents/sandboxes/` and
+implements the same `create → start_command → terminate` contract behind
+`SandboxRunner`:
+
+| Provider | Module | Backing runtime |
+|---|---|---|
+| `e2b` | `sandboxes/e2b.rs` | E2B Firecracker microVMs |
+| `opensandbox` | `sandboxes/opensandbox.rs` | [OpenSandbox](https://github.com/alibaba/OpenSandbox) Docker/Kubernetes sandboxes |
+| `server` (fallback) | `sandboxes/local.rs` | Local process on the gateway host |
+
+The OpenSandbox provider talks to two of its HTTP APIs:
+
+1. **Lifecycle API** (`{api_base}/sandboxes`) — `POST` to create a sandbox from
+   an image, poll `GET /sandboxes/{id}` until it reaches `Running`, then
+   `GET /sandboxes/{id}/endpoints/{execd_port}` to discover the execution daemon
+   URL (plus any secured-access headers), and `DELETE` to tear it down.
+2. **Execd API** (`{endpoint}/command`) — `POST` the harness command and decode
+   the streamed `ServerStreamEvent` frames (`stdout`/`stderr`) into the gateway's
+   `AgentOutputChunk` stream.
+
+## Harnesses
+
+A harness turns an agent definition + prompt into a shell command to run in the
+sandbox and maps the command's output into liteharness events. Harnesses live
+under `src/agents/harnesses/` and are selected per agent via
+`AgentDefinition.harness`:
+
+| Harness | Module | In-sandbox command |
+|---|---|---|
+| `claude-code` (default) | `harnesses/claude_code.rs` | Claude Agent SDK driver script (structured stream events) |
+| `opencode` | `harnesses/opencode.rs` | `opencode run` (plain-text reply) |
+| `codex` | `harnesses/codex.rs` | `codex exec --output-last-message` (plain-text reply) |
+
+`opencode` and `codex` share the `plain_text` event mapping: stdout is forwarded
+verbatim as `message.part.delta` text so the event stream looks identical
+regardless of which CLI produced the answer.
 
 ## Providers are self-contained
 

@@ -56,10 +56,90 @@ impl E2bSandboxParams {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct OpenSandboxParams {
+    pub api_key: Option<String>,
+    #[serde(default = "default_opensandbox_api_base")]
+    pub api_base: String,
+    #[serde(default = "default_opensandbox_image")]
+    pub image: String,
+    #[serde(default = "default_opensandbox_entrypoint")]
+    pub entrypoint: Vec<String>,
+    #[serde(default = "default_timeout_seconds")]
+    pub timeout_seconds: u64,
+    #[serde(default = "default_opensandbox_workspace_dir")]
+    pub workspace_dir: String,
+    #[serde(default = "default_opensandbox_cpu")]
+    pub cpu: String,
+    #[serde(default = "default_opensandbox_memory")]
+    pub memory: String,
+    #[serde(default = "default_opensandbox_execd_port")]
+    pub execd_port: u16,
+    #[serde(default)]
+    pub execd_access_token: Option<String>,
+    #[serde(default)]
+    pub secure_access: bool,
+    #[serde(default = "default_opensandbox_ready_timeout_seconds")]
+    pub ready_timeout_seconds: u64,
+    #[serde(default = "default_opensandbox_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    #[serde(default)]
+    pub envs: HashMap<String, String>,
+}
+
+impl Default for OpenSandboxParams {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            api_base: default_opensandbox_api_base(),
+            image: default_opensandbox_image(),
+            entrypoint: default_opensandbox_entrypoint(),
+            timeout_seconds: default_timeout_seconds(),
+            workspace_dir: default_opensandbox_workspace_dir(),
+            cpu: default_opensandbox_cpu(),
+            memory: default_opensandbox_memory(),
+            execd_port: default_opensandbox_execd_port(),
+            execd_access_token: None,
+            secure_access: false,
+            ready_timeout_seconds: default_opensandbox_ready_timeout_seconds(),
+            poll_interval_ms: default_opensandbox_poll_interval_ms(),
+            envs: HashMap::new(),
+        }
+    }
+}
+
+impl OpenSandboxParams {
+    fn validate(&self) -> Result<(), GatewayError> {
+        if self.api_key.as_deref().unwrap_or("").trim().is_empty() {
+            return Err(GatewayError::InvalidConfig(
+                "general_settings.opensandbox_sandbox_params.api_key is required".to_owned(),
+            ));
+        }
+        if self.api_base.trim().is_empty() {
+            return Err(GatewayError::InvalidConfig(
+                "general_settings.opensandbox_sandbox_params.api_base cannot be empty".to_owned(),
+            ));
+        }
+        if self.image.trim().is_empty() {
+            return Err(GatewayError::InvalidConfig(
+                "general_settings.opensandbox_sandbox_params.image cannot be empty".to_owned(),
+            ));
+        }
+        if self.workspace_dir.trim().is_empty() {
+            return Err(GatewayError::InvalidConfig(
+                "general_settings.opensandbox_sandbox_params.workspace_dir cannot be empty"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 pub fn validate_agents(
     agents: &[AgentDefinition],
     sandbox_choice: Option<&str>,
     e2b_params: &E2bSandboxParams,
+    opensandbox_params: &OpenSandboxParams,
 ) -> Result<(), GatewayError> {
     if agents.is_empty() {
         return Ok(());
@@ -71,7 +151,10 @@ pub fn validate_agents(
             "unsupported sandbox_choice: {choice}"
         )));
     }
-    e2b_params.validate()?;
+    match choice {
+        sandboxes::opensandbox::PROVIDER => opensandbox_params.validate()?,
+        _ => e2b_params.validate()?,
+    }
 
     let mut ids = HashSet::new();
     for agent in agents {
@@ -158,6 +241,42 @@ fn default_workspace_dir() -> String {
 
 fn default_e2b_api_base() -> String {
     "https://api.e2b.app".to_owned()
+}
+
+fn default_opensandbox_api_base() -> String {
+    "http://localhost:8080/v1".to_owned()
+}
+
+fn default_opensandbox_image() -> String {
+    "node:20-bookworm".to_owned()
+}
+
+fn default_opensandbox_entrypoint() -> Vec<String> {
+    vec!["tail".to_owned(), "-f".to_owned(), "/dev/null".to_owned()]
+}
+
+fn default_opensandbox_workspace_dir() -> String {
+    "/workspace".to_owned()
+}
+
+fn default_opensandbox_cpu() -> String {
+    "1".to_owned()
+}
+
+fn default_opensandbox_memory() -> String {
+    "2Gi".to_owned()
+}
+
+fn default_opensandbox_execd_port() -> u16 {
+    44772
+}
+
+fn default_opensandbox_ready_timeout_seconds() -> u64 {
+    180
+}
+
+fn default_opensandbox_poll_interval_ms() -> u64 {
+    1000
 }
 
 fn slugify(value: &str) -> String {

@@ -17,12 +17,31 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
   store_prompts_in_spend_logs: true
+  # sandbox_choice selects where agent harnesses run. Options: e2b | opensandbox.
+  # Omit it and the gateway auto-selects whichever provider has credentials
+  # (e2b first, then opensandbox), falling back to a local process runner.
   sandbox_choice: e2b
   e2b_sandbox_params:
     e2b_api_key: os.environ/E2B_API_KEY
     e2b_template: litellm-4gb
     envs:
       ANTHROPIC_API_KEY: os.environ/ANTHROPIC_API_KEY
+
+  # OpenSandbox (https://github.com/alibaba/OpenSandbox) runs each harness in a
+  # Docker/Kubernetes-backed sandbox via the sandbox lifecycle API. The gateway
+  # creates a sandbox from `image`, waits for it to reach Running, then drives
+  # the in-sandbox execution daemon (execd) over its HTTP API.
+  # opensandbox_sandbox_params:
+  #   api_key: os.environ/OPEN_SANDBOX_API_KEY
+  #   api_base: http://localhost:8080/v1     # OpenSandbox lifecycle server
+  #   image: node:20-bookworm                # harness CLIs are installed on first run
+  #   cpu: "1"
+  #   memory: 2Gi
+  #   timeout_seconds: 1800
+  #   execd_port: 44772                       # in-sandbox execd port
+  #   secure_access: false                    # set true for k8s ingress gateway mode
+  #   envs:
+  #     ANTHROPIC_API_KEY: os.environ/ANTHROPIC_API_KEY
 
 # MCP servers use the same dict-keyed shape as LiteLLM (key = server name).
 mcp_servers:
@@ -41,6 +60,9 @@ agents:
   - name: Untitled agent
     description: A blank starting point with the core toolset.
     model: claude-sonnet-4-6
+    # harness selects the coding CLI run inside the sandbox.
+    # Options: claude-code (default) | opencode | codex.
+    harness: claude-code
     system: You are a general-purpose agent that can research, write code, run commands, and use connected tools to complete the user's task end to end.
     mcp_servers: []
     tools:

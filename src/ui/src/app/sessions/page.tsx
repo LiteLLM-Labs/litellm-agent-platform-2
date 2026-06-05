@@ -20,14 +20,14 @@ export default function SessionsPage() {
         <header className="h-12 border-b border-border flex items-center justify-end gap-2 px-4 shrink-0">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-muted-foreground">runtime</span>
-            <Select value={harness} onValueChange={(v) => v && setHarness(v as "opencode" | "claude-code" | "github-copilot")}>
+            <Select value={harness} onValueChange={(v) => v && setHarness(v as "opencode" | "claude-code" | "codex")}>
               <SelectTrigger className="h-8 text-xs w-[140px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
                 <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
-                <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
+                <SelectItem value="codex" className="text-xs font-mono">codex</SelectItem>
               </SelectContent>
             </Select>
           </div>
