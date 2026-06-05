@@ -213,7 +213,7 @@ function AssistantBlock({
         <div className="mono flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10.5px] text-muted-foreground/75 transition-colors group-hover/turn:text-muted-foreground">
           {msg.harness && (
             <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-mono font-medium ${
-              msg.harness === "github-copilot"
+              msg.harness === "codex"
                 ? "bg-sky-500/15 text-sky-600 dark:text-sky-400"
                 : msg.harness === "claude-code"
                   ? "bg-orange-500/15 text-orange-600 dark:text-orange-400"

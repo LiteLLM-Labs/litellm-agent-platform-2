@@ -4,10 +4,12 @@ import { useState } from "react";
 
 const KEY = "harness";
 const DEFAULT_HARNESS = "claude-code";
-type Harness = "opencode" | "claude-code" | "github-copilot";
+export type Harness = "opencode" | "claude-code" | "codex";
+
+const HARNESSES: readonly Harness[] = ["opencode", "claude-code", "codex"];
 
 function normalizeHarness(value: string | null): Harness {
-  return value === "claude-code" ? value : DEFAULT_HARNESS;
+  return HARNESSES.includes(value as Harness) ? (value as Harness) : DEFAULT_HARNESS;
 }
 
 export function useHarness() {
