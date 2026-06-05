@@ -1,4 +1,7 @@
 pub mod claude_code;
+pub mod codex;
+pub mod opencode;
+mod plain_text;
 
 use serde_json::Value;
 
@@ -19,12 +22,14 @@ pub struct HarnessRunSpec {
 #[derive(Debug, Clone)]
 pub enum HarnessEvents {
     ClaudeCode(claude_code::ClaudeCodeEvents),
+    PlainText(plain_text::PlainTextEvents),
 }
 
 impl HarnessEvents {
     pub fn start(&self, context: &HarnessRunContext) -> Vec<HarnessEvent> {
         match self {
             Self::ClaudeCode(events) => events.start(context),
+            Self::PlainText(events) => events.start(context),
         }
     }
 
@@ -35,12 +40,14 @@ impl HarnessEvents {
     ) -> Vec<HarnessEvent> {
         match self {
             Self::ClaudeCode(events) => events.output(context, output),
+            Self::PlainText(events) => events.output(context, output),
         }
     }
 
     pub fn complete(&self, context: &HarnessRunContext) -> Vec<HarnessEvent> {
         match self {
             Self::ClaudeCode(events) => events.complete(context),
+            Self::PlainText(events) => events.complete(context),
         }
     }
 }
@@ -79,7 +86,7 @@ fn is_stdout(stream: AgentOutputStreamKind) -> bool {
 }
 
 pub fn is_supported(harness: &str) -> bool {
-    matches!(harness, claude_code::ID)
+    matches!(harness, claude_code::ID | opencode::ID | codex::ID)
 }
 
 pub fn build_harness_run(
@@ -88,8 +95,14 @@ pub fn build_harness_run(
 ) -> Result<HarnessRunSpec, GatewayError> {
     match agent.resolved_harness() {
         claude_code::ID => Ok(claude_code::build_run(agent, prompt)),
+        opencode::ID => Ok(opencode::build_run(agent, prompt)),
+        codex::ID => Ok(codex::build_run(agent, prompt)),
         harness => Err(GatewayError::InvalidConfig(format!(
             "unsupported harness: {harness}"
         ))),
     }
+}
+
+pub(crate) fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
