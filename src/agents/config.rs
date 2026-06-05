@@ -252,11 +252,7 @@ fn default_opensandbox_image() -> String {
 }
 
 fn default_opensandbox_entrypoint() -> Vec<String> {
-    vec![
-        "tail".to_owned(),
-        "-f".to_owned(),
-        "/dev/null".to_owned(),
-    ]
+    vec!["tail".to_owned(), "-f".to_owned(), "/dev/null".to_owned()]
 }
 
 fn default_opensandbox_workspace_dir() -> String {

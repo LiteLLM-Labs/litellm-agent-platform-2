@@ -69,8 +69,7 @@ mod tests {
     #[test]
     fn decodes_split_frames() {
         let mut decoder = ExecdEventDecoder::default();
-        let mut chunks =
-            decoder.decode(Bytes::from_static(b"{\"type\":\"stdout\",\"text\":\"hel"));
+        let mut chunks = decoder.decode(Bytes::from_static(b"{\"type\":\"stdout\",\"text\":\"hel"));
         assert!(chunks.is_empty());
         chunks.extend(decoder.decode(Bytes::from_static(
             b"lo\\n\"}\n\n{\"type\":\"stderr\",\"text\":\"warn\"}\n\n",

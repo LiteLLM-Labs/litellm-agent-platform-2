@@ -181,9 +181,8 @@ fn expand_env(config: &mut GatewayConfig) -> Result<(), GatewayError> {
             .opensandbox_sandbox_params
             .execd_access_token = Some(expand_env_value(token)?);
     }
-    config.general_settings.opensandbox_sandbox_params.api_base = expand_env_value(
-        &config.general_settings.opensandbox_sandbox_params.api_base,
-    )?;
+    config.general_settings.opensandbox_sandbox_params.api_base =
+        expand_env_value(&config.general_settings.opensandbox_sandbox_params.api_base)?;
     for value in config
         .general_settings
         .opensandbox_sandbox_params

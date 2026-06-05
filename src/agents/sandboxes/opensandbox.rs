@@ -371,6 +371,9 @@ mod tests {
     #[test]
     fn command_runs_inside_workspace() {
         let command = command_with_workspace("/workspace", "echo hi");
-        assert_eq!(command, "mkdir -p '/workspace' && cd '/workspace' && echo hi");
+        assert_eq!(
+            command,
+            "mkdir -p '/workspace' && cd '/workspace' && echo hi"
+        );
     }
 }
