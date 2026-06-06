@@ -6,17 +6,24 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use crate::{
     db::credentials,
     errors::GatewayError,
     managed_agents::providers::base::{
         default_api_base, normalize_runtime, RuntimeCredential, CLAUDE_AGENTS_RUNTIME,
-        CLAUDE_AGENTS_RUNTIME_LEGACY,
+        CLAUDE_AGENTS_RUNTIME_LEGACY, CURSOR_RUNTIME,
     },
-    proxy::{auth::master_key::require_master_key, credential_crypto, state::AppState},
-    sdk::agents::{AgentRuntime, AgentRuntimeCatalogEntry},
+    proxy::{
+        auth::master_key::require_master_key,
+        credential_crypto,
+        provider_credentials::{
+            self, ProviderCredentialInput, ANTHROPIC_PROVIDER_ID, CURSOR_PROVIDER_ID,
+            OPENCODE_PROVIDER_ID,
+        },
+        state::AppState,
+    },
+    sdk::agents::{AgentRuntime, AgentRuntimeCatalogEntry, OPENCODE},
 };
 
 #[derive(Debug, Serialize)]
@@ -29,6 +36,8 @@ pub struct RuntimeResponse {
     pub id: String,
     pub name: String,
     pub default_api_base: String,
+    pub credential_provider_id: String,
+    pub credential_provider_name: String,
     pub connected: bool,
     pub api_base: Option<String>,
     pub masked_api_key: Option<String>,
@@ -76,17 +85,14 @@ pub async fn save(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| default_api_base(runtime).unwrap_or_default());
-    let key =
-        credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
-    credentials::upsert(
+    provider_credentials::save(
         pool,
-        &credential_name(runtime),
-        json!({
-            "api_key": credential_crypto::encrypt_value(api_key, &key)?,
-            "api_base": credential_crypto::encrypt_value(api_base, &key)?,
-        }),
-        json!({ "runtime": runtime, "source": "agent-runtimes-ui" }),
-        "ui",
+        &state.config,
+        credential_provider_id(runtime)?,
+        ProviderCredentialInput {
+            api_key: api_key.to_owned(),
+            api_base: api_base.to_owned(),
+        },
     )
     .await?;
     Ok(Json(AgentRuntimesResponse {
@@ -102,16 +108,22 @@ pub async fn delete(
     require_admin(&state, &headers)?;
     let runtime = canonical_runtime(&runtime)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    let deleted = credentials::delete_by_name(pool, &credential_name(runtime)).await?;
+    let provider_id = credential_provider_id(runtime)?;
+    let deleted =
+        credentials::delete_by_name(pool, &provider_credentials::credential_name(provider_id))
+            .await?;
+    let deleted_runtime =
+        credentials::delete_by_name(pool, &legacy_credential_name(runtime)).await?;
     let deleted_legacy = if runtime == CLAUDE_AGENTS_RUNTIME {
-        credentials::delete_by_name(pool, &credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY)).await?
+        credentials::delete_by_name(pool, &legacy_credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY))
+            .await?
     } else {
         false
     };
     Ok((
         StatusCode::OK,
         Json(DeleteRuntimeCredentialResponse {
-            ok: deleted || deleted_legacy,
+            ok: deleted || deleted_runtime || deleted_legacy,
         }),
     ))
 }
@@ -122,24 +134,40 @@ pub async fn load_credential(
 ) -> Result<RuntimeCredential, GatewayError> {
     let runtime = canonical_runtime(runtime)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    let row = match credentials::get_by_name(pool, &credential_name(runtime)).await? {
+    if let Some(credential) =
+        provider_credentials::load(pool, &state.config, credential_provider_id(runtime)?).await?
+    {
+        return Ok(RuntimeCredential {
+            api_key: credential.api_key,
+            api_base: credential.api_base,
+        });
+    }
+    let row = match credentials::get_by_name(pool, &legacy_credential_name(runtime)).await? {
         Some(row) => row,
         None if runtime == CLAUDE_AGENTS_RUNTIME => {
-            match credentials::get_by_name(pool, &credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY))
-                .await?
+            match credentials::get_by_name(
+                pool,
+                &legacy_credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY),
+            )
+            .await?
             {
                 Some(row) => row,
                 None => {
+                    let provider =
+                        provider_credentials::catalog_entry(credential_provider_id(runtime)?)?;
                     return Err(GatewayError::InvalidJsonMessage(format!(
-                        "{runtime} credentials are not configured"
-                    )))
+                        "{} provider credentials are not configured",
+                        provider.name
+                    )));
                 }
             }
         }
         None => {
+            let provider = provider_credentials::catalog_entry(credential_provider_id(runtime)?)?;
             return Err(GatewayError::InvalidJsonMessage(format!(
-                "{runtime} credentials are not configured"
-            )))
+                "{} provider credentials are not configured",
+                provider.name
+            )));
         }
     };
     let key =
@@ -168,6 +196,7 @@ async fn runtime_value(
     state: &AppState,
     entry: AgentRuntimeCatalogEntry,
 ) -> Result<RuntimeResponse, GatewayError> {
+    let provider = provider_credentials::catalog_entry(credential_provider_id(entry.id)?)?;
     let credential = match load_credential(state, entry.id).await {
         Ok(value) => Some(value),
         Err(GatewayError::InvalidJsonMessage(_)) | Err(GatewayError::MissingDatabase) => None,
@@ -177,14 +206,27 @@ async fn runtime_value(
         id: entry.id.to_owned(),
         name: entry.name.to_owned(),
         default_api_base: entry.default_api_base.to_owned(),
+        credential_provider_id: provider.id.to_owned(),
+        credential_provider_name: provider.name.to_owned(),
         connected: credential.is_some(),
         api_base: credential.as_ref().map(|value| value.api_base.clone()),
-        masked_api_key: credential.map(|value| mask(&value.api_key)),
+        masked_api_key: credential.map(|value| provider_credentials::mask_api_key(&value.api_key)),
     })
 }
 
-fn credential_name(runtime: &str) -> String {
+fn legacy_credential_name(runtime: &str) -> String {
     format!("agent-runtime:{runtime}")
+}
+
+fn credential_provider_id(runtime: &str) -> Result<&'static str, GatewayError> {
+    match canonical_runtime(runtime)? {
+        CLAUDE_AGENTS_RUNTIME => Ok(ANTHROPIC_PROVIDER_ID),
+        CURSOR_RUNTIME => Ok(CURSOR_PROVIDER_ID),
+        OPENCODE => Ok(OPENCODE_PROVIDER_ID),
+        runtime => Err(GatewayError::InvalidJsonMessage(format!(
+            "unsupported runtime: {runtime}"
+        ))),
+    }
 }
 
 fn canonical_runtime(runtime: &str) -> Result<&'static str, GatewayError> {
@@ -202,13 +244,4 @@ fn decrypt(
         .and_then(|value| value.as_str())
         .ok_or_else(|| GatewayError::InvalidConfig(format!("credential is missing {field}")))?;
     credential_crypto::decrypt_value(encrypted, key)
-}
-
-fn mask(api_key: &str) -> String {
-    let trimmed = api_key.trim();
-    if trimmed.len() <= 12 {
-        "Configured".to_owned()
-    } else {
-        format!("{}...{}", &trimmed[..7], &trimmed[trimmed.len() - 4..])
-    }
 }

@@ -250,11 +250,14 @@ export async function listAgents(): Promise<Agent[]> {
   return data.agents;
 }
 
+export type ProviderCategory = "model" | "runtime";
+
 export interface AvailableProvider {
   id: string;
   name: string;
   description: string;
   default_base_url: string;
+  category?: ProviderCategory;
 }
 
 export interface ConnectedProvider {
@@ -262,6 +265,7 @@ export interface ConnectedProvider {
   name: string;
   api_base: string;
   masked_api_key: string;
+  category?: ProviderCategory;
 }
 
 export interface ProvidersResponse {
