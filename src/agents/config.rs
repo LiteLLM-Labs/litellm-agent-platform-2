@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    agents::{harnesses, sandboxes},
+    agents::{harnesses, harnesses::hello_world, sandboxes},
     errors::GatewayError,
 };
 
@@ -80,13 +80,14 @@ pub fn validate_agents(
                 "agent name cannot be empty".to_owned(),
             ));
         }
-        if agent.model.trim().is_empty() {
+        let is_hello_world = agent.resolved_harness() == hello_world::ID;
+        if !is_hello_world && agent.model.trim().is_empty() {
             return Err(GatewayError::InvalidConfig(format!(
                 "{} is missing model",
                 agent.name
             )));
         }
-        if agent.system.trim().is_empty() {
+        if !is_hello_world && agent.system.trim().is_empty() {
             return Err(GatewayError::InvalidConfig(format!(
                 "{} is missing system",
                 agent.name

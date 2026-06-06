@@ -1,4 +1,5 @@
 pub mod claude_code;
+pub mod hello_world;
 
 use serde_json::Value;
 
@@ -19,12 +20,14 @@ pub struct HarnessRunSpec {
 #[derive(Debug, Clone)]
 pub enum HarnessEvents {
     ClaudeCode(claude_code::ClaudeCodeEvents),
+    HelloWorld(hello_world::HelloWorldEvents),
 }
 
 impl HarnessEvents {
     pub fn start(&self, context: &HarnessRunContext) -> Vec<HarnessEvent> {
         match self {
             Self::ClaudeCode(events) => events.start(context),
+            Self::HelloWorld(events) => events.start(context),
         }
     }
 
@@ -35,12 +38,14 @@ impl HarnessEvents {
     ) -> Vec<HarnessEvent> {
         match self {
             Self::ClaudeCode(events) => events.output(context, output),
+            Self::HelloWorld(events) => events.output(context, output),
         }
     }
 
     pub fn complete(&self, context: &HarnessRunContext) -> Vec<HarnessEvent> {
         match self {
             Self::ClaudeCode(events) => events.complete(context),
+            Self::HelloWorld(events) => events.complete(context),
         }
     }
 }
@@ -79,7 +84,7 @@ fn is_stdout(stream: AgentOutputStreamKind) -> bool {
 }
 
 pub fn is_supported(harness: &str) -> bool {
-    matches!(harness, claude_code::ID)
+    matches!(harness, claude_code::ID | hello_world::ID)
 }
 
 pub fn build_harness_run(
@@ -88,6 +93,7 @@ pub fn build_harness_run(
 ) -> Result<HarnessRunSpec, GatewayError> {
     match agent.resolved_harness() {
         claude_code::ID => Ok(claude_code::build_run(agent, prompt)),
+        hello_world::ID => Ok(hello_world::build_run(agent, prompt)),
         harness => Err(GatewayError::InvalidConfig(format!(
             "unsupported harness: {harness}"
         ))),
