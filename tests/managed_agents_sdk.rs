@@ -1,9 +1,13 @@
 #[path = "managed_agents_support/sdk.rs"]
 mod sdk_support;
 
-use litellm_rust::sdk::agents::{parse_sse, AgentRuntime};
+use futures_util::StreamExt;
+use litellm_rust::sdk::agents::{parse_sse, AgentModel, AgentRuntime, CreateAgentParams};
 use serde_json::json;
-use wiremock::MockServer;
+use wiremock::{
+    matchers::{header, method, path},
+    Mock, MockServer, ResponseTemplate,
+};
 
 #[tokio::test]
 async fn creates_claude_managed_agent_with_anthropic_shape() {
@@ -39,6 +43,72 @@ async fn streams_session_events() {
     assert_eq!(events[1].event_type, "session.status_idle");
 }
 
+#[tokio::test]
+async fn creates_opencode_session_and_sends_message_parts() {
+    let server = MockServer::start().await;
+    sdk_support::mount_opencode_session_round_trip(&server).await;
+
+    let (session, sent) = sdk_support::create_opencode_session_and_send(&server).await;
+
+    assert_eq!(session.id, "sesn_open");
+    assert_eq!(sent.raw["info"]["id"], "msg_123");
+    assert_eq!(sent.raw["parts"][0]["text"], "done");
+}
+
+#[tokio::test]
+async fn streams_opencode_global_events() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/event"))
+        .and(header("authorization", "Basic b3BlbmNvZGU6cHc="))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "event: server.connected\n\
+             data: {\"version\":\"1.0.0\"}\n\n\
+             data: {\"type\":\"session.idle\",\"sessionID\":\"sesn_open\"}\n\n",
+        ))
+        .mount(&server)
+        .await;
+
+    let mut stream = sdk_support::opencode_client(&server)
+        .beta()
+        .sessions()
+        .events()
+        .stream("sesn_open")
+        .await
+        .unwrap();
+    let first = stream.next().await.unwrap().unwrap();
+    let second = stream.next().await.unwrap().unwrap();
+
+    assert_eq!(first.event_type, "server.connected");
+    assert_eq!(first.data["version"], "1.0.0");
+    assert_eq!(second.event_type, "session.idle");
+    assert_eq!(second.data["sessionID"], "sesn_open");
+}
+
+#[tokio::test]
+async fn rejects_opencode_agent_create_before_network() {
+    let server = MockServer::start().await;
+    let error = sdk_support::opencode_client(&server)
+        .beta()
+        .agents()
+        .create(CreateAgentParams {
+            lap_agent_runtime: AgentRuntime::OpenCode,
+            lap_provider_options: None,
+            name: "Coding Assistant".to_owned(),
+            model: AgentModel::from("anthropic/claude-sonnet-4-5"),
+            system: "Write clean code.".to_owned(),
+            description: None,
+            tools: Vec::new(),
+            mcp_servers: Vec::new(),
+        })
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("agents.create is not supported for opencode"));
+    assert_eq!(server.received_requests().await.unwrap().len(), 0);
+}
+
 #[test]
 fn parses_sse_and_resolves_supported_runtimes() {
     let events = parse_sse(
@@ -51,6 +121,10 @@ fn parses_sse_and_resolves_supported_runtimes() {
     assert_eq!(
         AgentRuntime::try_from("cursor").unwrap(),
         AgentRuntime::Cursor
+    );
+    assert_eq!(
+        AgentRuntime::try_from("opencode").unwrap(),
+        AgentRuntime::OpenCode
     );
     assert!(AgentRuntime::try_from("not-a-runtime").is_err());
 }

@@ -29,6 +29,11 @@ pub(super) async fn runtime_sdk_client(
             config.cursor_api_key = Some(credential.api_key);
             config.cursor_base_url = credential.api_base;
         }
+        AgentRuntime::OpenCode => {
+            return Err(GatewayError::InvalidConfig(
+                "OpenCode runtime is not wired for gateway sessions".to_owned(),
+            ));
+        }
     }
     Ok(Lap::with_http_client(config, state.http.clone()))
 }
@@ -101,13 +106,16 @@ fn provider_session_id(row: &SessionRow, runtime: AgentRuntime) -> Result<String
         AgentRuntime::Cursor => row.provider_session_id.clone().ok_or_else(|| {
             GatewayError::InvalidConfig("Cursor session is missing provider_session_id".to_owned())
         }),
+        AgentRuntime::OpenCode => Err(GatewayError::InvalidConfig(
+            "OpenCode runtime is not wired for gateway sessions".to_owned(),
+        )),
     }
 }
 
 fn provider_agent_id(runtime: AgentRuntime, provider_session_id: &str) -> Option<String> {
     match runtime {
         AgentRuntime::Cursor => Some(provider_session_id.to_owned()),
-        AgentRuntime::ClaudeManagedAgents => None,
+        AgentRuntime::ClaudeManagedAgents | AgentRuntime::OpenCode => None,
     }
 }
 
