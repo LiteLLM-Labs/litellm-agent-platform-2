@@ -162,14 +162,10 @@ fn create_config(
     let mut config = config.unwrap_or_else(|| json!({}));
     if let Some(object) = config.as_object_mut() {
         if let Some(runtime) = runtime.filter(|runtime| !runtime.trim().is_empty()) {
-            object
-                .entry("runtime".to_owned())
-                .or_insert_with(|| runtime.to_owned().into());
+            object.insert("runtime".to_owned(), runtime.to_owned().into());
         }
         if !tools.is_null() {
-            object
-                .entry("tools".to_owned())
-                .or_insert_with(|| tools.clone());
+            object.insert("tools".to_owned(), tools.clone());
         }
     }
     config

@@ -1,7 +1,7 @@
 #[path = "managed_agents_support/mod.rs"]
 mod support;
 
-use serde_json::json;
+use serde_json::{json, Value};
 use support::{flows, request_json, AppFixture};
 
 static DB_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -62,32 +62,28 @@ async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
         return;
     };
 
-    let created = request_json(
-        fixture.app.clone(),
-        "POST",
-        "/api/agents",
-        Some(json!({
+    let created = create_test_agent(
+        &fixture,
+        json!({
             "name": "runtime-agent",
             "owner_id": "user-1",
             "runtime": "claude_managed_agents",
             "harness": "claude_managed_agents"
-        })),
+        }),
     )
     .await;
     assert_eq!(created["harness"], "claude-code");
     assert!(created["tools"].is_null());
     assert_eq!(created["config"]["runtime"], "claude_managed_agents");
 
-    let explicit_empty_tools = request_json(
-        fixture.app.clone(),
-        "POST",
-        "/api/agents",
-        Some(json!({
+    let explicit_empty_tools = create_test_agent(
+        &fixture,
+        json!({
             "name": "empty-tools-agent",
             "owner_id": "user-1",
             "runtime": "claude_managed_agents",
             "tools": []
-        })),
+        }),
     )
     .await;
     assert_eq!(explicit_empty_tools["tools"], json!([]));
@@ -96,4 +92,22 @@ async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
         "claude_managed_agents"
     );
     assert_eq!(explicit_empty_tools["config"]["tools"], json!([]));
+
+    let overriding_tools = create_test_agent(
+        &fixture,
+        json!({
+            "name": "overriding-tools-agent",
+            "owner_id": "user-1",
+            "runtime": "claude_managed_agents",
+            "tools": [],
+            "config": { "tools": [{ "type": "bash" }] }
+        }),
+    )
+    .await;
+    assert_eq!(overriding_tools["tools"], json!([]));
+    assert_eq!(overriding_tools["config"]["tools"], json!([]));
+}
+
+async fn create_test_agent(fixture: &AppFixture, body: Value) -> Value {
+    request_json(fixture.app.clone(), "POST", "/api/agents", Some(body)).await
 }
