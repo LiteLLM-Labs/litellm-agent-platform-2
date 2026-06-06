@@ -757,10 +757,20 @@ export interface RuntimeAgentEvent {
 }
 
 export async function listRuntimeEvents(sessionId: string): Promise<RuntimeAgentEvent[]> {
+  // Best-effort history replay. The gateway currently only implements the live
+  // SSE stream (/events/stream), not a list endpoint — a GET to
+  // /v1/sessions/{id}/events falls through to the static UI handler and returns
+  // the HTML app shell. Treat any non-JSON or error response as "no history"
+  // instead of throwing a JSON-parse error the caller would surface to the user.
   const res = await reqHarness(`/v1/sessions/${encodeURIComponent(sessionId)}/events`);
-  const data = await jsonOrThrow<{ data?: RuntimeAgentEvent[] } | RuntimeAgentEvent[]>(res);
+  if (!res.ok) return [];
+  if (!res.headers.get("content-type")?.includes("application/json")) return [];
+  const data = (await res.json().catch(() => null)) as
+    | { data?: RuntimeAgentEvent[] }
+    | RuntimeAgentEvent[]
+    | null;
   if (Array.isArray(data)) return data;
-  return Array.isArray(data.data) ? data.data : [];
+  return Array.isArray(data?.data) ? data.data : [];
 }
 
 export function subscribeRuntimeEvents(opts: {
@@ -850,11 +860,14 @@ export function runtimeEventSourceUrl(sessionId: string): string {
   if (targetKey) params.set("target_key", targetKey);
   const qs = params.toString();
   const encoded = encodeURIComponent(sessionId);
+  // Always use the canonical /v1 SSE path. In production the built UI is served
+  // same-origin by the Rust gateway; in `next dev` the /v1/:path* rewrite proxies
+  // it to the gateway and streams it correctly. (The old /runtime-events/{id}.sse
+  // dev rewrite never matched and returned the HTML app shell, so the browser saw
+  // 0 events.) Remote harness sessions go through the harness proxy.
   const path = remoteBase
     ? `/api/harness-proxy/v1/sessions/${encoded}/events/stream`
-    : typeof window !== "undefined" && window.location.port === "3210"
-      ? `/runtime-events/${encoded}.sse`
-      : `/v1/sessions/${encoded}/events/stream`;
+    : `/v1/sessions/${encoded}/events/stream`;
   return `${BASE}${path}${qs ? `?${qs}` : ""}`;
 }
 
