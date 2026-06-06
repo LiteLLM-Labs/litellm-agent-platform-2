@@ -8,12 +8,14 @@ export function Composer({
   sessionId,
   model,
   onSent,
+  onSend,
   onSendStart,
   disabled = false,
 }: {
   sessionId: string;
   model: string;
   onSent?: () => void;
+  onSend?: (text: string) => Promise<void>;
   onSendStart?: (text: string) => void;
   disabled?: boolean;
 }) {
@@ -28,7 +30,7 @@ export function Composer({
     setError(null);
     onSendStart?.(t);
     try {
-      await sendMessage({ sessionId, text: t, model });
+      await (onSend ? onSend(t) : sendMessage({ sessionId, text: t, model }));
       setDraft("");
       onSent?.();
     } catch (e) {
@@ -36,7 +38,7 @@ export function Composer({
     } finally {
       setSending(false);
     }
-  }, [draft, sending, disabled, sessionId, model, onSent, onSendStart]);
+  }, [draft, sending, disabled, sessionId, model, onSent, onSend, onSendStart]);
 
   // Plain Enter sends, Shift+Enter inserts a newline. Matches LAP.
   const handleKeyDown = useCallback(

@@ -1,5 +1,5 @@
 use reqwest::Method;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::{
     client::{Lap, SessionContext},
@@ -36,6 +36,14 @@ impl SessionEvents<'_> {
             AgentRuntime::ClaudeManagedAgents => self.stream_claude_events(session_id).await,
             AgentRuntime::Cursor => self.stream_cursor_events(session_id).await,
             AgentRuntime::OpenCode => self.stream_opencode_events(session_id).await,
+        }
+    }
+
+    pub async fn list(&self, session_id: &str) -> Result<Value, AgentSdkError> {
+        let runtime = self.client.runtime_for_session(session_id)?;
+        match runtime {
+            AgentRuntime::ClaudeManagedAgents => self.list_claude_events(session_id).await,
+            AgentRuntime::Cursor | AgentRuntime::OpenCode => Ok(json!({ "data": [] })),
         }
     }
 
@@ -103,6 +111,16 @@ impl SessionEvents<'_> {
             .stream(
                 AgentRuntime::ClaudeManagedAgents,
                 &format!("/v1/sessions/{provider_session_id}/events/stream"),
+            )
+            .await
+    }
+
+    async fn list_claude_events(&self, session_id: &str) -> Result<Value, AgentSdkError> {
+        let provider_session_id = self.provider_session_id(session_id)?;
+        self.client
+            .get(
+                AgentRuntime::ClaudeManagedAgents,
+                &format!("/v1/sessions/{provider_session_id}/events"),
             )
             .await
     }

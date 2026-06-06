@@ -21,6 +21,7 @@ mod storage;
 mod types;
 
 use execution::execute_prompt;
+pub use runtime::runtime_event_list;
 pub use runtime::runtime_events;
 use runtime::{create_runtime_session, execute_runtime_prompt};
 use storage::{db, persist_message, resolve_session_request, session};
@@ -44,7 +45,7 @@ pub async fn create(
     if input.has_runtime() {
         return create_runtime_session(state, &pool, input).await.map(Json);
     }
-    let resolved = resolve_session_request(&pool, input).await?;
+    let resolved = resolve_session_request(&state, &pool, input).await?;
     let row = sessions::repository::create(
         &pool,
         &resolved.harness,

@@ -102,6 +102,20 @@ impl Lap {
         response_json(response).await
     }
 
+    pub(super) async fn get(
+        &self,
+        runtime: AgentRuntime,
+        path: &str,
+    ) -> Result<Value, AgentSdkError> {
+        let mut response = self.request(runtime, Method::GET, path)?.send().await?;
+        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(request) = self.opencode_bearer_request(Method::GET, path)? {
+                response = request.send().await?;
+            }
+        }
+        response_json(response).await
+    }
+
     pub(super) async fn stream(
         &self,
         runtime: AgentRuntime,
