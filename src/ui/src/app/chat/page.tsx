@@ -38,6 +38,7 @@ import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
 import type { Agent, AgentRuntimeId, HarnessMessage, HarnessMessagePart } from "@/lib/types";
 import type { Frame } from "@/components/inspector-panel";
+import SessionsPage from "../sessions/page";
 
 const FALLBACK_MODELS = [
   "anthropic/claude-opus-4-7",
@@ -691,14 +692,7 @@ function ChatInner() {
   }, [messages]);
 
   if (!sid) {
-    return (
-      <div className="flex h-screen bg-background text-foreground">
-        <Sidebar />
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-          Missing <code className="font-mono mx-1">?id=</code> parameter.
-        </div>
-      </div>
-    );
+    return <SessionsPage />;
   }
 
   const shortSid = sid.length > 12 ? sid.slice(0, 12) + "…" : sid;

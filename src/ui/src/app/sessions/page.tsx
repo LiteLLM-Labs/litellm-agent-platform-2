@@ -30,11 +30,12 @@ function runtimeIconId(id: string) {
   return id === "claude_managed_agents" || id === "claude_agents" ? "claude" : id;
 }
 
-function runtimeLabel(runtime: AgentRuntime | AgentRuntimeId): string {
+function runtimeLabel(runtime: AgentRuntime | string): string {
   if (typeof runtime !== "string") return runtime.name;
   if (runtime === "claude_managed_agents") return "Claude Agents";
   if (runtime === "cursor") return "Cursor";
   if (runtime === "opencode") return "OpenCode";
+  if (runtime === "claude-code" || runtime === "cc") return "Claude Code";
   return runtime;
 }
 
@@ -63,6 +64,19 @@ function promptTitle(prompt: string): string {
   const compact = prompt.replace(/\s+/g, " ").trim();
   if (!compact) return "New agent session";
   return compact.length > 46 ? `${compact.slice(0, 46).trimEnd()}...` : compact;
+}
+
+function isDbBackedAgent(agent: Agent): boolean {
+  return agent.id.startsWith("agent_");
+}
+
+function cursorEnvironment(repository: string, ref: string): Record<string, unknown> {
+  return {
+    repository: repository.trim(),
+    ref: ref.trim() || "main",
+    target_branch: "agent/{agent_id}/{session_id}",
+    auto_create_pr: false,
+  };
 }
 
 function SessionsStart() {
@@ -103,23 +117,31 @@ function SessionsStart() {
     () => savedAgents.find((agent) => agent.id === selectedAgentId) ?? null,
     [savedAgents, selectedAgentId],
   );
+  const selectedAgentMissing = selectedAgentId !== "" && selectedAgent === null;
+  const selectedAgentIsConfigured = Boolean(selectedAgent && !isDbBackedAgent(selectedAgent));
+  const needsRuntime = !selectedAgentIsConfigured;
   const needsPrompt = !selectedAgent;
   const canStart =
-    runtime !== "" &&
     (!needsPrompt || prompt.trim().length > 0) &&
     !starting &&
-    selectedRuntime?.connected &&
-    (!selectedAgentId || selectedAgent !== null) &&
-    (runtime !== "cursor" || repository.trim().length > 0);
+    !selectedAgentMissing &&
+    (!needsRuntime ||
+      (runtime !== "" &&
+        Boolean(selectedRuntime?.connected) &&
+        (runtime !== "cursor" || repository.trim().length > 0)));
 
   const startSession = async () => {
     const trimmed = prompt.trim();
     const runtimeId = runtime;
+    if (selectedAgentMissing) {
+      setError("Selected agent is no longer available.");
+      return;
+    }
     if (
-      !runtimeId ||
       starting ||
-      (needsPrompt && !trimmed) ||
-      (selectedAgentId && !selectedAgent)
+      !canStart ||
+      (needsRuntime && !runtimeId) ||
+      (needsPrompt && !trimmed)
     ) {
       return;
     }
@@ -127,32 +149,31 @@ function SessionsStart() {
     setError(null);
     try {
       const title = selectedAgent ? `${selectedAgent.name} session` : promptTitle(trimmed);
-      const agent =
-        selectedAgent ??
-        (await createAgent({
-          name: title,
-          owner_id: "default",
-          description: `Started from ${runtimeLabel(selectedRuntime ?? runtimeId)} landing prompt.`,
-          model: modelForRuntime(runtimeId),
-          harness: runtimeId,
-          system: "You are a helpful managed agent. Use available tools when they help complete the user's request.",
-          tools: [{ type: "agent_toolset_20260401" }],
-          mcp_servers: [],
-          skills: [],
-        }));
-      const environment =
-        runtimeId === "cursor"
-          ? {
-              repository,
-              ref,
-              target_branch: "agent/{agent_id}/{session_id}",
-              auto_create_pr: false,
-            }
-          : {};
-      const session = await createSession(title, agent.id, {
-        runtime: runtimeId,
-        environment,
-      });
+      const session =
+        selectedAgent && !isDbBackedAgent(selectedAgent)
+          ? await createSession(title, selectedAgent.id)
+          : await (async () => {
+              const runtimeForSession = runtimeId as AgentRuntimeId;
+              const agent =
+                selectedAgent ??
+                (await createAgent({
+                  name: title,
+                  owner_id: "default",
+                  description: `Started from ${runtimeLabel(selectedRuntime ?? runtimeForSession)} landing prompt.`,
+                  model: modelForRuntime(runtimeForSession),
+                  harness: runtimeForSession,
+                  system: "You are a helpful managed agent. Use available tools when they help complete the user's request.",
+                  tools: [{ type: "agent_toolset_20260401" }],
+                  mcp_servers: [],
+                  skills: [],
+                }));
+              const environment =
+                runtimeForSession === "cursor" ? cursorEnvironment(repository, ref) : {};
+              return createSession(title, agent.id, {
+                runtime: runtimeForSession,
+                environment,
+              });
+            })();
       const params = new URLSearchParams({
         id: session.id,
       });
@@ -284,7 +305,7 @@ function SessionsStart() {
                 </SelectContent>
               </Select>
               <span className="hidden rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-xs text-[#77736d] sm:inline">
-                {runtimeRoutePrefix(runtime)}
+                {selectedAgentIsConfigured ? "agent/*" : runtimeRoutePrefix(runtime)}
               </span>
               <Button variant="ghost" size="icon-sm" disabled className="ml-auto text-[#5d5a55]">
                 <Mic className="size-4" />
@@ -338,7 +359,11 @@ function SessionsStart() {
 
           <div className="absolute bottom-6 rounded-full border border-black/10 bg-white/80 px-3 py-1.5 text-xs text-[#68645f] shadow-sm">
             <span className="mr-2 inline-block size-2 rounded-full bg-[#b7b3ad]" />
-            {selectedRuntime?.connected ? `${selectedRuntime.name} ready` : "Runtime key missing"}
+            {selectedAgentIsConfigured
+              ? `${selectedAgent?.name} ready`
+              : selectedRuntime?.connected
+                ? `${selectedRuntime.name} ready`
+                : "Runtime key missing"}
           </div>
         </section>
       </main>

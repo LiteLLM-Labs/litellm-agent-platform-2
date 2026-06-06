@@ -45,7 +45,7 @@ pub async fn create(
     if input.has_runtime() {
         return create_runtime_session(state, &pool, input).await.map(Json);
     }
-    let resolved = resolve_session_request(&pool, input).await?;
+    let resolved = resolve_session_request(&state, &pool, input).await?;
     let row = sessions::repository::create(
         &pool,
         &resolved.harness,
