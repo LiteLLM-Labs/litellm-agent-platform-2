@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Check, KeyRound, ServerCog, X } from "lucide-react";
+
+import { BrandIcon } from "@/components/brand-icons";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { BrandIcon } from "@/components/brand-icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,6 +22,7 @@ export default function RuntimesPage() {
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [bases, setBases] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +39,9 @@ export default function RuntimesPage() {
   }, []);
 
   useEffect(() => {
-    refresh().catch((err) => setError(err instanceof Error ? err.message : "Failed to load runtimes"));
+    refresh()
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load runtimes"))
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   const saveRuntime = async (runtime: AgentRuntimeId) => {
@@ -85,23 +89,25 @@ export default function RuntimesPage() {
           <ThemeToggle />
         </header>
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto grid max-w-5xl gap-5 px-4 py-6">
-            <div>
-              <h2 className="text-lg font-semibold">Runtime Credentials</h2>
+          <div className="mx-auto grid w-[calc(100vw-4rem)] max-w-5xl gap-5 px-4 py-6 sm:w-full">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold">Agent Runtime Credentials</h2>
               <p className="text-sm text-muted-foreground">
                 Connect SDK agent runtimes before starting runtime sessions.
               </p>
+              {loading && <p className="mt-2 text-xs text-muted-foreground">Loading runtimes...</p>}
               {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
             </div>
+
             <div className="grid gap-3 md:grid-cols-2">
               {runtimes.map((runtime) => (
-                <Card key={runtime.id} className="grid gap-4 p-4">
+                <Card key={runtime.id} className="grid min-w-0 gap-4 p-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
                       <RuntimeLogo id={runtime.id} />
-                      <div>
+                      <div className="min-w-0">
                         <div className="font-medium">{runtime.name}</div>
-                        <p className="font-mono text-xs text-muted-foreground">
+                        <p className="truncate font-mono text-xs text-muted-foreground">
                           {runtime.masked_api_key ?? "No API key"}
                         </p>
                       </div>
@@ -179,7 +185,11 @@ export default function RuntimesPage() {
 function RuntimeLogo({ id }: { id: AgentRuntimeId }) {
   return (
     <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground shadow-sm">
-      <BrandIcon id={id === "claude_managed_agents" ? "claude" : id} className="size-5" />
+      <BrandIcon id={runtimeIconId(id)} className="size-5" />
     </span>
   );
+}
+
+function runtimeIconId(id: AgentRuntimeId) {
+  return id === "claude_managed_agents" ? "claude" : id;
 }

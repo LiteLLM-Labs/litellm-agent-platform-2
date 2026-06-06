@@ -106,7 +106,7 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
       label: "AI Gateway",
       icon: ShieldCheck,
       home: "/providers/",
-      description: "Keys, teams, logs, and models",
+      description: "Keys, teams, logs, providers, and runtimes",
       items: [
         {
           label: "Keys",
@@ -127,10 +127,16 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           active: (path) => path.startsWith("/observability"),
         },
         {
-          label: "Providers",
+          label: "LLM Providers",
           href: "/providers/",
           icon: ServerCog,
           active: (path) => path.startsWith("/providers"),
+        },
+        {
+          label: "Agent Runtimes",
+          href: "/runtimes/",
+          icon: ServerCog,
+          active: (path) => path.startsWith("/runtimes"),
         },
       ],
     },
@@ -158,12 +164,6 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           href: "/integrations/",
           icon: Puzzle,
           active: (path) => path.startsWith("/integrations"),
-        },
-        {
-          label: "Agent Runtimes",
-          href: "/runtimes/",
-          icon: ServerCog,
-          active: (path) => path.startsWith("/runtimes"),
         },
         {
           label: "Skills",

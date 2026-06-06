@@ -22,6 +22,8 @@ export interface AgentRuntime {
   id: AgentRuntimeId;
   name: string;
   default_api_base: string;
+  credential_provider_id: string;
+  credential_provider_name: string;
   connected: boolean;
   api_base?: string | null;
   masked_api_key?: string | null;
