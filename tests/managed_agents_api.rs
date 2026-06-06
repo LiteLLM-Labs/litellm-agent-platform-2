@@ -4,8 +4,11 @@ mod support;
 use serde_json::json;
 use support::{flows, request_json, AppFixture};
 
+static DB_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn managed_agent_endpoints_round_trip_against_postgres() {
+    let _guard = DB_TEST_LOCK.lock().await;
     let Some(fixture) = AppFixture::new().await else {
         eprintln!("skipping managed agent integration test: TEST_DATABASE_URL is not set");
         return;
@@ -17,6 +20,7 @@ async fn managed_agent_endpoints_round_trip_against_postgres() {
     flows::exercise_files(&fixture, &agent_id).await;
     flows::exercise_runs(&fixture, &agent_id).await;
     flows::exercise_sessions(&fixture).await;
+    flows::exercise_cursor_runtime_stream(&fixture, &agent_id).await;
     flows::exercise_skills(&fixture).await;
     flows::exercise_inbox(&fixture).await;
 
@@ -31,6 +35,7 @@ async fn managed_agent_endpoints_round_trip_against_postgres() {
 
 #[tokio::test]
 async fn rejects_invalid_file_base64_against_postgres() {
+    let _guard = DB_TEST_LOCK.lock().await;
     let Some(fixture) = AppFixture::new().await else {
         eprintln!("skipping managed agent integration test: TEST_DATABASE_URL is not set");
         return;

@@ -21,12 +21,35 @@ use crate::{
 };
 
 pub fn router(state: Arc<AppState>) -> Router {
+    public_routes()
+        .merge(api_routes())
+        .merge(session_routes())
+        .merge(crate::http::observability::routes::router())
+        .merge(crate::http::management::routes::router())
+        .merge(crate::http::managed_agents::routes::router())
+        .merge(mcp_routes())
+        .fallback_service(ui::static_files())
+        .with_state(state)
+}
+
+fn public_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(ui::redirect_to_sessions))
         .route("/docs", get(swagger_ui))
         .route("/openapi.json", get(openapi_json))
         .route("/health", get(health))
         .route("/event", get(events))
+        .route("/v1/messages", post(messages))
+        .route("/v1/responses", post(responses))
+        .route("/v1/models", get(models))
+        .route(
+            "/v1/sessions/{session_id}/events/stream",
+            get(sessions::runtime_events),
+        )
+}
+
+fn api_routes() -> Router<Arc<AppState>> {
+    Router::new()
         .route(
             "/api/harness-proxy/{*path}",
             any(crate::http::harness_proxy::proxy),
@@ -49,13 +72,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(crate::http::provider_credentials::save_provider)
                 .delete(crate::http::provider_credentials::delete_provider),
         )
-        .route("/v1/messages", post(messages))
-        .route("/v1/responses", post(responses))
-        .route("/v1/models", get(models))
-        .merge(session_routes())
-        .merge(crate::http::observability::routes::router())
-        .merge(crate::http::management::routes::router())
-        .merge(crate::http::managed_agents::routes::router())
+}
+
+fn mcp_routes() -> Router<Arc<AppState>> {
+    Router::new()
         .route(
             "/mcp",
             get(streamable_http)
@@ -68,8 +88,6 @@ pub fn router(state: Arc<AppState>) -> Router {
                 .post(streamable_http_server)
                 .delete(streamable_http_server),
         )
-        .fallback_service(ui::static_files())
-        .with_state(state)
 }
 
 fn session_routes() -> Router<Arc<AppState>> {

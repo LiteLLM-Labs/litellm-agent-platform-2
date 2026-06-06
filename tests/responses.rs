@@ -31,8 +31,21 @@ async fn responses_uses_db_backed_openai_credentials() {
         eprintln!("skipping responses integration test: TEST_DATABASE_URL is not set");
         return;
     };
-
     let upstream = MockServer::start().await;
+    mock_responses_upstream(&upstream).await;
+    let config = test_config(upstream.uri());
+    save_openai_credential(&pool, &config, upstream.uri()).await;
+
+    let app = router(build_state(config, pool));
+    let response = app.oneshot(responses_request()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["output_text"], "ok");
+}
+
+async fn mock_responses_upstream(upstream: &MockServer) {
     Mock::given(method("POST"))
         .and(path("/v1/responses"))
         .and(header_match("authorization", "Bearer sk-openai-db"))
@@ -44,47 +57,39 @@ async fn responses_uses_db_backed_openai_credentials() {
             "output": [],
             "output_text": "ok"
         })))
-        .mount(&upstream)
+        .mount(upstream)
         .await;
+}
 
-    let config = test_config(upstream.uri());
+async fn save_openai_credential(pool: &PgPool, config: &GatewayConfig, api_base: String) {
     provider_credentials::save(
-        &pool,
-        &config,
+        pool,
+        config,
         "openai",
         ProviderCredentialInput {
             api_key: "sk-openai-db".to_owned(),
-            api_base: upstream.uri(),
+            api_base,
         },
     )
     .await
     .unwrap();
+}
 
-    let app = router(build_state(config, pool));
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/responses")
-                .header(header::AUTHORIZATION, "Bearer sk-local")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    json!({
-                        "model": "gpt-5.5",
-                        "input": "Reply with exactly: ok",
-                        "max_output_tokens": 16
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(body["output_text"], "ok");
+fn responses_request() -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/v1/responses")
+        .header(header::AUTHORIZATION, "Bearer sk-local")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "model": "gpt-5.5",
+                "input": "Reply with exactly: ok",
+                "max_output_tokens": 16
+            })
+            .to_string(),
+        ))
+        .unwrap()
 }
 
 async fn test_pool() -> Option<PgPool> {

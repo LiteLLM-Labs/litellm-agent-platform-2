@@ -1,56 +1,16 @@
-use futures_util::StreamExt;
-use litellm_rust::sdk::agents::{
-    parse_sse, AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
-    CreateSessionParams, Lap, LapConfig, SendEventsParams, MANAGED_AGENTS_BETA,
-};
-use serde_json::json;
-use wiremock::{
-    matchers::{body_json, header, method, path},
-    Mock, MockServer, ResponseTemplate,
-};
+#[path = "managed_agents_support/sdk.rs"]
+mod sdk_support;
 
-fn client(server: &MockServer) -> Lap {
-    let config = LapConfig {
-        anthropic_api_key: Some("sk-ant-test".to_owned()),
-        anthropic_base_url: server.uri(),
-    };
-    Lap::new(config)
-}
+use litellm_rust::sdk::agents::{parse_sse, AgentRuntime};
+use serde_json::json;
+use wiremock::MockServer;
 
 #[tokio::test]
 async fn creates_claude_managed_agent_with_anthropic_shape() {
     let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/agents"))
-        .and(header("x-api-key", "sk-ant-test"))
-        .and(header("anthropic-beta", MANAGED_AGENTS_BETA))
-        .and(body_json(json!({
-            "name": "Coding Assistant",
-            "model": "claude-opus-4-8",
-            "system": "Write clean code.",
-            "tools": [{ "type": "agent_toolset_20260401" }]
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id": "agent_123",
-            "version": 1
-        })))
-        .mount(&server)
-        .await;
+    sdk_support::mount_claude_agent_create(&server).await;
 
-    let agent = client(&server)
-        .beta()
-        .agents()
-        .create(CreateAgentParams {
-            lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
-            name: "Coding Assistant".to_owned(),
-            model: AgentModel::from("claude-opus-4-8"),
-            system: "Write clean code.".to_owned(),
-            description: None,
-            tools: vec![json!({ "type": "agent_toolset_20260401" })],
-            mcp_servers: Vec::new(),
-        })
-        .await
-        .unwrap();
+    let agent = sdk_support::create_claude_agent(&server).await;
 
     assert_eq!(agent.id, "agent_123");
     assert_eq!(agent.version, Some(1));
@@ -59,81 +19,9 @@ async fn creates_claude_managed_agent_with_anthropic_shape() {
 #[tokio::test]
 async fn creates_session_and_sends_events_with_runtime_ids() {
     let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/environments"))
-        .and(body_json(json!({
-            "name": "quickstart-env",
-            "config": {
-                "type": "cloud",
-                "networking": { "type": "unrestricted" }
-            }
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "env_123" })))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/sessions"))
-        .and(body_json(json!({
-            "agent": "agent_123",
-            "environment_id": "env_123",
-            "title": "Quickstart session"
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "sesn_123" })))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/sessions/sesn_123/events"))
-        .and(body_json(json!({
-            "events": [{
-                "type": "user.message",
-                "content": [{ "type": "text", "text": "Create fibonacci.txt" }]
-            }]
-        })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [] })))
-        .mount(&server)
-        .await;
+    sdk_support::mount_session_round_trip(&server).await;
 
-    let client = client(&server);
-    let environment = client
-        .beta()
-        .environments()
-        .create(CreateEnvironmentParams {
-            lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
-            name: "quickstart-env".to_owned(),
-            config: json!({ "type": "cloud", "networking": { "type": "unrestricted" } }),
-            description: None,
-            scope: None,
-        })
-        .await
-        .unwrap();
-    let session = client
-        .beta()
-        .sessions()
-        .create(CreateSessionParams {
-            agent: "agent_123".to_owned(),
-            environment_id: environment.id,
-            title: "Quickstart session".to_owned(),
-            lap_agent_runtime: None,
-            metadata: None,
-            resources: None,
-        })
-        .await
-        .unwrap();
-    let sent = client
-        .beta()
-        .sessions()
-        .events()
-        .send(
-            &session.id,
-            SendEventsParams {
-                events: vec![json!({
-                    "type": "user.message",
-                    "content": [{ "type": "text", "text": "Create fibonacci.txt" }]
-                })],
-            },
-        )
-        .await
-        .unwrap();
+    let (session, sent) = sdk_support::create_session_and_send_events(&server).await;
 
     assert_eq!(session.id, "sesn_123");
     assert_eq!(sent.raw, json!({ "data": [] }));
@@ -142,34 +30,17 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
 #[tokio::test]
 async fn streams_session_events() {
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/sessions/sesn_123/events/stream"))
-        .and(header("anthropic-beta", MANAGED_AGENTS_BETA))
-        .respond_with(ResponseTemplate::new(200).set_body_string(
-            "event: agent.message\n\
-             data: {\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}\n\n\
-             data: {\"type\":\"session.status_idle\"}\n\n",
-        ))
-        .mount(&server)
-        .await;
+    sdk_support::mount_session_stream(&server).await;
 
-    let mut stream = client(&server)
-        .beta()
-        .sessions()
-        .events()
-        .stream("sesn_123")
-        .await
-        .unwrap();
-    let first = stream.next().await.unwrap().unwrap();
-    let second = stream.next().await.unwrap().unwrap();
+    let events = sdk_support::stream_mock_session_events(&server, "sesn_123").await;
 
-    assert_eq!(first.event_type, "agent.message");
-    assert_eq!(first.data["content"][0]["text"], "hello");
-    assert_eq!(second.event_type, "session.status_idle");
+    assert_eq!(events[0].event_type, "agent.message");
+    assert_eq!(events[0].data["content"][0]["text"], "hello");
+    assert_eq!(events[1].event_type, "session.status_idle");
 }
 
 #[test]
-fn parses_sse_and_rejects_unknown_runtime() {
+fn parses_sse_and_resolves_supported_runtimes() {
     let events = parse_sse(
         "event: agent.message\n\
          data: {\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}\n\n",
@@ -177,5 +48,28 @@ fn parses_sse_and_rejects_unknown_runtime() {
     .unwrap();
 
     assert_eq!(events[0].event_type, "agent.message");
-    assert!(AgentRuntime::try_from("cursor").is_err());
+    assert_eq!(
+        AgentRuntime::try_from("cursor").unwrap(),
+        AgentRuntime::Cursor
+    );
+    assert!(AgentRuntime::try_from("not-a-runtime").is_err());
+}
+
+#[tokio::test]
+async fn cursor_provider_stream_conforms_to_anthropic_reference_events() {
+    let server = MockServer::start().await;
+    sdk_support::mount_cursor_stream_conformance(&server).await;
+
+    let (client, session) = sdk_support::create_cursor_session(&server).await;
+    assert_eq!(session.id, sdk_support::CURSOR_AGENT_ID);
+
+    let initial_events = sdk_support::stream_session_events(&client, &session.id).await;
+    sdk_support::assert_initial_cursor_stream(&initial_events);
+
+    sdk_support::register_cursor_session(&client, session.id);
+    sdk_support::send_cursor_prompt(&client).await;
+
+    let events =
+        sdk_support::stream_session_events(&client, sdk_support::LAP_CURSOR_SESSION_ID).await;
+    sdk_support::assert_cursor_events_match_reference(&events);
 }
