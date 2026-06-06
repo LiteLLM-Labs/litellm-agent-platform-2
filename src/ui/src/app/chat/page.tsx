@@ -246,6 +246,7 @@ function ChatInner() {
   const [providerUrl, setProviderUrl] = useState<string | undefined>();
   const [sessionTitle, setSessionTitle] = useState<string>("");
   const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
+  const [switchingAgent, setSwitchingAgent] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
   const runtimeAssistantRef = useRef<{
@@ -291,7 +292,6 @@ function ChatInner() {
   const skills = Array.isArray(activeAgent?.skills) ? activeAgent.skills : [];
   const vaultKeys = Array.isArray(activeAgent?.vault_keys) ? activeAgent.vault_keys : [];
   const hasStarted = Boolean(messages && messages.length > 0);
-  const agentLocked = hasStarted || Boolean(activeAgent);
 
   const onCopyPrompt = useCallback(() => {
     if (!activePrompt) return;
@@ -329,13 +329,20 @@ function ChatInner() {
     listAgents().then(setSavedAgents).catch(() => {});
   }, []);
 
-  // On agent change before first message: delete current empty session, create new, redirect
   const onHarnessChange = useCallback(async (next: string) => {
     if (!sid || next === sessionHarness) return;
-    await deleteSession(sid);
-    const s = await createSession(undefined, next);
-    router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
-  }, [sid, sessionHarness, router]);
+    setSwitchingAgent(true);
+    setError(null);
+    try {
+      if (!hasStarted) await deleteSession(sid).catch(() => {});
+      const options = next.startsWith("agent_") && sessionRuntime ? { runtime: sessionRuntime } : undefined;
+      const s = await createSession(undefined, next, options);
+      router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to switch agent");
+      setSwitchingAgent(false);
+    }
+  }, [hasStarted, sid, sessionHarness, sessionRuntime, router]);
 
   const runtimeAssistantIds = useCallback(() => {
     if (!sid) return null;
@@ -697,36 +704,32 @@ function ChatInner() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">agent</span>
-              {agentLocked ? (
-                <span
-                  className="h-8 max-w-[220px] px-3 flex items-center text-xs font-mono border border-border rounded-md bg-muted text-muted-foreground truncate"
-                  title={activeAgentName}
-                >
-                  {activeAgentName}
-                </span>
-              ) : (
-                <Select value={sessionHarness} onValueChange={(v) => v && onHarnessChange(v)}>
-                  <SelectTrigger className="h-8 text-xs w-[150px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
-                    <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
-                    <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
-                    {savedAgents.length > 0 && (
-                      <>
-                        <div className="px-2 py-1.5 text-[10px] text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">Saved agents</div>
-                        {savedAgents.map(a => (
-                          <SelectItem key={a.id} value={a.id} className="text-xs font-mono">{a.name}</SelectItem>
-                        ))}
-                      </>
-                    )}
-                    <div className="px-2 py-2 text-[10px] text-muted-foreground border-t mt-1">
-                      💡 Say <span className="font-mono">&quot;save this agent&quot;</span> to save a session
-                    </div>
-                  </SelectContent>
-                </Select>
-              )}
+              <Select
+                value={sessionHarness}
+                onValueChange={(v) => v && onHarnessChange(v)}
+                disabled={switchingAgent || sessionStatus === "busy"}
+              >
+                <SelectTrigger className="h-8 text-xs w-[190px]">
+                  <SelectValue placeholder={activeAgentName} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
+                  <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
+                  <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
+                  {savedAgents.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-[10px] text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">Saved agents</div>
+                      {savedAgents.map(a => (
+                        <SelectItem key={a.id} value={a.id} className="text-xs font-mono">{a.name}</SelectItem>
+                      ))}
+                    </>
+                  )}
+                  <div className="px-2 py-2 text-[10px] text-muted-foreground border-t mt-1">
+                    Switching agents opens a new session.
+                  </div>
+                </SelectContent>
+              </Select>
+              {switchingAgent && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">model</span>

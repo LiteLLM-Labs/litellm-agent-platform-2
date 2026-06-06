@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowUp, Mic, Paperclip } from "lucide-react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowUp, Bot, Mic, Paperclip } from "lucide-react";
 import { BrandIcon } from "@/components/brand-icons";
 import { Sidebar } from "@/components/sidebar";
 import { Button } from "@/components/ui/button";
@@ -12,12 +12,18 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { createAgent, createSession, listAgentRuntimes, listAgents, listSessions } from "@/lib/api";
-import type { AgentRuntime, AgentRuntimeId } from "@/lib/types";
+import {
+  createAgent,
+  createSession,
+  listAgentRuntimes,
+  listAgents,
+  listSessions,
+} from "@/lib/api";
+import type { Agent, AgentRuntime, AgentRuntimeId } from "@/lib/types";
 
+const NEW_AGENT_VALUE = "__new_agent__";
 const CLAUDE_RUNTIME: AgentRuntimeId = "claude_managed_agents";
 
 function runtimeIconId(id: string) {
@@ -59,11 +65,14 @@ function promptTitle(prompt: string): string {
   return compact.length > 46 ? `${compact.slice(0, 46).trimEnd()}...` : compact;
 }
 
-export default function SessionsPage() {
+function SessionsStart() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [selectedAgentId, setSelectedAgentId] = useState(searchParams.get("agent") ?? "");
   const [prompt, setPrompt] = useState("");
   const [runtime, setRuntime] = useState<AgentRuntimeId | "">("");
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
+  const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
   const [repository, setRepository] = useState("");
   const [ref, setRef] = useState("main");
   const [sessionCount, setSessionCount] = useState<number | null>(null);
@@ -81,6 +90,7 @@ export default function SessionsPage() {
         });
         setSessionCount(nextSessions.length);
         setAgentCount(nextAgents.length);
+        setSavedAgents(nextAgents);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load runtimes"));
   }, []);
@@ -89,32 +99,47 @@ export default function SessionsPage() {
     () => runtimes.find((item) => item.id === runtime),
     [runtime, runtimes],
   );
+  const selectedAgent = useMemo(
+    () => savedAgents.find((agent) => agent.id === selectedAgentId) ?? null,
+    [savedAgents, selectedAgentId],
+  );
+  const needsPrompt = !selectedAgent;
   const canStart =
     runtime !== "" &&
-    prompt.trim().length > 0 &&
+    (!needsPrompt || prompt.trim().length > 0) &&
     !starting &&
     selectedRuntime?.connected &&
+    (!selectedAgentId || selectedAgent !== null) &&
     (runtime !== "cursor" || repository.trim().length > 0);
 
   const startSession = async () => {
     const trimmed = prompt.trim();
     const runtimeId = runtime;
-    if (!trimmed || starting || !runtimeId) return;
+    if (
+      !runtimeId ||
+      starting ||
+      (needsPrompt && !trimmed) ||
+      (selectedAgentId && !selectedAgent)
+    ) {
+      return;
+    }
     setStarting(true);
     setError(null);
     try {
-      const title = promptTitle(trimmed);
-      const agent = await createAgent({
-        name: title,
-        owner_id: "default",
-        description: `Started from ${runtimeLabel(selectedRuntime ?? runtimeId)} landing prompt.`,
-        model: modelForRuntime(runtimeId),
-        harness: runtimeId,
-        system: "You are a helpful managed agent. Use available tools when they help complete the user's request.",
-        tools: [{ type: "agent_toolset_20260401" }],
-        mcp_servers: [],
-        skills: [],
-      });
+      const title = selectedAgent ? `${selectedAgent.name} session` : promptTitle(trimmed);
+      const agent =
+        selectedAgent ??
+        (await createAgent({
+          name: title,
+          owner_id: "default",
+          description: `Started from ${runtimeLabel(selectedRuntime ?? runtimeId)} landing prompt.`,
+          model: modelForRuntime(runtimeId),
+          harness: runtimeId,
+          system: "You are a helpful managed agent. Use available tools when they help complete the user's request.",
+          tools: [{ type: "agent_toolset_20260401" }],
+          mcp_servers: [],
+          skills: [],
+        }));
       const environment =
         runtimeId === "cursor"
           ? {
@@ -130,9 +155,11 @@ export default function SessionsPage() {
       });
       const params = new URLSearchParams({
         id: session.id,
-        prompt: trimmed,
-        autostart: "1",
       });
+      if (trimmed) {
+        params.set("prompt", trimmed);
+        params.set("autostart", "1");
+      }
       router.push(`/chat/?${params.toString()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start session");
@@ -174,50 +201,92 @@ export default function SessionsPage() {
                   void startSession();
                 }
               }}
-              placeholder="Ask or build anything"
+              placeholder={selectedAgent ? "Optional first message" : "Ask or build anything"}
               className="min-h-24 resize-none border-0 bg-transparent px-4 py-4 text-[15px] text-[#20201f] shadow-none outline-none placeholder:text-[#77736d] focus-visible:ring-0"
             />
             <div className="flex flex-wrap items-center gap-2 border-t border-black/10 bg-[#faf9f7] px-3 py-3">
-              <Select value={runtime} onValueChange={(value) => setRuntime(value as AgentRuntimeId)}>
-                <SelectTrigger className="h-10 w-auto min-w-[230px] rounded-full border border-black/10 bg-white px-3 text-left text-[#20201f] shadow-sm transition-colors hover:bg-[#fbfaf8] focus:ring-1 focus:ring-black/15">
-                  <SelectValue>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-[#f3f1ee]">
-                        <BrandIcon id={runtimeIconId(runtime)} className="size-4" />
-                      </span>
-                      <span className="truncate text-sm font-medium">
-                        {selectedRuntime?.name ?? (runtime ? runtimeLabel(runtime) : "Select runtime")}
-                      </span>
+              <Select
+                value={selectedAgentId || NEW_AGENT_VALUE}
+                onValueChange={(value) => {
+                  const next = value ?? "";
+                  setSelectedAgentId(next === NEW_AGENT_VALUE ? "" : next);
+                }}
+              >
+                <SelectTrigger className="h-10 w-auto min-w-[230px] max-w-[320px] rounded-full border border-black/10 bg-white px-3 text-left text-[#20201f] shadow-sm transition-colors hover:bg-[#fbfaf8] focus:ring-1 focus:ring-black/15">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#77736d]">
+                      Agent
                     </span>
-                  </SelectValue>
+                    <span className="truncate text-sm font-medium">
+                      {selectedAgent?.name ?? "New managed agent"}
+                    </span>
+                  </span>
                 </SelectTrigger>
                 <SelectContent className="w-[340px]">
-                  {runtimes.map((item) => {
-                    return (
-                      <SelectItem key={item.id} value={item.id} disabled={!item.connected} className="py-3">
-                        <span className="flex min-w-0 items-center gap-3">
-                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
-                            <BrandIcon id={runtimeIconId(item.id)} className="size-4" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-medium">
-                              {item.name}
-                            </span>
-                            <span className="block truncate text-xs text-muted-foreground">
-                              {runtimeSubtitle(item)}
-                            </span>
+                  <SelectItem value={NEW_AGENT_VALUE} className="py-3">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                        <Bot className="size-4" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">New managed agent</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          Create one from this prompt
+                        </span>
+                      </span>
+                    </span>
+                  </SelectItem>
+                  {savedAgents.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                        Saved agents
+                      </div>
+                      {savedAgents.map((agent) => (
+                        <SelectItem key={agent.id} value={agent.id} className="py-3">
+                          <span className="block truncate text-sm font-medium">{agent.name}</span>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+
+              <Select value={runtime} onValueChange={(value) => setRuntime((value ?? "") as AgentRuntimeId | "")}>
+                <SelectTrigger className="h-10 w-auto min-w-[260px] max-w-[340px] rounded-full border border-black/10 bg-white px-3 text-left text-[#20201f] shadow-sm transition-colors hover:bg-[#fbfaf8] focus:ring-1 focus:ring-black/15">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#77736d]">
+                      Runtime
+                    </span>
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-[#f3f1ee]">
+                      <BrandIcon id={runtimeIconId(runtime)} className="size-4" />
+                    </span>
+                    <span className="truncate text-sm font-medium">
+                      {selectedRuntime?.name ?? (runtime ? runtimeLabel(runtime) : "Select runtime")}
+                    </span>
+                  </span>
+                </SelectTrigger>
+                <SelectContent className="w-[340px]">
+                  {runtimes.map((item) => (
+                    <SelectItem key={item.id} value={item.id} disabled={!item.connected} className="py-3">
+                      <span className="flex min-w-0 items-center gap-3">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                          <BrandIcon id={runtimeIconId(item.id)} className="size-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">{item.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {runtimeSubtitle(item)}
                           </span>
                         </span>
-                      </SelectItem>
-                    );
-                  })}
+                      </span>
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <span className="hidden rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-xs text-[#77736d] sm:inline">
                 {runtimeRoutePrefix(runtime)}
               </span>
-              <div className="ml-auto" />
-              <Button variant="ghost" size="icon-sm" disabled className="text-[#5d5a55]">
+              <Button variant="ghost" size="icon-sm" disabled className="ml-auto text-[#5d5a55]">
                 <Mic className="size-4" />
               </Button>
               <Button variant="ghost" size="icon-sm" disabled className="text-[#5d5a55]">
@@ -225,13 +294,14 @@ export default function SessionsPage() {
               </Button>
               <Button
                 type="button"
-                size="icon-sm"
+                size="sm"
                 onClick={() => void startSession()}
                 disabled={!canStart}
                 className="rounded-full bg-[#20201f] text-white hover:bg-black disabled:opacity-30"
                 aria-label="Start session"
               >
                 <ArrowUp className="size-4" />
+                <span>Run</span>
               </Button>
             </div>
             {runtime === "cursor" && (
@@ -273,6 +343,14 @@ export default function SessionsPage() {
         </section>
       </main>
     </div>
+  );
+}
+
+export default function SessionsPage() {
+  return (
+    <Suspense>
+      <SessionsStart />
+    </Suspense>
   );
 }
 

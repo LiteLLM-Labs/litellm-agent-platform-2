@@ -169,7 +169,7 @@ async function reqHarness(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export async function whoami(): Promise<void> {
-  const res = await req("/whoami");
+  const res = await req("/v1/models");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new ApiError(res.status, body);
