@@ -60,7 +60,15 @@ test with `TEST_DATABASE_URL`, then drop the database.
 
 ## Review Loop
 
-Poll CI and review threads after every push:
+After every push, including CI-only or non-Bugbot fixes, capture the latest head
+and request a fresh Bugbot review for that head:
+
+```bash
+gh pr view <PR_NUMBER> --json headRefOid --jq .headRefOid
+gh pr comment <PR_NUMBER> --body '@bugbot please re-review the latest head commit.'
+```
+
+Poll CI, Bugbot, and review threads after every push:
 
 ```bash
 gh pr view <PR_NUMBER> \
@@ -89,6 +97,11 @@ query($owner: String!, $repo: String!, $number: Int!) {
 ' -f owner='LiteLLM-Labs' -f repo='litellm-agent-platform-2' -F number=<PR_NUMBER>
 ```
 
+The `statusCheckRollup` is scoped to the current `headRefOid`. Do not treat
+Bugbot as done until the `Cursor Bugbot` check for that current head is terminal.
+If the head changes for any reason, request `@bugbot` again before evaluating the
+merge gate.
+
 For each unresolved Bugbot thread:
 
 1. Read the full comment and reproduce or reason through the failure.
@@ -105,12 +118,13 @@ For each unresolved Bugbot thread:
    }
    ' -f thread='<THREAD_ID>'
    ```
-6. Ask Bugbot to re-review:
+6. Ask Bugbot to re-review the new head:
    ```bash
    gh pr comment <PR_NUMBER> --body '@bugbot please re-review the latest fixes.'
    ```
 
-Repeat until Bugbot has completed and there are zero unresolved Bugbot threads.
+Repeat until Bugbot has completed for the latest `headRefOid` and there are zero
+unresolved Bugbot threads.
 
 ## Merge Gate
 
@@ -118,7 +132,7 @@ The PR is mergeable only when all of these are true:
 
 - `mergeStateStatus` is clean enough for GitHub to merge.
 - Required CI checks are terminal and successful.
-- Cursor Bugbot has completed after the latest head commit.
+- Cursor Bugbot is terminal in `statusCheckRollup` for the latest `headRefOid`.
 - There are zero unresolved Bugbot review threads.
 - The working tree contains no accidental or generated files staged for commit.
 
