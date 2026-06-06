@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { createSession, listAgentRuntimes, listAgents } from "@/lib/api";
 import type { Agent, AgentRuntime, AgentRuntimeId } from "@/lib/types";
 
@@ -33,7 +32,6 @@ export default function SessionsPage() {
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [repository, setRepository] = useState("");
   const [ref, setRef] = useState("main");
-  const [prompt, setPrompt] = useState("Start a runtime session for this agent.");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,7 +70,6 @@ export default function SessionsPage() {
           : {};
       const session = await createSession("Runtime PoC", agentId, {
         runtime,
-        prompt,
         environment,
       });
       router.push(`/chat/?id=${encodeURIComponent(session.id)}`);
@@ -176,16 +173,6 @@ export default function SessionsPage() {
                     </div>
                   </div>
                 )}
-
-                <div className="grid gap-1.5">
-                  <Label htmlFor="prompt">Prompt</Label>
-                  <Textarea
-                    id="prompt"
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    className="min-h-24"
-                  />
-                </div>
 
                 {error && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>}
                 <div className="flex justify-end">

@@ -8,10 +8,12 @@ export function Composer({
   sessionId,
   model,
   onSent,
+  disabled = false,
 }: {
   sessionId: string;
   model: string;
-  onSent?: () => void;
+  onSent?: (text: string) => void;
+  disabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -19,19 +21,19 @@ export function Composer({
 
   const handleSend = useCallback(async () => {
     const t = draft.trim();
-    if (!t || sending) return;
+    if (!t || sending || disabled) return;
     setSending(true);
     setError(null);
     try {
       await sendMessage({ sessionId, text: t, model });
       setDraft("");
-      onSent?.();
+      onSent?.(t);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
     }
-  }, [draft, sending, sessionId, model, onSent]);
+  }, [disabled, draft, sending, sessionId, model, onSent]);
 
   // Plain Enter sends, Shift+Enter inserts a newline. Matches LAP.
   const handleKeyDown = useCallback(
@@ -44,9 +46,11 @@ export function Composer({
     [handleSend],
   );
 
-  const canSend = draft.trim().length > 0 && !sending;
+  const canSend = draft.trim().length > 0 && !sending && !disabled;
   const placeholder = sending
     ? "Sending…"
+    : disabled
+      ? "Waiting for assistant…"
     : "Add a follow up";
 
   return (
@@ -59,7 +63,7 @@ export function Composer({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              disabled={sending}
+              disabled={sending || disabled}
               rows={1}
               className="min-h-14 w-full resize-none bg-transparent px-4 pt-4 text-[15px] outline-none placeholder:text-muted-foreground"
             />
