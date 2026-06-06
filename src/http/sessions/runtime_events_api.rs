@@ -12,6 +12,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::{
+    db::managed_agents::sessions,
     errors::GatewayError,
     proxy::{auth::master_key::require_master_key, state::AppState},
     sdk::agents::AgentEventStream,
@@ -49,7 +50,15 @@ pub async fn runtime_events(
         .stream(&row.id)
         .await
         .map_err(agent_sdk_error)?;
-    let body_stream = provider_stream.map(provider_event_line);
+    let stream_pool = pool.clone();
+    let stream_session_id = row.id.clone();
+    let body_stream = async_stream::stream! {
+        futures_util::pin_mut!(provider_stream);
+        while let Some(event) = provider_stream.next().await {
+            yield provider_event_line(event);
+        }
+        let _ = sessions::repository::set_status(&stream_pool, &stream_session_id, "idle").await;
+    };
     Response::builder()
         .header("content-type", "text/event-stream")
         .header("cache-control", "no-cache")

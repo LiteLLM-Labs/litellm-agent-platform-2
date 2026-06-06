@@ -4,10 +4,14 @@
 use std::{fs, path::Path};
 
 fn main() {
-    let providers_dir = Path::new("src/sdk/providers");
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir).join("providers_generated.rs");
+    let providers = provider_modules(Path::new("src/sdk/providers"));
+    fs::write(&dest, generated_source(&providers)).unwrap();
+    println!("cargo:rerun-if-changed=src/sdk/providers");
+}
 
+fn provider_modules(providers_dir: &Path) -> Vec<ProviderModule> {
     let mut providers: Vec<ProviderModule> = fs::read_dir(providers_dir)
         .expect("src/sdk/providers not found")
         .flatten()
@@ -26,7 +30,10 @@ fn main() {
         .filter(|provider| provider.name != "base")
         .collect();
     providers.sort_by(|a, b| a.name.cmp(&b.name));
+    providers
+}
 
+fn generated_source(providers: &[ProviderModule]) -> String {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let mods: String = providers
         .iter()
@@ -54,13 +61,9 @@ fn main() {
             )
         })
         .collect();
-
-    let generated = format!(
+    format!(
         "{mods}\npub fn register_all(registry: &mut crate::sdk::providers::base::ProviderRegistry) {{\n{inits}}}\n\npub(crate) fn register_runtime_adapters(registry: &mut crate::sdk::providers::base::runtime::RuntimeAdapterRegistry) {{\n{runtime_inits}}}\n"
-    );
-    fs::write(&dest, generated).unwrap();
-
-    println!("cargo:rerun-if-changed=src/sdk/providers");
+    )
 }
 
 struct ProviderModule {

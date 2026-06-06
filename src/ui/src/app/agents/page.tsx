@@ -22,7 +22,6 @@ import { Badge } from "@/components/ui/badge";
 import { ScheduleEditor } from "@/components/schedule-editor";
 import {
   listAgents,
-  createAgent,
   updateAgent,
   deleteAgent,
   listSkills,
@@ -44,7 +43,6 @@ import {
 
 interface FormState {
   name: string;
-  owner_id: string;
   description: string;
   prompt: string;
   skill_ids: string[];
@@ -55,7 +53,6 @@ interface FormState {
 
 const EMPTY: FormState = {
   name: "",
-  owner_id: "local",
   description: "",
   prompt: "",
   skill_ids: [],
@@ -159,22 +156,10 @@ export default function AgentsPage() {
     }
   };
 
-  const openNew = () => {
-    setEditingId(null);
-    setForm(EMPTY);
-    setFormError(null);
-    setVaultKeyInput("");
-    setVaultValues({});
-    setMemories([]);
-    setMemKey("");
-    setMemValue("");
-    setOpen(true);
-  };
   const openEdit = (ag: Agent) => {
     setEditingId(ag.id);
     setForm({
       name: ag.name ?? "",
-      owner_id: (ag.owner_id as string) ?? "local",
       description: ag.description ?? "",
       prompt: ag.prompt ?? "",
       skill_ids: Array.isArray(ag.skill_ids) ? ag.skill_ids : [],
@@ -196,29 +181,18 @@ export default function AgentsPage() {
     setFormError(null);
     try {
       if (!form.name.trim()) throw new Error("Name is required");
+      if (!editingId) throw new Error("Agent ID is required");
       const cron = form.cron.trim();
       const timezone = form.timezone.trim() || "UTC";
-      if (editingId) {
-        await updateAgent(editingId, {
-          name: form.name,
-          description: form.description,
-          prompt: form.prompt,
-          skill_ids: form.skill_ids,
-          cron: cron || null,
-          timezone,
-          vault_keys: form.vault_keys,
-        });
-      } else {
-        await createAgent({
-          name: form.name,
-          owner_id: form.owner_id || "local",
-          description: form.description,
-          prompt: form.prompt,
-          skill_ids: form.skill_ids,
-          schedule: cron ? { cron, timezone } : null,
-          vault_keys: form.vault_keys,
-        });
-      }
+      await updateAgent(editingId, {
+        name: form.name,
+        description: form.description,
+        prompt: form.prompt,
+        skill_ids: form.skill_ids,
+        cron: cron || null,
+        timezone,
+        vault_keys: form.vault_keys,
+      });
       setOpen(false);
       await load();
     } catch (e) {
@@ -250,9 +224,9 @@ export default function AgentsPage() {
         <header className="h-12 border-b border-border flex items-center justify-between px-4 shrink-0">
           <h1 className="text-sm font-semibold">Agents</h1>
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={openNew}>
+            <Button size="sm" onClick={() => router.push("/agents/new/")}>
               <Plus className="size-4" />
-              New agent
+              Create agent
             </Button>
             <ThemeToggle />
           </div>
@@ -270,7 +244,7 @@ export default function AgentsPage() {
             )}
             {agents && agents.length === 0 && (
               <div className="text-center text-sm text-muted-foreground py-16">
-                No agents yet. Click <span className="font-medium">New agent</span> to define one.
+                No agents yet. Start with a template or draft one from a prompt.
               </div>
             )}
             {agents?.map((ag) => {
@@ -344,7 +318,7 @@ export default function AgentsPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[92vw] sm:max-w-2xl max-h-[88vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 p-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
-            <DialogTitle>{editingId ? "Edit agent" : "New agent"}</DialogTitle>
+            <DialogTitle>Edit agent</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4 px-6 py-4 overflow-y-auto">
             <div className="grid gap-1.5">
@@ -356,16 +330,6 @@ export default function AgentsPage() {
                 placeholder="security-reviewer"
               />
             </div>
-            {!editingId && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="ag-owner">Owner ID</Label>
-                <Input
-                  id="ag-owner"
-                  value={form.owner_id}
-                  onChange={(e) => setForm({ ...form, owner_id: e.target.value })}
-                />
-              </div>
-            )}
             <div className="grid gap-1.5">
               <Label htmlFor="ag-desc">Description</Label>
               <Input
@@ -556,7 +520,7 @@ export default function AgentsPage() {
               Cancel
             </Button>
             <Button onClick={save} disabled={saving}>
-              {saving ? "Saving…" : editingId ? "Save" : "Create"}
+              {saving ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

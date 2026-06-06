@@ -458,6 +458,100 @@ export async function listModels(): Promise<string[]> {
   return items.map((m) => m.id).filter(Boolean);
 }
 
+const DEFAULT_AGENT_DRAFT_MODEL = "claude-sonnet-4-6";
+
+function draftModelFrom(models: string[]): string {
+  const concrete = models.filter((model) => !model.endsWith("/*"));
+  return (
+    concrete.find((model) => model === DEFAULT_AGENT_DRAFT_MODEL) ??
+    concrete.find((model) => model.endsWith(`/${DEFAULT_AGENT_DRAFT_MODEL}`)) ??
+    concrete.find((model) => /claude.*sonnet/i.test(model)) ??
+    concrete[0] ??
+    DEFAULT_AGENT_DRAFT_MODEL
+  );
+}
+
+function messageText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const data = payload as {
+    content?: unknown;
+    output_text?: unknown;
+    message?: { content?: unknown };
+  };
+  if (typeof data.output_text === "string") return data.output_text;
+  if (typeof data.content === "string") return data.content;
+  if (Array.isArray(data.content)) {
+    return data.content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const text = (part as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      })
+      .join("");
+  }
+  if (typeof data.message?.content === "string") return data.message.content;
+  if (Array.isArray(data.message?.content)) {
+    return data.message.content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const text = (part as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      })
+      .join("");
+  }
+  return "";
+}
+
+function yamlFromMessage(text: string): string {
+  const fenced = text.match(/```(?:ya?ml)?\s*([\s\S]*?)```/i);
+  return (fenced?.[1] ?? text).trim();
+}
+
+function runtimeToolCatalogPrompt(runtimes: AgentRuntime[]): string {
+  if (runtimes.length === 0) {
+    return [
+      "Available runtime tools:",
+      "- claude_managed_agents: bash, read, write, edit, glob, grep, web_fetch, web_search",
+    ].join("\n");
+  }
+  return [
+    "Available runtime tools:",
+    ...runtimes.map((runtime) => {
+      const tools = (runtime.tools ?? []).map((tool) => tool.id).join(", ");
+      return `- ${runtime.id}: ${tools || "no explicit LAP-managed tools"}`;
+    }),
+  ].join("\n");
+}
+
+export async function draftAgentConfigWithModel(
+  desire: string,
+  runtimes: AgentRuntime[] = [],
+): Promise<string> {
+  const model = draftModelFrom(await listModels().catch(() => []));
+  const res = await req("/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1200,
+      system:
+        "You design managed agent configs for LiteLLM Agent Platform. Return only valid YAML, with no markdown fence and no prose. Use exactly these primary keys: name, description, model, runtime, system, tools. The runtime must be claude_managed_agents unless the user explicitly names another supported runtime. The model should be claude-sonnet-4-6 unless a different model is clearly requested. Use tools as YAML list items with a type equal to a tool id available for the selected runtime, for example `- type: bash`. Do not emit provider-native toolset identifiers such as agent_toolset_20260401. If the selected runtime has no explicit LAP-managed tools, use tools: []. Do not include harness. Do not paste the user's request as a generic mission; synthesize a complete, specific system prompt that tells the agent how to behave, what to avoid, and when to ask for approval. Include schedule, vault_keys, or skill_ids only when the request clearly needs them.\n\n" +
+        runtimeToolCatalogPrompt(runtimes),
+      messages: [
+        {
+          role: "user",
+          content: `Create an editable config.yaml for this agent request:\n\n${desire.trim()}`,
+        },
+      ],
+    }),
+  });
+  const payload = await jsonOrThrow<unknown>(res);
+  const text = messageText(payload);
+  const yaml = yamlFromMessage(text);
+  if (!yaml) throw new Error("Model returned an empty config.");
+  return yaml;
+}
+
 export async function listSpendLogs(input?: {
   q?: string;
   status?: string;

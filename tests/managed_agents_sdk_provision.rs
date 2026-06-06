@@ -12,7 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
     AgentEventKind, AgentModel, AgentModelConfig, AgentRuntime, CreateAgentParams,
-    CreateEnvironmentParams, CreateSessionParams, Lap, LapConfig, SendEventsParams,
+    CreateEnvironmentParams, CreateSessionParams, Environment, Lap, LapConfig, ManagedAgent,
+    SendEventsParams, Session,
 };
 use serde_json::json;
 
@@ -68,117 +69,133 @@ async fn provision_flow_returns_ids_and_streams_one_event() {
     );
 
     for rt in runtimes {
-        eprintln!("\n=== {} ===", rt.name);
-
-        // 1. agents.create
-        let agent = rt
-            .lap
-            .beta()
-            .agents()
-            .create(CreateAgentParams {
-                lap_agent_runtime: rt.runtime,
-                lap_provider_options: None,
-                name: format!("lap-sdk-provision-test-{suffix}"),
-                model: AgentModel::Config(AgentModelConfig {
-                    id: rt.model.to_owned(),
-                    speed: None,
-                }),
-                system: "Reply with exactly one word: ok".to_owned(),
-                description: None,
-                tools: vec![json!({ "type": "agent_toolset_20260401" })],
-                mcp_servers: Vec::new(),
-                workspace: None,
-                env_vars: None,
-                metadata: None,
-            })
-            .await
-            .unwrap_or_else(|e| panic!("[{}] agents.create failed: {e}", rt.name));
-
-        assert!(!agent.id.is_empty(), "[{}] agent.id is empty", rt.name);
-        eprintln!("[{}] agent.id = {}", rt.name, agent.id);
-
-        // 2. environments.create
-        let env = rt
-            .lap
-            .beta()
-            .environments()
-            .create(CreateEnvironmentParams {
-                lap_agent_runtime: rt.runtime,
-                name: format!("lap-sdk-env-{suffix}"),
-                config: json!({ "type": "cloud", "networking": { "type": "unrestricted" } }),
-                description: None,
-                scope: None,
-            })
-            .await
-            .unwrap_or_else(|e| panic!("[{}] environments.create failed: {e}", rt.name));
-
-        assert!(!env.id.is_empty(), "[{}] environment.id is empty", rt.name);
-        eprintln!("[{}] environment.id = {}", rt.name, env.id);
-
-        // 3. sessions.create
-        let session = rt
-            .lap
-            .beta()
-            .sessions()
-            .create(CreateSessionParams {
-                agent: agent.id.clone(),
-                environment_id: env.id.clone(),
-                title: format!("lap-sdk-session-{suffix}"),
-                lap_agent_runtime: Some(rt.runtime),
-                metadata: None,
-                resources: None,
-            })
-            .await
-            .unwrap_or_else(|e| panic!("[{}] sessions.create failed: {e}", rt.name));
-
-        assert!(!session.id.is_empty(), "[{}] session.id is empty", rt.name);
-        eprintln!("[{}] session.id = {}", rt.name, session.id);
-
-        // 4. send a prompt (Claude only — Cursor's initial run starts on agents.create)
-        if rt.needs_send_events {
-            rt.lap
-                .beta()
-                .sessions()
-                .events()
-                .send(
-                    &session.id,
-                    SendEventsParams {
-                        events: vec![json!({
-                            "type": "user.message",
-                            "content": [{ "type": "text", "text": "ok" }]
-                        })],
-                    },
-                )
-                .await
-                .unwrap_or_else(|e| panic!("[{}] send_events failed: {e}", rt.name));
-        }
-
-        // 5. stream: expect at least one agent.message before session goes idle
-        let mut stream = rt
-            .lap
-            .beta()
-            .sessions()
-            .events()
-            .stream(&session.id)
-            .await
-            .unwrap_or_else(|e| panic!("[{}] stream failed: {e}", rt.name));
-
-        let mut saw_message = false;
-        while let Some(event) = stream.next().await {
-            let event = event.unwrap_or_else(|e| panic!("[{}] stream error: {e}", rt.name));
-            eprintln!("[{}] event: {}", rt.name, event.event_type);
-            if event.kind() == AgentEventKind::AgentMessage {
-                saw_message = true;
-            }
-            if event.kind() == AgentEventKind::SessionStatusIdle {
-                break;
-            }
-        }
-
-        assert!(
-            saw_message,
-            "[{}] never received agent.message event",
-            rt.name
-        );
+        exercise_runtime(rt, suffix).await;
     }
+}
+
+async fn exercise_runtime(rt: RuntimeUnderTest, suffix: u64) {
+    eprintln!("\n=== {} ===", rt.name);
+    let agent = create_agent(&rt, suffix).await;
+    let env = create_environment(&rt, suffix).await;
+    let session = create_session(&rt, suffix, &agent, &env).await;
+    send_prompt_if_needed(&rt, &session).await;
+    assert_stream_has_message(&rt, &session).await;
+}
+
+async fn create_agent(rt: &RuntimeUnderTest, suffix: u64) -> ManagedAgent {
+    let agent = rt
+        .lap
+        .beta()
+        .agents()
+        .create(CreateAgentParams {
+            lap_agent_runtime: rt.runtime,
+            lap_provider_options: None,
+            name: format!("lap-sdk-provision-test-{suffix}"),
+            model: AgentModel::Config(AgentModelConfig {
+                id: rt.model.to_owned(),
+                speed: None,
+            }),
+            system: "Reply with exactly one word: ok".to_owned(),
+            description: None,
+            tools: vec![json!({ "type": "agent_toolset_20260401" })],
+            mcp_servers: Vec::new(),
+            workspace: None,
+            env_vars: None,
+            metadata: None,
+        })
+        .await
+        .unwrap_or_else(|error| panic!("[{}] agents.create failed: {error}", rt.name));
+    assert!(!agent.id.is_empty(), "[{}] agent.id is empty", rt.name);
+    eprintln!("[{}] agent.id = {}", rt.name, agent.id);
+    agent
+}
+
+async fn create_environment(rt: &RuntimeUnderTest, suffix: u64) -> Environment {
+    let env = rt
+        .lap
+        .beta()
+        .environments()
+        .create(CreateEnvironmentParams {
+            lap_agent_runtime: rt.runtime,
+            name: format!("lap-sdk-env-{suffix}"),
+            config: json!({ "type": "cloud", "networking": { "type": "unrestricted" } }),
+            description: None,
+            scope: None,
+        })
+        .await
+        .unwrap_or_else(|error| panic!("[{}] environments.create failed: {error}", rt.name));
+    assert!(!env.id.is_empty(), "[{}] environment.id is empty", rt.name);
+    eprintln!("[{}] environment.id = {}", rt.name, env.id);
+    env
+}
+
+async fn create_session(
+    rt: &RuntimeUnderTest,
+    suffix: u64,
+    agent: &ManagedAgent,
+    env: &Environment,
+) -> Session {
+    let session = rt
+        .lap
+        .beta()
+        .sessions()
+        .create(CreateSessionParams {
+            agent: agent.id.clone(),
+            environment_id: env.id.clone(),
+            title: format!("lap-sdk-session-{suffix}"),
+            lap_agent_runtime: Some(rt.runtime),
+            metadata: None,
+            resources: None,
+        })
+        .await
+        .unwrap_or_else(|error| panic!("[{}] sessions.create failed: {error}", rt.name));
+    assert!(!session.id.is_empty(), "[{}] session.id is empty", rt.name);
+    eprintln!("[{}] session.id = {}", rt.name, session.id);
+    session
+}
+
+async fn send_prompt_if_needed(rt: &RuntimeUnderTest, session: &Session) {
+    if !rt.needs_send_events {
+        return;
+    }
+    rt.lap
+        .beta()
+        .sessions()
+        .events()
+        .send(
+            &session.id,
+            SendEventsParams {
+                events: vec![json!({
+                    "type": "user.message",
+                    "content": [{ "type": "text", "text": "ok" }]
+                })],
+            },
+        )
+        .await
+        .unwrap_or_else(|error| panic!("[{}] send_events failed: {error}", rt.name));
+}
+
+async fn assert_stream_has_message(rt: &RuntimeUnderTest, session: &Session) {
+    let mut stream = rt
+        .lap
+        .beta()
+        .sessions()
+        .events()
+        .stream(&session.id)
+        .await
+        .unwrap_or_else(|error| panic!("[{}] stream failed: {error}", rt.name));
+    let mut saw_message = false;
+    while let Some(event) = stream.next().await {
+        let event = event.unwrap_or_else(|error| panic!("[{}] stream error: {error}", rt.name));
+        eprintln!("[{}] event: {}", rt.name, event.event_type);
+        saw_message |= event.kind() == AgentEventKind::AgentMessage;
+        if event.kind() == AgentEventKind::SessionStatusIdle {
+            break;
+        }
+    }
+    assert!(
+        saw_message,
+        "[{}] never received agent.message event",
+        rt.name
+    );
 }

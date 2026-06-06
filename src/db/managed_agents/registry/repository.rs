@@ -2,6 +2,7 @@ use serde_json::json;
 use sqlx::{PgConnection, PgPool};
 
 use crate::{
+    agents::harnesses,
     db::managed_agents::{id, now_ms},
     errors::GatewayError,
 };
@@ -38,6 +39,7 @@ struct CreateDefaults {
     title: String,
     model: String,
     system: String,
+    harness: String,
     cron: Option<String>,
     timezone: String,
 }
@@ -58,6 +60,12 @@ impl CreateDefaults {
                 .clone()
                 .or_else(|| input.prompt.clone())
                 .unwrap_or_default(),
+            harness: input
+                .harness
+                .as_deref()
+                .filter(|harness| harnesses::is_supported(harness))
+                .unwrap_or(harnesses::claude_code::ID)
+                .to_owned(),
             cron: input
                 .schedule
                 .as_ref()
@@ -83,7 +91,7 @@ async fn insert_session(
         "#,
     )
     .bind(&defaults.session_id)
-    .bind("cc")
+    .bind(&defaults.harness)
     .bind(&defaults.agent_id)
     .bind(&defaults.title)
     .bind(defaults.now)
@@ -98,6 +106,8 @@ async fn insert_agent(
     input: CreateManagedAgent,
     defaults: &CreateDefaults,
 ) -> Result<ManagedAgentRow, GatewayError> {
+    let tools = input.tools.unwrap_or(serde_json::Value::Null);
+    let config = create_config(input.config, input.runtime.as_deref(), &tools);
     sqlx::query_as::<_, ManagedAgentRow>(
         r#"
         INSERT INTO "LiteLLM_ManagedAgentsTable" (
@@ -119,7 +129,7 @@ async fn insert_agent(
     .bind(input.name)
     .bind(&defaults.model)
     .bind(&defaults.system)
-    .bind(json!([]))
+    .bind(&tools)
     .bind(defaults.cron.clone())
     .bind(&defaults.session_id)
     .bind(defaults.now)
@@ -134,14 +144,34 @@ async fn insert_agent(
             .on_failure
             .unwrap_or_else(|| "pause_and_notify".to_owned()),
     )
-    .bind(input.config.unwrap_or_else(|| json!({})))
+    .bind(config)
     .bind(input.owner_id)
     .bind(input.description)
-    .bind(input.harness.unwrap_or_else(|| "claude-code".to_owned()))
+    .bind(defaults.harness.clone())
     .bind(input.skill_ids.unwrap_or_else(|| json!([])))
     .fetch_one(conn)
     .await
     .map_err(GatewayError::Database)
+}
+
+fn create_config(
+    config: Option<serde_json::Value>,
+    runtime: Option<&str>,
+    tools: &serde_json::Value,
+) -> serde_json::Value {
+    let mut config = config
+        .filter(|value| value.is_object())
+        .unwrap_or_else(|| json!({}));
+    let Some(object) = config.as_object_mut() else {
+        return json!({});
+    };
+    if let Some(runtime) = runtime.filter(|runtime| !runtime.trim().is_empty()) {
+        object.insert("runtime".to_owned(), runtime.to_owned().into());
+    }
+    if !tools.is_null() {
+        object.insert("tools".to_owned(), tools.clone());
+    }
+    config
 }
 
 pub async fn list(

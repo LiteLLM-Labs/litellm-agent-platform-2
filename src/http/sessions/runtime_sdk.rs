@@ -10,7 +10,9 @@ use crate::{
     http::agent_runtimes::{load_credential, RuntimeCredential},
     proxy::state::AppState,
     sdk::{
-        agents::{AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams},
+        agents::{
+            AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams,
+        },
         providers,
     },
 };
@@ -53,13 +55,14 @@ pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result
     })?;
     let lap_agent_runtime = sdk_runtime(runtime)?;
     let provider_session_id = row.provider_session_id.clone().ok_or_else(|| {
-        GatewayError::InvalidConfig(format!(
-            "{runtime} session is missing provider_session_id"
-        ))
+        GatewayError::InvalidConfig(format!("{runtime} session is missing provider_session_id"))
     })?;
     let provider_agent_id = providers::runtime_registry()
         .entry_for_id(runtime)
-        .and_then(|e| e.adapter.provider_agent_id_from_session_id(&provider_session_id));
+        .and_then(|e| {
+            e.adapter
+                .provider_agent_id_from_session_id(&provider_session_id)
+        });
     client
         .register_session(ManagedSessionRef {
             session_id: row.id.clone(),

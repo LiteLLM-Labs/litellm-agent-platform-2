@@ -47,5 +47,12 @@ agents:
     system: You are a general-purpose agent that can research, write code, run commands, and use connected tools to complete the user's task end to end.
     mcp_servers: []
     tools:
-      - type: agent_toolset_20260401
+      - type: bash
+      - type: read
+      - type: write
+      - type: edit
+      - type: glob
+      - type: grep
+      - type: web_fetch
+      - type: web_search
     skills: []

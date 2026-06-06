@@ -71,6 +71,13 @@ function runtimeLabel(runtime?: string): string {
   return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
 }
 
+function runtimeModelId(runtime?: AgentRuntimeId): string | null {
+  if (runtime === "claude_managed_agents") return "anthropic/*";
+  if (runtime === "cursor") return "cursor/*";
+  if (runtime === "opencode") return "opencode/*";
+  return null;
+}
+
 function providerSessionUrl(runtime?: string, providerSessionId?: string, providerUrl?: string): string | null {
   if (providerUrl) return providerUrl;
   if ((runtime === "claude_managed_agents" || runtime === "claude_agents") && providerSessionId) {
@@ -259,6 +266,7 @@ function ChatInner() {
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
   const seenRuntimeEventIdsRef = useRef<Set<string>>(new Set());
+  const runtimeReplayEventCountRef = useRef(0);
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -312,6 +320,10 @@ function ChatInner() {
   const skills = Array.isArray(activeAgent?.skills) ? activeAgent.skills : [];
   const vaultKeys = Array.isArray(activeAgent?.vault_keys) ? activeAgent.vault_keys : [];
   const hasStarted = Boolean(messages && messages.length > 0);
+  const modelOptions = useMemo(() => {
+    const runtimeModel = runtimeModelId(sessionRuntime);
+    return runtimeModel ? [runtimeModel, ...models.filter((item) => item !== runtimeModel)] : models;
+  }, [models, sessionRuntime]);
 
   const onCopyPrompt = useCallback(() => {
     if (!activePrompt) return;
@@ -330,10 +342,16 @@ function ChatInner() {
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const runtimeModel = runtimeModelId(sessionRuntime);
+    if (runtimeModel) setModel(runtimeModel);
+  }, [models, sessionRuntime]);
+
   // Fetch session metadata to get the locked agent
   useEffect(() => {
     if (!sid) return;
     seenRuntimeEventIdsRef.current = new Set();
+    runtimeReplayEventCountRef.current = 0;
     eventBufferRef.current = [];
     runtimeAssistantRef.current = null;
     setSessionLoaded(false);
@@ -341,6 +359,7 @@ function ChatInner() {
       const a = s.agent_id ?? s.agent ?? s.harness;
       if (a) setSessionHarness(a);
       setSessionRuntime(s.runtime);
+      setSessionStatus(s.status === "running" ? "busy" : "idle");
       setProviderSessionId(s.provider_session_id);
       setProviderUrl(s.provider_url);
       if (s.title) setSessionTitle(s.title);
@@ -620,6 +639,12 @@ function ChatInner() {
     setSessionStatus("busy");
   }, [appendRuntimePartText, appendRuntimeToolEvent, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
 
+  const replayRuntimeEvents = useCallback((events: RuntimeAgentEvent[]) => {
+    const start = Math.min(runtimeReplayEventCountRef.current, events.length);
+    runtimeReplayEventCountRef.current = events.length;
+    events.slice(start).forEach(handleRuntimeEvent);
+  }, [handleRuntimeEvent]);
+
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
     refetch();
@@ -629,7 +654,7 @@ function ChatInner() {
       onError: (err) => setError(err instanceof Error ? err.message : String(err)),
     });
     listRuntimeEvents(sid)
-      .then((events) => events.forEach(handleRuntimeEvent))
+      .then(replayRuntimeEvents)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     if (autostartPrompt && autostartedRef.current !== sid) {
       autostartedRef.current = sid;
@@ -652,7 +677,28 @@ function ChatInner() {
     }
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
+  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, replayRuntimeEvents, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
+
+  useEffect(() => {
+    if (!sid || !sessionRuntime || sessionStatus !== "busy") return;
+    let active = true;
+    const replay = () => {
+      listRuntimeEvents(sid)
+        .then((events) => {
+          if (!active) return;
+          replayRuntimeEvents(events);
+        })
+        .catch((err) => {
+          if (active) setError(err instanceof Error ? err.message : String(err));
+        });
+    };
+    replay();
+    const timer = window.setInterval(replay, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [sid, sessionRuntime, sessionStatus, replayRuntimeEvents]);
 
   const onApprovalAccept = useCallback(async (id: string, args: Record<string, unknown>) => {
     setApprovalBusy(true);
@@ -758,7 +804,7 @@ function ChatInner() {
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">model</span>
-              <ModelSelect value={model} models={models} onValueChange={setModel} />
+              <ModelSelect value={model} models={modelOptions} onValueChange={setModel} />
             </div>
             {providerLink && (
               <Button

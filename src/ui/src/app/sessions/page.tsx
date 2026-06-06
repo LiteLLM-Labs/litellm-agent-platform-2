@@ -60,6 +60,20 @@ function runtimeRoutePrefix(runtime: AgentRuntimeId | ""): string {
   return "runtime/*";
 }
 
+function isAgentRuntimeId(value: unknown): value is AgentRuntimeId {
+  return value === "claude_managed_agents" || value === "cursor" || value === "opencode";
+}
+
+function configuredRuntime(agent: Agent | null): AgentRuntimeId | "" {
+  if (!agent) return "";
+  const config = agent.config;
+  if (config && typeof config === "object" && !Array.isArray(config)) {
+    const runtime = (config as { runtime?: unknown }).runtime;
+    if (isAgentRuntimeId(runtime)) return runtime;
+  }
+  return isAgentRuntimeId(agent.harness) ? agent.harness : "";
+}
+
 function promptTitle(prompt: string): string {
   const compact = prompt.replace(/\s+/g, " ").trim();
   if (!compact) return "New agent session";
@@ -117,6 +131,7 @@ function SessionsStart() {
     () => savedAgents.find((agent) => agent.id === selectedAgentId) ?? null,
     [savedAgents, selectedAgentId],
   );
+  const selectedAgentRuntime = configuredRuntime(selectedAgent);
   const selectedAgentMissing = selectedAgentId !== "" && selectedAgent === null;
   const selectedAgentIsConfigured = Boolean(selectedAgent && !isDbBackedAgent(selectedAgent));
   const needsRuntime = !selectedAgentIsConfigured;
@@ -129,6 +144,12 @@ function SessionsStart() {
       (runtime !== "" &&
         Boolean(selectedRuntime?.connected) &&
         (runtime !== "cursor" || repository.trim().length > 0)));
+
+  useEffect(() => {
+    if (!selectedAgentRuntime) return;
+    if (!runtimes.some((item) => item.id === selectedAgentRuntime)) return;
+    setRuntime(selectedAgentRuntime);
+  }, [runtimes, selectedAgentRuntime]);
 
   const startSession = async () => {
     const trimmed = prompt.trim();
@@ -161,7 +182,8 @@ function SessionsStart() {
                   owner_id: "default",
                   description: `Started from ${runtimeLabel(selectedRuntime ?? runtimeForSession)} landing prompt.`,
                   model: modelForRuntime(runtimeForSession),
-                  harness: runtimeForSession,
+                  runtime: runtimeForSession,
+                  harness: "claude-code",
                   system: "You are a helpful managed agent. Use available tools when they help complete the user's request.",
                   tools: [{ type: "agent_toolset_20260401" }],
                   mcp_servers: [],
@@ -171,13 +193,14 @@ function SessionsStart() {
                 runtimeForSession === "cursor" ? cursorEnvironment(repository, ref) : {};
               return createSession(title, agent.id, {
                 runtime: runtimeForSession,
+                prompt: trimmed || undefined,
                 environment,
               });
             })();
       const params = new URLSearchParams({
         id: session.id,
       });
-      if (trimmed) {
+      if (trimmed && !session.runtime) {
         params.set("prompt", trimmed);
         params.set("autostart", "1");
       }
@@ -230,7 +253,11 @@ function SessionsStart() {
                 value={selectedAgentId || NEW_AGENT_VALUE}
                 onValueChange={(value) => {
                   const next = value ?? "";
-                  setSelectedAgentId(next === NEW_AGENT_VALUE ? "" : next);
+                  const nextAgentId = next === NEW_AGENT_VALUE ? "" : next;
+                  setSelectedAgentId(nextAgentId);
+                  const nextAgent = savedAgents.find((agent) => agent.id === nextAgentId) ?? null;
+                  const nextRuntime = configuredRuntime(nextAgent);
+                  if (nextRuntime) setRuntime(nextRuntime);
                 }}
               >
                 <SelectTrigger className="h-10 w-auto min-w-[230px] max-w-[320px] rounded-full border border-black/10 bg-white px-3 text-left text-[#20201f] shadow-sm transition-colors hover:bg-[#fbfaf8] focus:ring-1 focus:ring-black/15">
@@ -304,13 +331,13 @@ function SessionsStart() {
                   ))}
                 </SelectContent>
               </Select>
-              <span className="hidden rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-xs text-[#77736d] sm:inline">
+              <span className="hidden rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-xs text-[#77736d] 2xl:inline">
                 {selectedAgentIsConfigured ? "agent/*" : runtimeRoutePrefix(runtime)}
               </span>
-              <Button variant="ghost" size="icon-sm" disabled className="ml-auto text-[#5d5a55]">
+              <Button variant="ghost" size="icon-sm" disabled className="ml-auto hidden text-[#5d5a55] 2xl:inline-flex">
                 <Mic className="size-4" />
               </Button>
-              <Button variant="ghost" size="icon-sm" disabled className="text-[#5d5a55]">
+              <Button variant="ghost" size="icon-sm" disabled className="hidden text-[#5d5a55] 2xl:inline-flex">
                 <Paperclip className="size-4" />
               </Button>
               <Button
@@ -318,7 +345,7 @@ function SessionsStart() {
                 size="sm"
                 onClick={() => void startSession()}
                 disabled={!canStart}
-                className="rounded-full bg-[#20201f] text-white hover:bg-black disabled:opacity-30"
+                className="ml-auto rounded-full bg-[#20201f] text-white hover:bg-black disabled:opacity-30"
                 aria-label="Start session"
               >
                 <ArrowUp className="size-4" />
