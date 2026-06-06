@@ -252,13 +252,50 @@ function ChatInner() {
     return runtimeAssistantRef.current;
   }, [sid]);
 
+  const ensureRuntimeAssistantMessage = useCallback(() => {
+    const ids = runtimeAssistantIds();
+    if (!ids) return null;
+    setMessages((prev) => {
+      const next = prev ?? [];
+      if (next.some((m) => m.info.id === ids.messageId)) return next;
+      return [
+        ...next,
+        {
+          info: { id: ids.messageId, role: "assistant", sessionID: sid ?? undefined },
+          parts: [],
+        },
+      ];
+    });
+    return ids;
+  }, [runtimeAssistantIds, sid]);
+
+  const finishRuntimeAssistantMessage = useCallback(() => {
+    const ids = runtimeAssistantRef.current;
+    if (!ids) return;
+    setMessages((prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((m) => m.info.id === ids.messageId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      const msg = next[idx];
+      next[idx] = {
+        ...msg,
+        info: {
+          ...msg.info,
+          finish: "stop",
+        },
+      };
+      return next;
+    });
+    runtimeAssistantRef.current = null;
+  }, []);
+
   const appendRuntimePartText = useCallback((partKind: "text" | "thinking", delta: string) => {
     const ids = runtimeAssistantIds();
     if (!ids || !delta) return;
     const partId = partKind === "thinking" ? ids.thinkingPartId : ids.textPartId;
     setMessages((prev) => {
-      if (!prev) return prev;
-      let next = prev;
+      let next = prev ?? [];
       let idx = next.findIndex((m) => m.info.id === ids.messageId);
       if (idx === -1) {
         next = [
@@ -288,10 +325,21 @@ function ChatInner() {
         next = [...next];
       }
       const msg = next[idx];
+      let foundPart = false;
       const parts = msg.parts.map((part) => {
         if (part.id !== partId) return part;
+        foundPart = true;
         return { ...part, text: `${"text" in part ? part.text : ""}${delta}` } as HarnessMessagePart;
       });
+      if (!foundPart) {
+        parts.push({
+          id: partId,
+          messageID: ids.messageId,
+          sessionID: sid ?? undefined,
+          type: partKind,
+          text: delta,
+        });
+      }
       next[idx] = { ...msg, parts };
       return next;
     });
@@ -307,6 +355,7 @@ function ChatInner() {
       ev.type === "session.status_running" ||
       ev.type === "session.thread_status_running"
     ) {
+      ensureRuntimeAssistantMessage();
       setSessionStatus("busy");
       return;
     }
@@ -319,17 +368,20 @@ function ChatInner() {
           : status && typeof status === "object"
             ? (status as { type?: unknown }).type
             : undefined;
-      if (statusType === "busy" || statusType === "running") setSessionStatus("busy");
+      if (statusType === "busy" || statusType === "running") {
+        ensureRuntimeAssistantMessage();
+        setSessionStatus("busy");
+      }
       if (statusType === "idle") {
         setSessionStatus("idle");
-        runtimeAssistantRef.current = null;
+        finishRuntimeAssistantMessage();
       }
       return;
     }
 
     if (ev.type === "session.status_idle" || ev.type === "session.thread_status_idle") {
       setSessionStatus("idle");
-      runtimeAssistantRef.current = null;
+      finishRuntimeAssistantMessage();
       return;
     }
 
@@ -341,11 +393,13 @@ function ChatInner() {
     }
 
     if (!isRuntimeAssistantTextEvent(ev.type) && !isRuntimeThinkingEvent(ev.type)) return;
+    ensureRuntimeAssistantMessage();
     const delta = runtimeEventText(ev);
-    if (!delta) return;
-    appendRuntimePartText(isRuntimeThinkingEvent(ev.type) ? "thinking" : runtimeEventPartKind(ev), delta);
+    if (delta) {
+      appendRuntimePartText(isRuntimeThinkingEvent(ev.type) ? "thinking" : runtimeEventPartKind(ev), delta);
+    }
     setSessionStatus("busy");
-  }, [appendRuntimePartText]);
+  }, [appendRuntimePartText, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
