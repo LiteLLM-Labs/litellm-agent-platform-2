@@ -12,9 +12,8 @@ It exposes:
 
 Runtime-specific request shapes live behind provider-owned adapters in
 `src/sdk/providers/<provider>/runtime/`. Adding another runtime should add an
-adapter there and register it in `src/sdk/translation/runtime.rs` instead of
+adapter there and register it in `src/sdk/providers/mod.rs` instead of
 adding new `match AgentRuntime` branches throughout the SDK resource layer.
 
-Model routing lives under `src/sdk/routing/`; shared translation traits live
-under `src/sdk/translation/`; provider-owned implementations live under
-`src/sdk/providers/<provider>/`.
+Model routing lives in `src/sdk/routing.rs`; provider-owned endpoint
+translations and runtimes live under `src/sdk/providers/<provider>/`.

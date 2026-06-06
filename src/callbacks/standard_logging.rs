@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::{model_prices::ModelCostMap, sdk::routing::llms::Deployment};
+use crate::{model_prices::ModelCostMap, sdk::routing::Deployment};
 
 const MAX_BODY_CAPTURE_BYTES: usize = 1_000_000;
 

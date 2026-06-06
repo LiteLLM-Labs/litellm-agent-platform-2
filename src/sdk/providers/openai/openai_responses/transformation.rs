@@ -4,8 +4,8 @@ use serde_json::Value;
 use crate::{
     errors::GatewayError,
     sdk::{
-        routing::llms::Deployment,
-        translation::llm::{ProviderRequest, Transformation},
+        routing::Deployment,
+        providers::{ProviderRequest, Transformation},
     },
 };
 
@@ -87,7 +87,7 @@ mod tests {
     use serde_json::json;
 
     use super::OpenAiResponsesTransformation;
-    use crate::sdk::{routing::llms::Deployment, translation::llm::Transformation};
+    use crate::sdk::{routing::Deployment, providers::Transformation};
 
     fn deployment() -> Deployment {
         Deployment {

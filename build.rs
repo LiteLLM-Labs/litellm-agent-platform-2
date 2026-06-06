@@ -16,7 +16,7 @@ fn main() {
             if path.is_dir() && path.join("mod.rs").exists() {
                 Some(ProviderModule {
                     name: path.file_name()?.to_str()?.to_owned(),
-                    has_llm: path.join("llm").join("mod.rs").exists(),
+                    translation_module: provider_translation_module(&path),
                 })
             } else {
                 None
@@ -35,12 +35,16 @@ fn main() {
         .collect();
     let inits: String = providers
         .iter()
-        .filter(|provider| provider.has_llm)
-        .map(|provider| format!("    {}::llm::init(registry);\n", provider.name))
+        .filter_map(|provider| {
+            provider
+                .translation_module
+                .as_ref()
+                .map(|module| format!("    {}::{module}::init(registry);\n", provider.name))
+        })
         .collect();
 
     let generated = format!(
-        "{mods}\npub fn register_all(registry: &mut crate::sdk::translation::llm::ProviderRegistry) {{\n{inits}}}\n"
+        "{mods}\npub fn register_all(registry: &mut crate::sdk::providers::ProviderRegistry) {{\n{inits}}}\n"
     );
     fs::write(&dest, generated).unwrap();
 
@@ -49,5 +53,20 @@ fn main() {
 
 struct ProviderModule {
     name: String,
-    has_llm: bool,
+    translation_module: Option<String>,
+}
+
+fn provider_translation_module(path: &Path) -> Option<String> {
+    fs::read_dir(path)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() && path.join("mod.rs").exists() {
+                path.file_name()?.to_str().map(str::to_owned)
+            } else {
+                None
+            }
+        })
+        .find(|name| name != "runtime")
 }

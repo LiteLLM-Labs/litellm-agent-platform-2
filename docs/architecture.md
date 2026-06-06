@@ -14,8 +14,8 @@ litellm-rust is a low-overhead gateway. A request flows through four layers:
 | Layer | File | Responsibility |
 |---|---|---|
 | **Endpoint** | `http/messages.rs` | Receive the request, authenticate (master key) |
-| **Router** | `sdk/routing/llms.rs` | Map the public model name to an upstream deployment + provider handler |
-| **Transformation** | `sdk/providers/<name>/llm/transformation.rs` | Translate the request into the provider's API shape |
+| **Router** | `sdk/routing.rs` | Map the public model name to an upstream deployment + provider handler |
+| **Transformation** | `sdk/providers/<name>/<endpoint>/transformation.rs` | Translate the request into the provider's API shape |
 | **LLM API** | `http/llm.rs` | The only place that does outbound networking |
 
 ## Two halves
@@ -25,15 +25,14 @@ separate:
 
 | Half | Folders | What it is |
 |---|---|---|
-| **Routing** | `sdk/routing/` | Request/model routing that sits above LLM and runtime translation. |
-| **Translation** | `sdk/translation/` | Shared translation traits for LLM calls and managed-agent runtimes. |
-| **Provider integrations** | `sdk/providers/` | Provider-owned LLM transforms and runtime adapters. |
+| **Routing** | `sdk/routing.rs` | Request/model routing that sits above provider translation. |
+| **Provider integrations** | `sdk/providers/` | Provider-owned endpoint translations and runtime adapters. |
 | **Agent Runtime SDK** | `sdk/agents/` | The `Lap` client resources and managed-agent runtime types. |
 | **Proxy server** | `proxy/`, `http/`, `cli/` | Everything around the translation: config loading, master-key auth, shared `AppState`, HTTP endpoints, the CLI wizard. |
 
 `errors.rs` (the shared `GatewayError`) sits at the crate root — both halves use
-it. The rule: `sdk/routing/` and `sdk/translation/` must not depend on
-`proxy/`. (One bridge remains: `routing::llms::Router::from_config` reads
+it. The rule: `sdk/routing.rs` and `sdk/providers/` must not depend on
+`proxy/`. (One bridge remains: `routing::Router::from_config` reads
 `proxy::config::GatewayConfig`; when the SDK is extracted, the proxy will build
 the route table and hand routing plain data instead.)
 
@@ -49,8 +48,8 @@ curl http://localhost:4000/v1/messages \
 ```
 
 1. **Endpoint** (`http/messages.rs`) — `proxy::auth` checks the `Authorization: Bearer` token against the configured master key, then parses the body and reads `model`.
-2. **Router** (`sdk/routing/llms.rs`) — looks up `"claude-opus-4-6"` in the route table built at boot from `config.yaml`. Returns a `Route` = `{ deployment, handler }`.
-3. **Transformation** (`sdk/providers/anthropic/llm/transformation.rs`) — rewrites the model alias to the real upstream name, builds outbound headers (`x-api-key`, `anthropic-version`).
+2. **Router** (`sdk/routing.rs`) — looks up `"claude-opus-4-6"` in the route table built at boot from `config.yaml`. Returns a `Route` = `{ deployment, handler }`.
+3. **Transformation** (`sdk/providers/anthropic/anthropic_messages/transformation.rs`) — rewrites the model alias to the real upstream name, builds outbound headers (`x-api-key`, `anthropic-version`).
 4. **LLM API** (`http/llm.rs`) — sends to `https://api.anthropic.com/v1/messages`, streams the response back byte-for-byte.
 
 ## Config → routes
@@ -104,15 +103,15 @@ the sandbox when the run ends.
 ## Providers are self-contained
 
 Each provider is one folder under `src/sdk/providers/`. `build.rs` scans for any
-provider with an `llm/mod.rs` and wires it into the LLM registry automatically.
-Runtime adapters live beside LLM transforms under the same provider folder.
+provider with an `<endpoint>/mod.rs` and wires it into the LLM registry automatically.
+Runtime adapters live beside endpoint translations under the same provider folder.
 
 To add a provider (e.g. OpenAI):
 
 ```
 src/sdk/providers/openai/
 ├── mod.rs
-└── llm/
+└── openai_responses/
     ├── mod.rs              # pub fn init(registry) { registry.register("openai", ...) }
     └── transformation.rs   # impl Transformation
 ```

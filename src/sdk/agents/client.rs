@@ -13,7 +13,7 @@ use super::{
     responses::{ensure_success, response_json},
     types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
-use crate::sdk::translation::runtime::{self, RuntimeAdapter};
+use crate::sdk::providers::{self, RuntimeAdapter};
 
 #[derive(Clone)]
 pub struct Lap {
@@ -250,7 +250,7 @@ fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
             RuntimeConfig {
                 api_key,
                 base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-                adapter: runtime::adapter(AgentRuntime::ClaudeManagedAgents),
+                adapter: providers::adapter(AgentRuntime::ClaudeManagedAgents),
             },
         );
     }
@@ -260,7 +260,7 @@ fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
             RuntimeConfig {
                 api_key,
                 base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
-                adapter: runtime::adapter(AgentRuntime::Cursor),
+                adapter: providers::adapter(AgentRuntime::Cursor),
             },
         );
     }

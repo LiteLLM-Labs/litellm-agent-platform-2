@@ -78,22 +78,21 @@ Drop a new folder under `src/sdk/providers/`:
 ```
 src/sdk/providers/openai/
 ├── mod.rs
-└── llm/
+└── openai_responses/
     ├── mod.rs              # pub fn init(registry) { registry.register("openai", ...) }
     └── transformation.rs   # impl Transformation
 ```
 
 `build.rs` auto-discovers the folder and wires it in. No other files need
-editing. See `src/sdk/providers/anthropic/llm/` for a reference implementation.
+editing. See `src/sdk/providers/anthropic/anthropic_messages/` for a reference implementation.
 
 ## Project layout
 
 ```
 src/
   sdk/
-    routing/   # request/model routing above translation
-    translation/ # shared translation traits
-    providers/ # provider-owned llm/ and runtime/ modules
+    routing.rs # request/model routing above provider translation
+    providers/ # provider-owned endpoint/ and runtime/ modules
     agents/    # Agent Runtime SDK client resources + types
   proxy/       # config, master-key auth, AppState
   http/        # axum endpoints + outbound HTTP (http/llm.rs)

@@ -4,8 +4,8 @@ use serde_json::Value;
 use crate::{
     errors::GatewayError,
     sdk::{
-        routing::llms::Deployment,
-        translation::llm::{ProviderRequest, Transformation},
+        routing::Deployment,
+        providers::{ProviderRequest, Transformation},
     },
 };
 

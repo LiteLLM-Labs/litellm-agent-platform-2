@@ -13,7 +13,7 @@ use litellm_rust::{
         config::{GatewayConfig, GeneralSettings},
         state::AppState,
     },
-    sdk::{routing::llms::Router as ModelRouter, translation::llm::ProviderRegistry},
+    sdk::{providers::ProviderRegistry, routing::Router as ModelRouter},
 };
 use serde_json::{json, Value};
 use sqlx::PgPool;
