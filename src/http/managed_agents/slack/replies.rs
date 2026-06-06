@@ -80,7 +80,7 @@ async fn post_placeholder(
         &state.config.slack.api_base_url,
         bot_token,
         &message.channel,
-        &message.thread_ts,
+        &message.reply_thread_ts,
         "_Thinking..._",
     )
     .await

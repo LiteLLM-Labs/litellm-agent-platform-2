@@ -44,7 +44,7 @@ impl<'a> SlackReply<'a> {
             pool,
             bot_token,
             channel: &message.channel,
-            thread_ts: &message.thread_ts,
+            thread_ts: &message.reply_thread_ts,
             ts,
             session_id,
             baseline_seq,

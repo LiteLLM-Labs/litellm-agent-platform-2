@@ -90,13 +90,11 @@ fn incoming_message(payload: &Value) -> Option<SlackIncomingMessage> {
     if !is_supported_event(event) {
         return None;
     }
+    let channel = event.get("channel").and_then(Value::as_str)?.to_owned();
     Some(SlackIncomingMessage {
-        channel: event.get("channel").and_then(Value::as_str)?.to_owned(),
-        thread_ts: event
-            .get("thread_ts")
-            .or_else(|| event.get("ts"))
-            .and_then(Value::as_str)?
-            .to_owned(),
+        thread_ts: session_thread_ts(event, &channel)?,
+        reply_thread_ts: reply_thread_ts(event)?,
+        channel,
         prompt: clean_prompt(
             event
                 .get("text")
@@ -113,6 +111,21 @@ fn is_supported_event(event: &Value) -> bool {
         Some("message") => is_direct_message(event) || is_channel_thread_reply(event),
         _ => false,
     }
+}
+
+fn session_thread_ts(event: &Value, channel: &str) -> Option<String> {
+    if is_direct_message(event) {
+        return Some(format!("dm:{channel}"));
+    }
+    reply_thread_ts(event)
+}
+
+fn reply_thread_ts(event: &Value) -> Option<String> {
+    event
+        .get("thread_ts")
+        .or_else(|| event.get("ts"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 fn is_direct_message(event: &Value) -> bool {
@@ -176,4 +189,39 @@ fn fallback_event_key(payload: &Value, message: &SlackIncomingMessage) -> String
         "fallback:{}:{}:{}:{}:{}",
         message.channel, message.thread_ts, ts, user, text
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::incoming_message;
+
+    #[test]
+    fn direct_messages_use_stable_session_thread() {
+        let first = incoming_message(&json!({
+            "event": {
+                "type": "message",
+                "channel_type": "im",
+                "channel": "D123",
+                "ts": "1.000001",
+                "text": "hello"
+            }
+        }))
+        .unwrap();
+        let second = incoming_message(&json!({
+            "event": {
+                "type": "message",
+                "channel_type": "im",
+                "channel": "D123",
+                "ts": "1.000002",
+                "text": "again"
+            }
+        }))
+        .unwrap();
+        assert_eq!(first.thread_ts, "dm:D123");
+        assert_eq!(second.thread_ts, "dm:D123");
+        assert_eq!(first.reply_thread_ts, "1.000001");
+        assert_eq!(second.reply_thread_ts, "1.000002");
+    }
 }
