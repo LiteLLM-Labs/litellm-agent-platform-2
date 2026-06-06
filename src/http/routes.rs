@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    routing::{any, get, post, put},
+    routing::{any, delete, get, post, put},
     Router,
 };
 
@@ -71,6 +71,14 @@ fn api_routes() -> Router<Arc<AppState>> {
             "/api/providers/{provider_id}",
             post(crate::http::provider_credentials::save_provider)
                 .delete(crate::http::provider_credentials::delete_provider),
+        )
+        .route(
+            "/api/vault/{user_id}",
+            get(crate::http::vault::list).post(crate::http::vault::save),
+        )
+        .route(
+            "/api/vault/{user_id}/{key}",
+            delete(crate::http::vault::delete),
         )
 }
 

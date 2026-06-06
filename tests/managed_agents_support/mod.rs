@@ -10,7 +10,7 @@ use litellm_rust::{
     db::managed_agents::pool as managed_agents_pool,
     http::routes::router,
     proxy::{
-        config::{GatewayConfig, GeneralSettings},
+        config::{GatewayConfig, GeneralSettings, SlackSettings},
         state::AppState,
     },
     sdk::{providers::transform::ProviderRegistry, router::Router as ModelRouter},
@@ -29,6 +29,7 @@ pub struct AppFixture {
     pub app: axum::Router,
     pool: PgPool,
     _e2b: MockServer,
+    pub slack: MockServer,
 }
 
 impl AppFixture {
@@ -40,15 +41,17 @@ impl AppFixture {
         managed_agents_pool::migrate(&pool).await.unwrap();
         reset_tables(&pool).await;
         let e2b = mock_e2b().await;
+        let slack = mock_slack().await;
         Some(Self {
-            app: router(build_state(pool.clone(), e2b.uri())),
+            app: router(build_state(pool.clone(), e2b.uri(), slack.uri())),
             pool,
             _e2b: e2b,
+            slack,
         })
     }
 }
 
-fn build_state(pool: PgPool, e2b_api_base: String) -> Arc<AppState> {
+fn build_state(pool: PgPool, e2b_api_base: String, slack_api_base_url: String) -> Arc<AppState> {
     let config = GatewayConfig {
         model_list: Vec::new(),
         mcp_servers: HashMap::new(),
@@ -66,6 +69,9 @@ fn build_state(pool: PgPool, e2b_api_base: String) -> Arc<AppState> {
             },
             ..Default::default()
         },
+        slack: SlackSettings {
+            api_base_url: slack_api_base_url,
+        },
         agents: Vec::new(),
     };
     let http = AppState::build_http_client().unwrap();
@@ -78,6 +84,7 @@ fn empty_router() -> ModelRouter {
             model_list: Vec::new(),
             mcp_servers: HashMap::new(),
             general_settings: GeneralSettings::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         },
         &ProviderRegistry::new(),
@@ -157,6 +164,32 @@ pub async fn request_raw(
     String::from_utf8(body.to_vec()).unwrap()
 }
 
+pub async fn request_with_headers(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    body: String,
+    content_type: &str,
+    headers: &[(&str, String)],
+    expected: StatusCode,
+) -> String {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::AUTHORIZATION, "Bearer sk-local")
+        .header(header::CONTENT_TYPE, content_type);
+    for (name, value) in headers {
+        builder = builder.header(*name, value);
+    }
+    let response = app
+        .oneshot(builder.body(Body::from(body)).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), expected);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    String::from_utf8(body.to_vec()).unwrap()
+}
+
 async fn mock_e2b() -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -190,6 +223,35 @@ async fn mock_e2b() -> MockServer {
         .mount(&server)
         .await;
 
+    server
+}
+
+async fn mock_slack() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat.postMessage"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "channel": "C123",
+            "ts": "200.000001"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/chat.update"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth.v2.access"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true,
+            "access_token": "xoxb-oauth-token",
+            "bot_user_id": "B123",
+            "team": { "name": "LiteLLM" }
+        })))
+        .mount(&server)
+        .await;
     server
 }
 
@@ -228,6 +290,7 @@ async fn reset_tables(pool: &PgPool) {
         r#"
         TRUNCATE
           "LiteLLM_CredentialsTable",
+          "LiteLLM_ManagedAgentSlackThreadSessionsTable",
           "LiteLLM_ManagedAgentInboxItemsTable",
           "LiteLLM_ManagedAgentRunsTable",
           "LiteLLM_ManagedAgentFilesTable",

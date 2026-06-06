@@ -6,9 +6,11 @@ use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
 mod cursor_runtime;
 mod sessions;
+mod slack;
 
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use sessions::exercise_sessions;
+pub use slack::exercise_slack;
 
 pub async fn assert_agent_runtime_catalog(fixture: &AppFixture) {
     let response = request_json(fixture.app.clone(), "GET", "/api/agent-runtimes", None).await;

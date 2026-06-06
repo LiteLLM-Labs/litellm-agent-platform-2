@@ -158,6 +158,7 @@ mod tests {
             }],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 
@@ -184,6 +185,7 @@ mod tests {
             }],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 
@@ -210,6 +212,7 @@ mod tests {
             }],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 
@@ -246,6 +249,7 @@ mod tests {
             ],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 

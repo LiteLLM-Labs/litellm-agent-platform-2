@@ -5,6 +5,7 @@ pub mod registry;
 pub mod routes;
 pub mod runs;
 pub mod skills;
+pub mod slack;
 
 use axum::http::HeaderMap;
 use sqlx::PgPool;

@@ -44,6 +44,7 @@ export interface SlackConfig {
   status?: string;
   client_secret_key?: string;
   signing_secret_key?: string;
+  bot_token_key?: string;
   slack_team_name?: string;
   bot_user_id?: string;
   oauth_error?: string | null;
