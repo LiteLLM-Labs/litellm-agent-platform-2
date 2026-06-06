@@ -23,7 +23,10 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
+mod db;
 pub mod flows;
+
+use db::reset_tables;
 
 pub struct AppFixture {
     pub app: axum::Router,
@@ -283,26 +286,4 @@ async fn request(
     )
     .await
     .unwrap()
-}
-
-async fn reset_tables(pool: &PgPool) {
-    sqlx::query(
-        r#"
-        TRUNCATE
-          "LiteLLM_CredentialsTable",
-          "LiteLLM_ManagedAgentSlackThreadSessionsTable",
-          "LiteLLM_ManagedAgentInboxItemsTable",
-          "LiteLLM_ManagedAgentRunsTable",
-          "LiteLLM_ManagedAgentFilesTable",
-          "LiteLLM_ManagedAgentMemoriesTable",
-          "LiteLLM_ManagedAgentsTable",
-          "LiteLLM_ManagedAgentSessionsTable",
-          "LiteLLM_ManagedAgentSkillsTable",
-          "LiteLLM_SavedAgentsTable"
-        CASCADE
-        "#,
-    )
-    .execute(pool)
-    .await
-    .unwrap();
 }

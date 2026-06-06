@@ -7,6 +7,7 @@ use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 mod cursor_runtime;
 mod sessions;
 mod slack;
+mod slack_helpers;
 
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use sessions::exercise_sessions;

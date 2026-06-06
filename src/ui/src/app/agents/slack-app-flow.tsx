@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { saveIntegrationKey, updateAgent } from "@/lib/api";
+import { createSlackOAuthState, saveIntegrationKey, updateAgent } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 
 const SLACK_BOT_SCOPES = [
@@ -134,14 +134,14 @@ function slackManifestUrl(ag: Agent, appName: string) {
   )}`;
 }
 
-function slackAuthorizeUrl(ag: Agent, clientId: string) {
+function slackAuthorizeUrl(ag: Agent, clientId: string, state: string) {
   const origin = originForSlack();
   const providerId = providerIdFor(ag.id);
   const params = new URLSearchParams({
     client_id: clientId,
     scope: SLACK_BOT_SCOPES.join(","),
     redirect_uri: `${origin}/host-oauth-callback/${providerId}`,
-    state: ag.id,
+    state,
   });
   return `https://slack.com/oauth/v2/authorize?${params.toString()}`;
 }
@@ -233,6 +233,29 @@ export function useSlackAppFlow(setAgents: Dispatch<SetStateAction<Agent[] | nul
       setAgent(updated);
       setAgents((prev) => prev?.map((a) => (a.id === updated.id ? updated : a)) ?? null);
     } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const connectOAuth = async () => {
+    if (!agent) return;
+    const clientId = slackConfig(agent).client_id || credentials.clientId;
+    if (!clientId.trim()) {
+      setError("Client ID is required");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
+    try {
+      const state = await createSlackOAuthState(agent.id);
+      const url = slackAuthorizeUrl(agent, clientId, state);
+      if (popup) popup.location.href = url;
+      else window.location.href = url;
+    } catch (e) {
+      popup?.close();
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
@@ -473,15 +496,10 @@ export function useSlackAppFlow(setAgents: Dispatch<SetStateAction<Agent[] | nul
                     <Check className="size-3.5" />
                     Save & Request Approval
                   </Button>
-                  <a
-                    className={buttonVariants({ variant: "default" })}
-                    href={slackAuthorizeUrl(agent, slackConfig(agent).client_id || credentials.clientId)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <Button onClick={connectOAuth} disabled={saving}>
                     Connect OAuth
                     <ExternalLink className="size-3.5" />
-                  </a>
+                  </Button>
                 </>
               )}
             </DialogFooter>

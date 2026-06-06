@@ -75,11 +75,11 @@ pub async fn list_by_prefix(
         r#"
         SELECT credential_name, credential_info
         FROM "LiteLLM_CredentialsTable"
-        WHERE credential_name LIKE $1
+        WHERE substring(credential_name from 1 for char_length($1)) = $1
         ORDER BY credential_name ASC
         "#,
     )
-    .bind(format!("{prefix}%"))
+    .bind(prefix)
     .fetch_all(pool)
     .await
     .map_err(GatewayError::Database)

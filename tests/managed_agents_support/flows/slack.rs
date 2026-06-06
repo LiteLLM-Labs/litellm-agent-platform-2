@@ -1,20 +1,27 @@
 use axum::http::StatusCode;
-use hmac::{Hmac, Mac};
+use litellm_rust::db::managed_agents::slack as slack_db;
 use serde_json::json;
-use sha2::Sha256;
 use sqlx::PgPool;
 
-use super::super::{read_events_until_completed, request_json, request_with_headers, AppFixture};
+use super::{
+    super::{read_events_until_completed, request_json, request_raw, AppFixture},
+    slack_helpers::{
+        assert_slack_api_call_count, assert_slack_api_called, now_seconds, percent_encode,
+        provider_id_for, signed_json_request, signed_request,
+    },
+};
 
 pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
     save_slack_secrets(fixture, agent_id).await;
     configure_agent_slack(fixture, agent_id).await;
+    assert_oauth_callback(fixture, agent_id).await;
     assert_url_verification(fixture, agent_id).await;
+    assert_thread_session_race(fixture, agent_id).await;
     let session_id = send_app_mention(fixture, agent_id).await;
     let events = read_events_until_completed(fixture.app.clone(), "/event", &session_id).await;
     assert!(events.contains("\"type\":\"message.part.delta\""));
     assert!(events.contains("\"delta\":\"hello \""));
-    assert_slack_api_called(fixture, "/chat.postMessage").await;
+    assert_slack_api_call_count(fixture, "/chat.postMessage", 1).await;
     assert_slack_api_called(fixture, "/chat.update").await;
     assert_interactivity_accepts_approval(fixture, agent_id).await;
 }
@@ -22,6 +29,7 @@ pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
 async fn save_slack_secrets(fixture: &AppFixture, agent_id: &str) {
     for (key, value) in [
         (format!("SLACK_{agent_id}_SIGNING_SECRET"), "slack-secret"),
+        (format!("SLACK_{agent_id}_CLIENT_SECRET"), "client-secret"),
         (format!("SLACK_{agent_id}_BOT_TOKEN"), "xoxb-test"),
     ] {
         request_json(
@@ -48,6 +56,8 @@ async fn configure_agent_slack(fixture: &AppFixture, agent_id: &str) {
             "config": {
                 "slack": {
                     "status": "connected",
+                    "client_id": "client-id",
+                    "client_secret_key": format!("SLACK_{agent_id}_CLIENT_SECRET"),
                     "signing_secret_key": format!("SLACK_{agent_id}_SIGNING_SECRET"),
                     "bot_token_key": format!("SLACK_{agent_id}_BOT_TOKEN")
                 }
@@ -55,6 +65,41 @@ async fn configure_agent_slack(fixture: &AppFixture, agent_id: &str) {
         })),
     )
     .await;
+}
+
+async fn assert_oauth_callback(fixture: &AppFixture, agent_id: &str) {
+    let state = request_json(
+        fixture.app.clone(),
+        "POST",
+        &format!("/api/agents/{agent_id}/slack/oauth-state"),
+        None,
+    )
+    .await["state"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request_raw(
+        fixture.app.clone(),
+        "GET",
+        &format!(
+            "/host-oauth-callback/{}?state={state}&code=oauth-code",
+            provider_id_for(agent_id)
+        ),
+        None,
+        "application/json",
+        StatusCode::SEE_OTHER,
+    )
+    .await;
+    let agent = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/api/agents/{agent_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(agent["config"]["slack"]["status"], "connected");
+    assert_eq!(agent["config"]["slack"]["bot_user_id"], "B123");
+    assert_slack_api_called(fixture, "/oauth.v2.access").await;
 }
 
 async fn assert_url_verification(fixture: &AppFixture, agent_id: &str) {
@@ -93,11 +138,42 @@ async fn send_app_mention(fixture: &AppFixture, agent_id: &str) -> String {
     signed_json_request(
         fixture,
         &format!("/api/agents/{agent_id}/slack/events"),
+        body.clone(),
+        StatusCode::OK,
+    )
+    .await;
+    signed_json_request(
+        fixture,
+        &format!("/api/agents/{agent_id}/slack/events"),
         body,
         StatusCode::OK,
     )
     .await;
     wait_for_slack_session(&fixture.pool, agent_id, "C123", "1712345678.000100").await
+}
+
+async fn assert_thread_session_race(fixture: &AppFixture, agent_id: &str) {
+    let (left, right) = tokio::join!(
+        slack_db::repository::ensure_thread_session(
+            &fixture.pool,
+            agent_id,
+            "claude-code",
+            "UTC",
+            "C-race",
+            "1712345678.999999",
+        ),
+        slack_db::repository::ensure_thread_session(
+            &fixture.pool,
+            agent_id,
+            "claude-code",
+            "UTC",
+            "C-race",
+            "1712345678.999999",
+        )
+    );
+    let left = left.unwrap();
+    let right = right.unwrap();
+    assert_eq!(left.session_id, right.session_id);
 }
 
 async fn assert_interactivity_accepts_approval(fixture: &AppFixture, agent_id: &str) {
@@ -168,87 +244,4 @@ async fn wait_for_slack_session(
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     panic!("slack thread session was not created");
-}
-
-async fn assert_slack_api_called(fixture: &AppFixture, path: &str) {
-    for _ in 0..20 {
-        let requests = fixture.slack.received_requests().await.unwrap();
-        if requests.iter().any(|request| request.url.path() == path) {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    panic!("slack mock did not receive {path}");
-}
-
-async fn signed_json_request(
-    fixture: &AppFixture,
-    uri: &str,
-    body: String,
-    expected: StatusCode,
-) -> String {
-    signed_request(fixture, uri, body, "application/json", expected).await
-}
-
-async fn signed_request(
-    fixture: &AppFixture,
-    uri: &str,
-    body: String,
-    content_type: &str,
-    expected: StatusCode,
-) -> String {
-    let timestamp = now_seconds();
-    request_with_headers(
-        fixture.app.clone(),
-        "POST",
-        uri,
-        body.clone(),
-        content_type,
-        &[
-            ("x-slack-request-timestamp", timestamp.to_string()),
-            (
-                "x-slack-signature",
-                slack_signature(timestamp, body.as_bytes(), "slack-secret"),
-            ),
-        ],
-        expected,
-    )
-    .await
-}
-
-fn slack_signature(timestamp: i64, body: &[u8], signing_secret: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(signing_secret.as_bytes()).unwrap();
-    mac.update(format!("v0:{timestamp}:").as_bytes());
-    mac.update(body);
-    format!("v0={}", lower_hex(&mac.finalize().into_bytes()))
-}
-
-fn lower_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    out
-}
-
-fn percent_encode(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.as_bytes() {
-        match *byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*byte as char)
-            }
-            byte => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
-fn now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
 }

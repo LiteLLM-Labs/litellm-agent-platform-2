@@ -107,6 +107,10 @@ fn slack_routes() -> Router<Arc<AppState>> {
             post(super::slack::interactivity),
         )
         .route(
+            "/api/agents/{agent_id}/slack/oauth-state",
+            post(super::slack::oauth_state),
+        )
+        .route(
             "/host-oauth-callback/{provider_id}",
             get(super::slack::oauth_callback),
         )
