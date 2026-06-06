@@ -157,6 +157,73 @@ function optimisticUserMessage(sessionId: string, text: string): HarnessMessage 
   };
 }
 
+function messageText(message: HarnessMessage): string {
+  return message.parts
+    .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
+function isRuntimeOptimisticUser(message: HarnessMessage, sessionId: string): boolean {
+  return (
+    message.info.role === "user" &&
+    typeof message.info.id === "string" &&
+    message.info.id.startsWith(`${sessionId}_runtime_user_`)
+  );
+}
+
+function mergeServerAndRuntimeMessages(
+  serverMessages: HarnessMessage[],
+  localMessages: HarnessMessage[],
+  sessionId: string,
+): HarnessMessage[] {
+  const serverIds = new Set(serverMessages.map((message) => message.info.id));
+  const localOnly = localMessages.filter((message) => !serverIds.has(message.info.id));
+  if (localOnly.length === 0) return serverMessages;
+
+  const insertAfter = new Map<number, HarnessMessage[]>();
+  const trailing: HarnessMessage[] = [];
+  const consumedServerUsers = new Set<number>();
+  let activeServerUserIndex: number | null = null;
+
+  for (const message of localOnly) {
+    if (isRuntimeOptimisticUser(message, sessionId)) {
+      const text = messageText(message);
+      const serverIndex = serverMessages.findIndex((serverMessage, index) => (
+        !consumedServerUsers.has(index) &&
+        serverMessage.info.role === "user" &&
+        messageText(serverMessage) === text
+      ));
+      if (serverIndex === -1) {
+        activeServerUserIndex = null;
+        trailing.push(message);
+      } else {
+        consumedServerUsers.add(serverIndex);
+        activeServerUserIndex = serverIndex;
+      }
+      continue;
+    }
+
+    if (activeServerUserIndex !== null) {
+      const items = insertAfter.get(activeServerUserIndex) ?? [];
+      items.push(message);
+      insertAfter.set(activeServerUserIndex, items);
+      continue;
+    }
+
+    trailing.push(message);
+  }
+
+  const merged: HarnessMessage[] = [];
+  serverMessages.forEach((message, index) => {
+    merged.push(message);
+    const localAfter = insertAfter.get(index);
+    if (localAfter) merged.push(...localAfter);
+  });
+  merged.push(...trailing);
+  return merged;
+}
+
 function ChatInner() {
   const sp = useSearchParams();
   const sid = sp.get("id");
@@ -194,9 +261,7 @@ function ChatInner() {
       const list = await getMessages(sid);
       setMessages((prev) => {
         if (!prev) return list;
-        const serverIds = new Set(list.map((m) => m.info.id));
-        const inflight = prev.filter((m) => !serverIds.has(m.info.id));
-        return [...list, ...inflight];
+        return mergeServerAndRuntimeMessages(list, prev, sid);
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
