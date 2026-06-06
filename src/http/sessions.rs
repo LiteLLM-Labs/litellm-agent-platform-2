@@ -21,9 +21,14 @@ use crate::{
     db::managed_agents::{
         messages,
         registry::{self, schema::ManagedAgentRow},
+        runtime_refs::{self, schema::UpsertRuntimeRef},
         sessions::{self, schema::SessionRow},
     },
     errors::GatewayError,
+    managed_agents::providers::{
+        base::{validate_runtime, RuntimeSessionInput},
+        provision_runtime,
+    },
     proxy::{auth::master_key::require_master_key, state::AppState},
 };
 
@@ -41,10 +46,13 @@ pub async fn create(
     headers: HeaderMap,
     Json(input): Json<CreateSessionRequest>,
 ) -> Result<Json<SessionResponse>, GatewayError> {
-    let pool = db(&state, &headers)?;
-    let resolved = resolve_session_request(pool, input).await?;
+    let pool = db(&state, &headers)?.clone();
+    if input.runtime.is_some() {
+        return create_runtime_session(state, &pool, input).await.map(Json);
+    }
+    let resolved = resolve_session_request(&pool, input).await?;
     let row = sessions::repository::create(
-        pool,
+        &pool,
         &resolved.harness,
         resolved.agent_id.as_deref(),
         &resolved.title,
@@ -53,6 +61,83 @@ pub async fn create(
     .await?;
     state.agent_runs.track_run(&resolved.harness, &row.id);
     Ok(Json(SessionResponse::from(row)))
+}
+
+async fn create_runtime_session(
+    state: Arc<AppState>,
+    pool: &PgPool,
+    input: CreateSessionRequest,
+) -> Result<SessionResponse, GatewayError> {
+    let runtime = input.runtime.clone().unwrap_or_default();
+    if !validate_runtime(&runtime) {
+        return Err(GatewayError::InvalidJsonMessage(format!(
+            "unsupported runtime: {runtime}"
+        )));
+    }
+    let agent_id = input
+        .agent_id
+        .clone()
+        .or(input.agent.clone())
+        .ok_or_else(|| GatewayError::InvalidJsonMessage("agent_id is required".to_owned()))?;
+    let agent = registry::repository::get(pool, &agent_id)
+        .await?
+        .ok_or_else(|| GatewayError::UnknownAgent(agent_id.clone()))?;
+    let credential = crate::http::agent_runtimes::load_credential(&state, &runtime).await?;
+    let environment = input.environment.clone().unwrap_or_else(|| json!({}));
+    let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
+    let row = sessions::repository::create_runtime(
+        pool,
+        &runtime,
+        &agent.id,
+        &title,
+        input.timezone.as_deref().or(input.tz.as_deref()),
+        None,
+        environment.clone(),
+        None,
+        None,
+    )
+    .await?;
+    state.agent_runs.track_run(&agent.id, &row.id);
+    let prompt = input
+        .prompt
+        .or_else(|| agent.prompt.clone())
+        .filter(|prompt| !prompt.trim().is_empty())
+        .unwrap_or_else(|| format!("Start a session for {}.", agent.name));
+    let provision = provision_runtime(
+        &state.http,
+        &runtime,
+        &agent,
+        credential,
+        RuntimeSessionInput {
+            session_id: row.id.clone(),
+            prompt,
+            environment,
+        },
+    )
+    .await?;
+    let runtime_ref = runtime_refs::repository::upsert(
+        pool,
+        &agent.id,
+        &runtime,
+        UpsertRuntimeRef {
+            runtime_agent_id: provision.runtime_agent_id,
+            provider_session_id: provision.provider_session_id.clone(),
+            provider_run_id: provision.provider_run_id.clone(),
+            provider_url: provision.provider_url,
+            metadata: provision.metadata,
+        },
+    )
+    .await?;
+    let row = sessions::repository::set_runtime_refs(
+        pool,
+        &row.id,
+        &runtime_ref.id,
+        provision.provider_session_id.as_deref(),
+        provision.provider_run_id.as_deref(),
+        "running",
+    )
+    .await?;
+    Ok(SessionResponse::from(row))
 }
 
 pub async fn get(
@@ -387,6 +472,10 @@ pub struct CreateSessionRequest {
     title: Option<String>,
     harness: Option<String>,
     agent: Option<String>,
+    agent_id: Option<String>,
+    runtime: Option<String>,
+    prompt: Option<String>,
+    environment: Option<Value>,
     timezone: Option<String>,
     tz: Option<String>,
 }
@@ -450,6 +539,16 @@ pub struct SessionResponse {
     agent: String,
     agent_id: Option<String>,
     harness: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_agent_ref_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_run_id: Option<String>,
+    status: String,
+    environment: Value,
     time: SessionTime,
 }
 
@@ -461,6 +560,12 @@ impl From<SessionRow> for SessionResponse {
             agent: row.agent_id.clone().unwrap_or_else(|| row.harness.clone()),
             agent_id: row.agent_id,
             harness: row.harness,
+            runtime: row.runtime,
+            runtime_agent_ref_id: row.runtime_agent_ref_id,
+            provider_session_id: row.provider_session_id,
+            provider_run_id: row.provider_run_id,
+            status: row.status,
+            environment: row.environment_json,
             time: SessionTime {
                 created: row.created_at,
                 updated: row.updated_at,

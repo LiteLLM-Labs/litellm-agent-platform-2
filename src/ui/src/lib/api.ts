@@ -2,6 +2,8 @@ import type {
   Agent,
   AgentFile,
   AgentRunStart,
+  AgentRuntime,
+  AgentRuntimeId,
   HarnessMessage,
   Memory,
   OpencodeSession,
@@ -191,13 +193,55 @@ export async function listSessions(): Promise<OpencodeSession[]> {
   );
 }
 
-export async function createSession(title?: string, agent?: string): Promise<OpencodeSession> {
+export async function createSession(
+  title?: string,
+  agent?: string,
+  options?: {
+    runtime?: AgentRuntimeId;
+    prompt?: string;
+    environment?: Record<string, unknown>;
+  },
+): Promise<OpencodeSession> {
   const res = await reqHarness("/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title, ...(agent ? { agent, harness: agent } : {}) }),
+    body: JSON.stringify({
+      title,
+      ...(agent ? { agent, agent_id: agent, harness: agent } : {}),
+      ...(options?.runtime ? { runtime: options.runtime } : {}),
+      ...(options?.prompt ? { prompt: options.prompt } : {}),
+      ...(options?.environment ? { environment: options.environment } : {}),
+    }),
   });
   return jsonOrThrow<OpencodeSession>(res);
+}
+
+export async function listAgentRuntimes(): Promise<AgentRuntime[]> {
+  const res = await req("/api/agent-runtimes");
+  const data = await jsonOrThrow<{ runtimes: AgentRuntime[] }>(res);
+  return data.runtimes;
+}
+
+export async function saveAgentRuntimeCredential(input: {
+  runtime: AgentRuntimeId;
+  apiKey: string;
+  apiBase?: string;
+}): Promise<AgentRuntime[]> {
+  const res = await req(`/api/agent-runtimes/${encodeURIComponent(input.runtime)}/credentials`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ api_key: input.apiKey, api_base: input.apiBase }),
+  });
+  const data = await jsonOrThrow<{ runtimes: AgentRuntime[] }>(res);
+  return data.runtimes;
+}
+
+export async function deleteAgentRuntimeCredential(runtime: AgentRuntimeId): Promise<void> {
+  await jsonOrThrow(
+    await req(`/api/agent-runtimes/${encodeURIComponent(runtime)}/credentials`, {
+      method: "DELETE",
+    }),
+  );
 }
 
 export async function listAgents(): Promise<Agent[]> {

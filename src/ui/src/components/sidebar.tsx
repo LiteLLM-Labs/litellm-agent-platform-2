@@ -26,8 +26,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { readHarness } from "@/lib/use-harness";
-import { createSession, deleteSession, listSessions, listInbox } from "@/lib/api";
+import { deleteSession, listSessions, listInbox } from "@/lib/api";
 import type { OpencodeSession } from "@/lib/types";
 
 type NavItem = {
@@ -62,7 +61,6 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
   const pathname = usePathname();
   const [sessions, setSessions] = useState<OpencodeSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [inboxCount, setInboxCount] = useState(0);
   const load = async () => {
     try {
@@ -92,16 +90,7 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
   }, [pathname]);
 
   const onNew = async () => {
-    setCreating(true);
-    try {
-      const s = await createSession(undefined, readHarness());
-      router.push(`/chat/?id=${encodeURIComponent(s.id)}`);
-      load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreating(false);
-    }
+    router.push("/sessions/");
   };
 
   const onDelete = async (e: React.MouseEvent, id: string) => {
@@ -171,6 +160,12 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           active: (path) => path.startsWith("/integrations"),
         },
         {
+          label: "Agent Runtimes",
+          href: "/runtimes/",
+          icon: ServerCog,
+          active: (path) => path.startsWith("/runtimes"),
+        },
+        {
           label: "Skills",
           href: "/skills/",
           icon: FileText,
@@ -204,7 +199,6 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
         {isAgentPlatform && (
           <Button
             onClick={onNew}
-            disabled={creating}
             className="relative w-full justify-center sm:justify-start"
             size="sm"
             aria-label="New session"
