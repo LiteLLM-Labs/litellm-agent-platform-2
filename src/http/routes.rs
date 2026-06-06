@@ -87,5 +87,9 @@ fn session_routes() -> Router<Arc<AppState>> {
             "/session/{session_id}/prompt_async",
             post(sessions::prompt_async),
         )
+        .route(
+            "/session/{session_id}/runtime_events",
+            get(sessions::runtime_events),
+        )
         .route("/session/{session_id}/abort", post(sessions::abort))
 }

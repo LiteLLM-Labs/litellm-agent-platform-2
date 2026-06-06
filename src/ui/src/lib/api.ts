@@ -732,6 +732,46 @@ export function subscribeEvents(opts: {
   };
 }
 
+export interface RuntimeAgentEvent {
+  type: string;
+  [key: string]: unknown;
+}
+
+export function subscribeRuntimeEvents(opts: {
+  sessionId: string;
+  onEvent: (ev: RuntimeAgentEvent) => void;
+  onError?: (err: unknown) => void;
+}): () => void {
+  let es: EventSource | null = null;
+  try {
+    es = new EventSource(runtimeEventSourceUrl(opts.sessionId));
+  } catch (e) {
+    opts.onError?.(e);
+    return () => {};
+  }
+  es.onmessage = (msg) => {
+    try {
+      opts.onEvent(JSON.parse(msg.data) as RuntimeAgentEvent);
+    } catch (e) {
+      opts.onError?.(e);
+    }
+  };
+  es.onerror = (e) => opts.onError?.(e);
+  return () => {
+    try {
+      es?.close();
+    } catch {
+      /* noop */
+    }
+  };
+}
+
+export function runtimeEventSourceUrl(sessionId: string): string {
+  const localKey = getStoredMasterKey();
+  const qs = localKey ? `?key=${encodeURIComponent(localKey)}` : "";
+  return `${BASE}/session/${encodeURIComponent(sessionId)}/runtime_events${qs}`;
+}
+
 export function harnessEventSourceUrl(): string {
   const remoteBase = getHarnessServerUrl();
   const localKey = getStoredMasterKey();

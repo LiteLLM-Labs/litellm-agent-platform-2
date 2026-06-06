@@ -1,8 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 use axum::{
-    extract::{Path, State},
+    body::{Body, Bytes},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
+    response::Response,
     Json,
 };
 use futures_util::StreamExt;
@@ -30,7 +32,7 @@ use crate::{
         provision_runtime,
     },
     proxy::{auth::master_key::require_master_key, state::AppState},
-    sdk::agents::{AgentEvent, AgentSdkError, Lap, LapConfig, SendEventsParams},
+    sdk::agents::{AgentSdkError, Lap, LapConfig, SendEventsParams},
 };
 
 pub async fn list(
@@ -232,6 +234,62 @@ pub async fn send_message(
         .map(Json)
 }
 
+pub async fn runtime_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<Response, GatewayError> {
+    require_events_master_key(
+        &headers,
+        &query,
+        state.config.general_settings.master_key.as_deref(),
+    )?;
+    let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
+    let row = session(pool, &session_id).await?;
+    if row.runtime.as_deref() != Some(CLAUDE_AGENTS_RUNTIME) {
+        return Err(GatewayError::InvalidConfig(
+            "runtime event streaming is only available for Claude Managed Agents sessions"
+                .to_owned(),
+        ));
+    }
+    let provider_session_id = row.provider_session_id.clone().ok_or_else(|| {
+        GatewayError::InvalidConfig(
+            "Claude Agents session is missing provider_session_id".to_owned(),
+        )
+    })?;
+    let client = claude_agents_sdk_client(&state).await?;
+    let provider_stream = client
+        .beta()
+        .sessions()
+        .events()
+        .stream(&provider_session_id)
+        .await
+        .map_err(agent_sdk_error)?;
+    let body_stream = provider_stream.map(|event| {
+        let line = match event {
+            Ok(event) => match serde_json::to_string(&event) {
+                Ok(payload) => format!("data: {payload}\n\n"),
+                Err(error) => format!(
+                    "data: {}\n\n",
+                    json!({ "type": "session.error", "error": { "message": error.to_string() } })
+                ),
+            },
+            Err(error) => format!(
+                "data: {}\n\n",
+                json!({ "type": "session.error", "error": { "message": error.to_string() } })
+            ),
+        };
+        Ok::<Bytes, Infallible>(Bytes::from(line))
+    });
+
+    Response::builder()
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .body(Body::from_stream(body_stream))
+        .map_err(|error| GatewayError::SandboxError(error.to_string()))
+}
+
 pub async fn abort(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -252,6 +310,17 @@ pub async fn abort(
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn require_events_master_key(
+    headers: &HeaderMap,
+    query: &HashMap<String, String>,
+    configured: Option<&str>,
+) -> Result<(), GatewayError> {
+    if query.get("key").map(String::as_str) == configured {
+        return Ok(());
+    }
+    require_master_key(headers, configured)
+}
+
 async fn execute_prompt(
     state: Arc<AppState>,
     pool: PgPool,
@@ -260,7 +329,7 @@ async fn execute_prompt(
     model: String,
 ) -> Result<(), GatewayError> {
     if row.runtime.is_some() {
-        return execute_runtime_prompt(state, pool, row, prompt).await;
+        return execute_runtime_prompt(state, row, prompt).await;
     }
 
     let agent = agent_definition(&pool, &state, &row, &model).await?;
@@ -330,14 +399,11 @@ async fn execute_prompt(
 
 async fn execute_runtime_prompt(
     state: Arc<AppState>,
-    pool: PgPool,
     row: SessionRow,
     prompt: String,
 ) -> Result<(), GatewayError> {
     match row.runtime.as_deref() {
-        Some(CLAUDE_AGENTS_RUNTIME) => {
-            execute_claude_agents_prompt(state, pool, row, prompt).await
-        }
+        Some(CLAUDE_AGENTS_RUNTIME) => execute_claude_agents_prompt(state, row, prompt).await,
         Some(CURSOR_RUNTIME) => Err(GatewayError::InvalidConfig(
             "Cursor runtime sessions are provisioned, but the managed agents SDK does not yet expose Cursor event send/stream".to_owned(),
         )),
@@ -352,7 +418,6 @@ async fn execute_runtime_prompt(
 
 async fn execute_claude_agents_prompt(
     state: Arc<AppState>,
-    pool: PgPool,
     row: SessionRow,
     prompt: String,
 ) -> Result<(), GatewayError> {
@@ -361,32 +426,11 @@ async fn execute_claude_agents_prompt(
             "Claude Agents session is missing provider_session_id".to_owned(),
         )
     })?;
-    let credential =
-        crate::http::agent_runtimes::load_credential(&state, CLAUDE_AGENTS_RUNTIME).await?;
-    let client = Lap::new(LapConfig {
-        anthropic_api_key: Some(credential.api_key),
-        anthropic_base_url: credential.api_base,
-    });
-    let context = HarnessRunContext::new(&row.id);
-    let thinking_part_id = format!("{}_thinking", row.id);
-    let text_part_id = context.part_id.clone();
+    let client = claude_agents_sdk_client(&state).await?;
 
     state
         .agent_runs
         .update_status(&row.id, AgentRunStatus::Running);
-    push_events(
-        &state,
-        &row.id,
-        runtime_start_events(&context, &thinking_part_id, &text_part_id),
-    );
-
-    let mut stream = client
-        .beta()
-        .sessions()
-        .events()
-        .stream(&provider_session_id)
-        .await
-        .map_err(agent_sdk_error)?;
     client
         .beta()
         .sessions()
@@ -402,195 +446,16 @@ async fn execute_claude_agents_prompt(
         )
         .await
         .map_err(agent_sdk_error)?;
-
-    let mut assistant_text = String::new();
-    while let Some(event) = stream.next().await {
-        let event = event.map_err(agent_sdk_error)?;
-        if event.event_type == "session.status_idle" {
-            break;
-        }
-        if event.event_type == "session.error" {
-            return Err(GatewayError::SandboxError(provider_error_text(&event)));
-        }
-        if let Some(delta) = assistant_delta(&event) {
-            assistant_text.push_str(&delta);
-            push_events(
-                &state,
-                &row.id,
-                vec![runtime_delta_event(
-                    &context.message_id,
-                    &text_part_id,
-                    "text",
-                    delta,
-                )],
-            );
-        }
-        if let Some(delta) = thinking_delta(&event) {
-            push_events(
-                &state,
-                &row.id,
-                vec![runtime_delta_event(
-                    &context.message_id,
-                    &thinking_part_id,
-                    "text",
-                    delta,
-                )],
-            );
-        }
-    }
-
-    if !assistant_text.is_empty() {
-        persist_message_with_ids(
-            &pool,
-            &row.id,
-            "assistant",
-            &assistant_text,
-            Some("stop"),
-            Some(&context.message_id),
-            Some(&text_part_id),
-        )
-        .await?;
-    }
-    state
-        .agent_runs
-        .update_status(&row.id, AgentRunStatus::Completed);
-    push_events(&state, &row.id, runtime_complete_events(&context));
     Ok(())
 }
 
-fn runtime_start_events(
-    context: &HarnessRunContext,
-    thinking_part_id: &str,
-    text_part_id: &str,
-) -> Vec<HarnessEvent> {
-    vec![
-        HarnessEvent::new(
-            events::SESSION_STATUS,
-            json!({ "status": { "type": "busy" } }),
-        ),
-        HarnessEvent::new(
-            events::MESSAGE_UPDATED,
-            json!({
-                "info": {
-                    "id": context.message_id,
-                    "role": "assistant",
-                    "sessionID": context.run_id,
-                }
-            }),
-        ),
-        HarnessEvent::new(
-            events::MESSAGE_PART_UPDATED,
-            json!({
-                "part": {
-                    "id": thinking_part_id,
-                    "messageID": context.message_id,
-                    "sessionID": context.run_id,
-                    "type": "thinking",
-                    "text": "",
-                }
-            }),
-        ),
-        HarnessEvent::new(
-            events::MESSAGE_PART_UPDATED,
-            json!({
-                "part": {
-                    "id": text_part_id,
-                    "messageID": context.message_id,
-                    "sessionID": context.run_id,
-                    "type": "text",
-                    "text": "",
-                }
-            }),
-        ),
-    ]
-}
-
-fn runtime_delta_event(
-    message_id: &str,
-    part_id: &str,
-    field: &str,
-    delta: String,
-) -> HarnessEvent {
-    HarnessEvent::new(
-        events::MESSAGE_PART_DELTA,
-        json!({
-            "messageID": message_id,
-            "partID": part_id,
-            "field": field,
-            "delta": delta,
-        }),
-    )
-}
-
-fn runtime_complete_events(context: &HarnessRunContext) -> Vec<HarnessEvent> {
-    vec![
-        HarnessEvent::new(
-            events::MESSAGE_UPDATED,
-            json!({
-                "info": {
-                    "id": context.message_id,
-                    "role": "assistant",
-                    "finish": "stop",
-                    "sessionID": context.run_id,
-                }
-            }),
-        ),
-        HarnessEvent::new(events::SESSION_IDLE, json!({ "sessionID": context.run_id })),
-    ]
-}
-
-fn assistant_delta(event: &AgentEvent) -> Option<String> {
-    match event.event_type.as_str() {
-        "assistant_response" => text_from_event(event),
-        "agent.message" => content_text(event),
-        _ => None,
-    }
-}
-
-fn thinking_delta(event: &AgentEvent) -> Option<String> {
-    match event.event_type.as_str() {
-        "thinking_back" | "agent.thinking" | "agent.reasoning" => text_from_event(event),
-        _ => None,
-    }
-}
-
-fn text_from_event(event: &AgentEvent) -> Option<String> {
-    event
-        .data
-        .get("text")
-        .or_else(|| event.data.get("delta"))
-        .or_else(|| event.data.get("content"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .or_else(|| content_text(event))
-}
-
-fn content_text(event: &AgentEvent) -> Option<String> {
-    event
-        .data
-        .get("content")
-        .and_then(Value::as_array)
-        .map(|blocks| {
-            blocks
-                .iter()
-                .filter_map(|block| block.get("text").and_then(Value::as_str))
-                .collect::<String>()
-        })
-        .filter(|text| !text.is_empty())
-}
-
-fn provider_error_text(event: &AgentEvent) -> String {
-    event
-        .data
-        .get("error")
-        .and_then(|error| {
-            error
-                .get("message")
-                .and_then(Value::as_str)
-                .or_else(|| error.as_str())
-        })
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("provider session error: {:?}", event.data))
+async fn claude_agents_sdk_client(state: &AppState) -> Result<Lap, GatewayError> {
+    let credential =
+        crate::http::agent_runtimes::load_credential(state, CLAUDE_AGENTS_RUNTIME).await?;
+    Ok(Lap::new(LapConfig {
+        anthropic_api_key: Some(credential.api_key),
+        anthropic_base_url: credential.api_base,
+    }))
 }
 
 fn agent_sdk_error(error: AgentSdkError) -> GatewayError {
