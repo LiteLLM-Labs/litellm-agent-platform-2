@@ -12,27 +12,14 @@ use crate::{
     db::credentials,
     errors::GatewayError,
     proxy::{auth::master_key::require_master_key, credential_crypto, state::AppState},
+    sdk::providers,
 };
 
-pub(crate) const CURSOR_RUNTIME: &str = "cursor";
-pub(crate) const CLAUDE_AGENTS_RUNTIME: &str = "claude_agents";
-
+/// Opaque credential loaded from the DB for a runtime.
 #[derive(Debug, Clone)]
 pub struct RuntimeCredential {
     pub(crate) api_key: String,
     pub(crate) api_base: String,
-}
-
-pub(crate) fn validate_runtime(runtime: &str) -> bool {
-    matches!(runtime, CURSOR_RUNTIME | CLAUDE_AGENTS_RUNTIME)
-}
-
-pub(crate) fn default_api_base(runtime: &str) -> Option<&'static str> {
-    match runtime {
-        CURSOR_RUNTIME => Some("https://api.cursor.com"),
-        CLAUDE_AGENTS_RUNTIME => Some("https://api.anthropic.com"),
-        _ => None,
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -86,12 +73,18 @@ pub async fn save(
             "api_key is required".to_owned(),
         ));
     }
+    let registry = providers::runtime_registry();
     let api_base = input
         .api_base
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| default_api_base(&runtime).unwrap_or_default());
+        .unwrap_or_else(|| {
+            registry
+                .entry_for_id(&runtime)
+                .map(|e| e.default_api_base)
+                .unwrap_or_default()
+        });
     let key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
     credentials::upsert(
@@ -152,27 +145,24 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayErr
 }
 
 async fn runtime_values(state: &AppState) -> Result<Vec<RuntimeResponse>, GatewayError> {
+    let registry = providers::runtime_registry();
     let mut values = Vec::new();
-    for runtime in [CURSOR_RUNTIME, CLAUDE_AGENTS_RUNTIME] {
-        values.push(runtime_value(state, runtime).await?);
+    for entry in registry.all_entries() {
+        let credential = match load_credential(state, entry.id).await {
+            Ok(value) => Some(value),
+            Err(GatewayError::InvalidJsonMessage(_)) | Err(GatewayError::MissingDatabase) => None,
+            Err(error) => return Err(error),
+        };
+        values.push(RuntimeResponse {
+            id: entry.id.to_owned(),
+            name: entry.name.to_owned(),
+            default_api_base: entry.default_api_base.to_owned(),
+            connected: credential.is_some(),
+            api_base: credential.as_ref().map(|c| c.api_base.clone()),
+            masked_api_key: credential.map(|c| mask(&c.api_key)),
+        });
     }
     Ok(values)
-}
-
-async fn runtime_value(state: &AppState, runtime: &str) -> Result<RuntimeResponse, GatewayError> {
-    let credential = match load_credential(state, runtime).await {
-        Ok(value) => Some(value),
-        Err(GatewayError::InvalidJsonMessage(_)) | Err(GatewayError::MissingDatabase) => None,
-        Err(error) => return Err(error),
-    };
-    Ok(RuntimeResponse {
-        id: runtime.to_owned(),
-        name: runtime_name(runtime).to_owned(),
-        default_api_base: default_api_base(runtime).unwrap_or_default().to_owned(),
-        connected: credential.is_some(),
-        api_base: credential.as_ref().map(|value| value.api_base.clone()),
-        masked_api_key: credential.map(|value| mask(&value.api_key)),
-    })
 }
 
 fn credential_name(runtime: &str) -> String {
@@ -180,20 +170,12 @@ fn credential_name(runtime: &str) -> String {
 }
 
 fn validate(runtime: &str) -> Result<(), GatewayError> {
-    if validate_runtime(runtime) {
+    if providers::runtime_registry().validate_id(runtime) {
         Ok(())
     } else {
         Err(GatewayError::InvalidJsonMessage(format!(
             "unsupported runtime: {runtime}"
         )))
-    }
-}
-
-fn runtime_name(runtime: &str) -> &str {
-    match runtime {
-        CURSOR_RUNTIME => "Cursor",
-        CLAUDE_AGENTS_RUNTIME => "Claude Agents",
-        _ => runtime,
     }
 }
 

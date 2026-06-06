@@ -8,6 +8,9 @@ pub use anthropic_messages::{init, transformation};
 pub(crate) fn register_runtime_adapters(registry: &mut RuntimeAdapterRegistry) {
     registry.register(
         AgentRuntime::ClaudeManagedAgents,
+        runtime::RUNTIME_ID,
+        runtime::RUNTIME_NAME,
+        runtime::DEFAULT_API_BASE,
         runtime::ClaudeManagedAgentsRuntime,
     );
 }

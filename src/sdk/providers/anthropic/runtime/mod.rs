@@ -7,6 +7,11 @@ use crate::sdk::agents::{
 };
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 
+/// String ID used to identify this runtime in the database and HTTP API.
+pub(crate) const RUNTIME_ID: &str = "claude_agents";
+pub(crate) const RUNTIME_NAME: &str = "Claude Agents";
+pub(crate) const DEFAULT_API_BASE: &str = "https://api.anthropic.com";
+
 pub(crate) struct ClaudeManagedAgentsRuntime;
 
 impl RuntimeAdapter for ClaudeManagedAgentsRuntime {

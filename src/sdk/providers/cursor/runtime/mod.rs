@@ -13,6 +13,11 @@ use crate::sdk::agents::{
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 use stream::normalize_cursor_stream;
 
+/// String ID used to identify this runtime in the database and HTTP API.
+pub(crate) const RUNTIME_ID: &str = "cursor";
+pub(crate) const RUNTIME_NAME: &str = "Cursor";
+pub(crate) const DEFAULT_API_BASE: &str = "https://api.cursor.com";
+
 pub(crate) struct CursorRuntime;
 
 impl RuntimeAdapter for CursorRuntime {
@@ -35,6 +40,32 @@ impl RuntimeAdapter for CursorRuntime {
             agent_id: session.provider_agent_id.or(session.provider_session_id),
             run_id: session.provider_run_id,
         }
+    }
+
+    fn provider_run_id_from_agent_raw(&self, raw: &Value) -> Option<String> {
+        raw.get("run")
+            .and_then(|v| v.get("id"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                raw.get("agent")
+                    .and_then(|a| a.get("latestRunId"))
+                    .and_then(Value::as_str)
+            })
+            .or_else(|| raw.get("latestRunId").and_then(Value::as_str))
+            .map(str::to_owned)
+    }
+
+    fn provider_url_from_agent_raw(&self, raw: &Value) -> Option<String> {
+        raw.get("url")
+            .and_then(Value::as_str)
+            .or_else(|| raw.get("webUrl").and_then(Value::as_str))
+            .or_else(|| raw.get("agent").and_then(|a| a.get("url")).and_then(Value::as_str))
+            .or_else(|| raw.get("agent").and_then(|a| a.get("webUrl")).and_then(Value::as_str))
+            .map(str::to_owned)
+    }
+
+    fn provider_agent_id_from_session_id(&self, provider_session_id: &str) -> Option<String> {
+        Some(provider_session_id.to_owned())
     }
 
     fn create_agent<'a>(

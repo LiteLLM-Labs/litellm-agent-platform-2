@@ -13,9 +13,13 @@ pub use crate::sdk::providers::base::{
 pub mod base;
 
 pub(crate) fn adapter(runtime: AgentRuntime) -> Option<Arc<dyn RuntimeAdapter>> {
+    runtime_registry().get(runtime)
+}
+
+pub(crate) fn runtime_registry() -> base::runtime::RuntimeAdapterRegistry {
     let mut registry = base::runtime::RuntimeAdapterRegistry::new();
     register_runtime_adapters(&mut registry);
-    registry.get(runtime)
+    registry
 }
 
 pub mod model {
