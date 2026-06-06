@@ -14,7 +14,7 @@ use crate::{
         models::models,
         openapi::{openapi_json, swagger_ui},
         responses::responses,
-        sessions, ui,
+        sessions, ui, vault,
     },
     mcp::route::{streamable_http, streamable_http_server},
     proxy::state::AppState,
@@ -77,13 +77,23 @@ fn api_routes() -> Router<Arc<AppState>> {
             post(crate::http::provider_credentials::save_provider)
                 .delete(crate::http::provider_credentials::delete_provider),
         )
+        .merge(vault_routes())
+}
+
+fn vault_routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route(
+            "/api/vault/global",
+            get(vault::list_global).post(vault::save_global),
+        )
+        .route("/api/vault/global/{key}", delete(vault::delete_global))
         .route(
             "/api/vault/{user_id}",
-            get(crate::http::vault::list).post(crate::http::vault::save),
+            get(vault::list).post(vault::save),
         )
         .route(
             "/api/vault/{user_id}/{key}",
-            delete(crate::http::vault::delete),
+            delete(vault::delete_personal),
         )
 }
 

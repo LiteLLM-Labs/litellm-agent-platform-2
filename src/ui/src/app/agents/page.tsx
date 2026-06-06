@@ -25,7 +25,7 @@ import {
   updateAgent,
   deleteAgent,
   listSkills,
-  listIntegrationKeys,
+  listVaultKeys,
   listPlatformMcps,
   saveIntegrationKey,
   deleteIntegrationKey,
@@ -34,7 +34,7 @@ import {
   deleteMemory,
 } from "@/lib/api";
 import { DEFAULT_TIMEZONE, scheduleLabel } from "@/lib/schedule";
-import type { Agent, Skill, Memory, PlatformMcp } from "@/lib/types";
+import type { Agent, Skill, Memory, VaultKeyEntry, PlatformMcp } from "@/lib/types";
 import {
   slackActionClass,
   slackActionLabel,
@@ -90,7 +90,7 @@ export default function AgentsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [vaultKeyInput, setVaultKeyInput] = useState("");
   const [vaultValues, setVaultValues] = useState<Record<string, string>>({});
-  const [storedKeys, setStoredKeys] = useState<string[]>([]);
+  const [storedKeyEntries, setStoredKeyEntries] = useState<VaultKeyEntry[]>([]);
   const [memories, setMemories] = useState<Memory[] | null>(null);
   const [memKey, setMemKey] = useState("");
   const [memValue, setMemValue] = useState("");
@@ -108,7 +108,7 @@ export default function AgentsPage() {
     load();
     listSkills().then(setSkills).catch(() => setSkills([]));
     listPlatformMcps().then(setPlatformMcps).catch(() => setPlatformMcps([]));
-    listIntegrationKeys().then(setStoredKeys).catch(() => setStoredKeys([]));
+    listVaultKeys().then(setStoredKeyEntries).catch(() => setStoredKeyEntries([]));
   }, []);
 
   const addVaultKey = () => {
@@ -119,15 +119,21 @@ export default function AgentsPage() {
   };
   const removeVaultKey = (k: string) => {
     setForm((f) => ({ ...f, vault_keys: f.vault_keys.filter((x) => x !== k) }));
-    deleteIntegrationKey(k).then(() => setStoredKeys((p) => p.filter((x) => x !== k))).catch(() => {});
+    deleteIntegrationKey(k).then(() =>
+      setStoredKeyEntries((p) => p.filter((x) => x.key !== k))
+    ).catch(() => {});
     setVaultValues(({ [k]: _drop, ...rest }) => rest);
   };
   const saveVaultValue = async (k: string) => {
     const v = vaultValues[k];
     if (!v) return;
     try {
-      await saveIntegrationKey(k, v);
-      setStoredKeys((p) => (p.includes(k) ? p : [...p, k]));
+      await saveIntegrationKey(k, v, "personal");
+      setStoredKeyEntries((p) =>
+        p.some((x) => x.key === k)
+          ? p
+          : [...p, { key: k, scope: "personal" }]
+      );
       setVaultValues(({ [k]: _drop, ...rest }) => rest);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
@@ -539,12 +545,18 @@ export default function AgentsPage() {
               {form.vault_keys.length > 0 && (
                 <div className="rounded-md border border-border divide-y divide-border">
                   {form.vault_keys.map((k) => {
-                    const isSet = storedKeys.includes(k);
+                    const entry = storedKeyEntries.find((x) => x.key === k);
+                    const isSet = !!entry;
+                    const badgeLabel = isSet
+                      ? entry.scope === "global"
+                        ? "set (global)"
+                        : "set (personal)"
+                      : "no value";
                     return (
                       <div key={k} className="flex items-center gap-2 px-2.5 py-1.5">
                         <span className="text-xs font-mono min-w-0 flex-1 truncate">{k}</span>
                         <Badge variant={isSet ? "secondary" : "outline"} className="text-[10px]">
-                          {isSet ? "set" : "no value"}
+                          {badgeLabel}
                         </Badge>
                         <Input
                           type="password"

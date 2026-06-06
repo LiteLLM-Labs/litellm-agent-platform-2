@@ -87,7 +87,9 @@ impl E2bSandboxClient {
         sandbox: &E2bSandbox,
         command: SandboxCommand,
     ) -> Result<AgentOutputStream, GatewayError> {
-        let command = command_with_workspace(&self.settings.workspace_dir, &command.command);
+        let cmd_str = command_with_workspace(&self.settings.workspace_dir, &command.command);
+        let mut envs = self.settings.envs.clone();
+        envs.extend(command.extra_env);
         let response = self
             .http
             .post(format!(
@@ -101,9 +103,9 @@ impl E2bSandboxClient {
             .body(connect_json_frame(&StartProcessRequest {
                 process: StartProcess {
                     cmd: "bash",
-                    args: vec!["-lc", &command],
+                    args: vec!["-lc", &cmd_str],
                     cwd: "/",
-                    envs: &self.settings.envs,
+                    envs: &envs,
                 },
                 stdin: false,
             })?)

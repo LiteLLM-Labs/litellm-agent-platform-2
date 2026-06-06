@@ -47,6 +47,14 @@ pub async fn create(
         .or_else(|| agent.prompt.clone())
         .filter(|prompt| !prompt.trim().is_empty())
         .unwrap_or_else(|| "Proceed with your task.".to_owned());
+    let vault_keys: Vec<String> = agent
+        .vault_keys
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    let owner_id = agent.owner_id.clone();
     let run = repository::create(pool, &agent_id, agent.session_id.clone(), input).await?;
     state.agent_runs.track_run(&agent_id, &run.id);
     spawn_managed_agent_run(
@@ -56,6 +64,8 @@ pub async fn create(
         managed_agent_definition(pool, &agent).await?,
         prompt,
         run.id.clone(),
+        owner_id,
+        vault_keys,
     );
     let host = headers
         .get("host")

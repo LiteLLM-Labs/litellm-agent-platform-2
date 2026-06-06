@@ -121,6 +121,14 @@ export interface AgentRunStart {
   event_url: string;
 }
 
+export interface VaultKeyEntry {
+  key: string;
+  scope: "global" | "personal";
+  updated_at?: number;
+  /** "env" if sourced from environment variables */
+  source?: string;
+}
+
 /** A reusable, DB-backed skill (capability doc) attachable to an agent. */
 export interface Skill {
   id: string;
