@@ -9,10 +9,10 @@ use crate::{
     errors::GatewayError,
 };
 
-/// Compose an agent's downstream system prompt: the full bodies of the skills
-/// **attached to this agent** (by `skill_ids`) followed by the agent's own base
-/// system prompt. Skills the agent has not attached are never included — the
-/// system prompt must not enumerate other agents' skills.
+/// Compose an agent's downstream system prompt: the agent's own base system
+/// prompt first, followed by the full bodies of the skills **attached to this
+/// agent** (by `skill_ids`). Skills the agent has not attached are never
+/// included — the system prompt must not enumerate other agents' skills.
 ///
 /// This is the single source of truth for skill → system-prompt composition. It
 /// is shared by the non-runtime agent-run path (`runs/create/definition.rs`) and
@@ -45,12 +45,14 @@ pub fn string_array(value: &Value) -> Vec<String> {
 }
 
 fn compose_agent_system(agent_system: &str, attached_skills: &[&SkillRow]) -> String {
-    let mut parts = attached_skills
-        .iter()
-        .map(|skill| format!("## Skill: {}\n{}", skill.name, skill.content))
-        .collect::<Vec<_>>();
+    let mut parts = Vec::new();
     if !agent_system.trim().is_empty() {
         parts.push(agent_system.trim().to_owned());
     }
+    parts.extend(
+        attached_skills
+            .iter()
+            .map(|skill| format!("## Skill: {}\n{}", skill.name, skill.content)),
+    );
     parts.join("\n\n---\n\n")
 }
