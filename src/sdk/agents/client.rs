@@ -13,8 +13,8 @@ use super::{
     events::{stream_events, AgentEvent, AgentEventStream},
     types::{
         AgentModel, AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, LapConfig, ManagedAgent, SendEventsParams,
-        SendEventsResponse, Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
+        CreateSessionParams, Environment, LapConfig, ManagedAgent, ManagedSessionRef,
+        SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
     },
 };
 
@@ -38,6 +38,7 @@ struct RuntimeConfig {
 #[derive(Debug, Clone)]
 struct SessionContext {
     runtime: AgentRuntime,
+    provider_session_id: Option<String>,
     agent_id: Option<String>,
     run_id: Option<String>,
 }
@@ -64,6 +65,52 @@ impl Lap {
             );
         }
         Self::with_http(configured_http_client(), runtimes)
+    }
+
+    pub(crate) fn with_http_client(config: LapConfig, http: reqwest::Client) -> Self {
+        let mut runtimes = HashMap::new();
+        if let Some(api_key) = config.anthropic_api_key {
+            runtimes.insert(
+                AgentRuntime::ClaudeManagedAgents,
+                RuntimeConfig {
+                    api_key,
+                    base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
+                },
+            );
+        }
+        if let Some(api_key) = config.cursor_api_key {
+            runtimes.insert(
+                AgentRuntime::Cursor,
+                RuntimeConfig {
+                    api_key,
+                    base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
+                },
+            );
+        }
+        Self::with_http(http, runtimes)
+    }
+
+    pub fn register_session(&self, session: ManagedSessionRef) -> Result<(), AgentSdkError> {
+        let ManagedSessionRef {
+            session_id,
+            lap_agent_runtime,
+            provider_session_id,
+            provider_agent_id,
+            provider_run_id,
+        } = session;
+        let agent_id = match lap_agent_runtime {
+            AgentRuntime::Cursor => provider_agent_id.or_else(|| provider_session_id.clone()),
+            AgentRuntime::ClaudeManagedAgents => provider_agent_id,
+        };
+        self.remember_session_context(
+            &session_id,
+            SessionContext {
+                runtime: lap_agent_runtime,
+                provider_session_id,
+                agent_id,
+                run_id: provider_run_id,
+            },
+        )
     }
 
     fn with_http(http: reqwest::Client, runtimes: HashMap<AgentRuntime, RuntimeConfig>) -> Self {
@@ -202,6 +249,7 @@ impl Lap {
                 session_id.to_owned(),
                 SessionContext {
                     runtime,
+                    provider_session_id: Some(session_id.to_owned()),
                     agent_id: None,
                     run_id: None,
                 },
@@ -214,6 +262,7 @@ impl SessionContext {
     fn cursor(agent_id: String, run_id: Option<String>) -> Self {
         Self {
             runtime: AgentRuntime::Cursor,
+            provider_session_id: Some(agent_id.clone()),
             agent_id: Some(agent_id),
             run_id,
         }
@@ -356,22 +405,19 @@ impl SessionEvents<'_> {
         let runtime = self.client.runtime_for_session(session_id)?;
         match runtime {
             AgentRuntime::ClaudeManagedAgents => {
+                let provider_session_id = self.provider_session_id(session_id)?;
                 let raw = self
                     .client
                     .post(
                         runtime,
-                        &format!("/v1/sessions/{session_id}/events"),
+                        &format!("/v1/sessions/{provider_session_id}/events"),
                         &params,
                     )
                     .await?;
                 Ok(SendEventsResponse { raw })
             }
             AgentRuntime::Cursor => {
-                let agent_id = self
-                    .client
-                    .context_for_session(session_id)?
-                    .and_then(|context| context.agent_id)
-                    .unwrap_or_else(|| session_id.to_owned());
+                let agent_id = self.cursor_agent_id(session_id)?;
                 let body = json!({ "prompt": cursor_prompt_from_events(&params.events)? });
                 let raw = self
                     .client
@@ -391,16 +437,17 @@ impl SessionEvents<'_> {
         let runtime = self.client.runtime_for_session(session_id)?;
         match runtime {
             AgentRuntime::ClaudeManagedAgents => {
+                let provider_session_id = self.provider_session_id(session_id)?;
                 self.client
-                    .stream(runtime, &format!("/v1/sessions/{session_id}/events/stream"))
+                    .stream(
+                        runtime,
+                        &format!("/v1/sessions/{provider_session_id}/events/stream"),
+                    )
                     .await
             }
             AgentRuntime::Cursor => {
                 let context = self.client.context_for_session(session_id)?;
-                let agent_id = context
-                    .as_ref()
-                    .and_then(|context| context.agent_id.clone())
-                    .unwrap_or_else(|| session_id.to_owned());
+                let agent_id = cursor_agent_id_from_context(session_id, context.as_ref());
                 let run_id = match context.and_then(|context| context.run_id) {
                     Some(run_id) => run_id,
                     None => self.latest_cursor_run_id(&agent_id).await?,
@@ -413,6 +460,21 @@ impl SessionEvents<'_> {
                     .await
             }
         }
+    }
+
+    fn provider_session_id(&self, session_id: &str) -> Result<String, AgentSdkError> {
+        Ok(self
+            .client
+            .context_for_session(session_id)?
+            .and_then(|context| context.provider_session_id)
+            .unwrap_or_else(|| session_id.to_owned()))
+    }
+
+    fn cursor_agent_id(&self, session_id: &str) -> Result<String, AgentSdkError> {
+        Ok(cursor_agent_id_from_context(
+            session_id,
+            self.client.context_for_session(session_id)?.as_ref(),
+        ))
     }
 
     async fn latest_cursor_run_id(&self, agent_id: &str) -> Result<String, AgentSdkError> {
@@ -428,6 +490,13 @@ impl SessionEvents<'_> {
         let raw = response_json(response).await?;
         string_field(&raw, "latestRunId")
     }
+}
+
+fn cursor_agent_id_from_context(session_id: &str, context: Option<&SessionContext>) -> String {
+    context
+        .and_then(|context| context.agent_id.clone())
+        .or_else(|| context.and_then(|context| context.provider_session_id.clone()))
+        .unwrap_or_else(|| session_id.to_owned())
 }
 
 fn configured_http_client() -> reqwest::Client {

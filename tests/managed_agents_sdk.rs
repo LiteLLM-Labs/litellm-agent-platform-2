@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
     parse_sse, AgentEvent, AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
-    CreateSessionParams, Lap, LapConfig, SendEventsParams, MANAGED_AGENTS_BETA,
+    CreateSessionParams, Lap, LapConfig, ManagedSessionRef, SendEventsParams, MANAGED_AGENTS_BETA,
 };
 use serde_json::json;
 use wiremock::{
@@ -327,13 +327,22 @@ async fn cursor_provider_stream_conforms_to_anthropic_reference_events() {
         .unwrap();
 
     assert_eq!(session.id, "bc-00000000-0000-0000-0000-000000000001");
+    client
+        .register_session(ManagedSessionRef {
+            session_id: "lap_ses_123".to_owned(),
+            lap_agent_runtime: AgentRuntime::Cursor,
+            provider_session_id: Some(session.id),
+            provider_agent_id: Some("bc-00000000-0000-0000-0000-000000000001".to_owned()),
+            provider_run_id: None,
+        })
+        .unwrap();
 
     client
         .beta()
         .sessions()
         .events()
         .send(
-            &session.id,
+            "lap_ses_123",
             SendEventsParams {
                 events: vec![json!({
                     "type": "user.message",
@@ -348,7 +357,7 @@ async fn cursor_provider_stream_conforms_to_anthropic_reference_events() {
         .beta()
         .sessions()
         .events()
-        .stream(&session.id)
+        .stream("lap_ses_123")
         .await
         .unwrap();
     let mut events = Vec::new();

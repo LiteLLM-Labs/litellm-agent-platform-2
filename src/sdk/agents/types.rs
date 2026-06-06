@@ -149,6 +149,15 @@ pub struct SendEventsParams {
     pub events: Vec<Value>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ManagedSessionRef {
+    pub session_id: String,
+    pub lap_agent_runtime: AgentRuntime,
+    pub provider_session_id: Option<String>,
+    pub provider_agent_id: Option<String>,
+    pub provider_run_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ManagedAgent {
     pub id: String,

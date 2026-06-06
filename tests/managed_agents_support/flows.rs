@@ -1,6 +1,10 @@
 use axum::http::StatusCode;
 use serde_json::json;
 use sqlx::PgPool;
+use wiremock::{
+    matchers::{body_json, header, method, path},
+    Mock, MockServer, ResponseTemplate,
+};
 
 use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
@@ -230,6 +234,181 @@ pub async fn exercise_sessions(fixture: &AppFixture) {
     )
     .await;
     assert_eq!(deleted, true);
+}
+
+pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str) {
+    let cursor = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agents"))
+        .and(header("authorization", "Bearer cursor-test"))
+        .and(body_json(json!({
+            "prompt": { "text": "watch deploys\n\nFix the failing tests" },
+            "model": { "id": "composer-2" },
+            "name": "ops-agent"
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "agent": {
+                "id": "bc-11111111-1111-1111-1111-111111111111",
+                "status": "ACTIVE",
+                "latestRunId": "run-11111111-1111-1111-1111-111111111111"
+            },
+            "run": {
+                "id": "run-11111111-1111-1111-1111-111111111111",
+                "agentId": "bc-11111111-1111-1111-1111-111111111111",
+                "status": "CREATING"
+            }
+        })))
+        .mount(&cursor)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/v1/agents/bc-11111111-1111-1111-1111-111111111111/runs/run-11111111-1111-1111-1111-111111111111/stream",
+        ))
+        .and(header("authorization", "Bearer cursor-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "event: status\n\
+             data: {\"runId\":\"run-11111111-1111-1111-1111-111111111111\",\"status\":\"RUNNING\"}\n\n\
+             event: assistant\n\
+             data: {\"text\":\"gateway\"}\n\n\
+             event: assistant\n\
+             data: {\"text\":\" stream\"}\n\n\
+             event: result\n\
+             data: {\"runId\":\"run-11111111-1111-1111-1111-111111111111\",\"status\":\"FINISHED\"}\n\n",
+        ))
+        .mount(&cursor)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/v1/agents/bc-11111111-1111-1111-1111-111111111111/runs",
+        ))
+        .and(header("authorization", "Bearer cursor-test"))
+        .and(body_json(json!({
+            "prompt": { "text": "Follow up on the test failure" }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "run": {
+                "id": "run-22222222-2222-2222-2222-222222222222",
+                "agentId": "bc-11111111-1111-1111-1111-111111111111",
+                "status": "CREATING"
+            }
+        })))
+        .mount(&cursor)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/v1/agents/bc-11111111-1111-1111-1111-111111111111/runs/run-22222222-2222-2222-2222-222222222222/stream",
+        ))
+        .and(header("authorization", "Bearer cursor-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "event: status\n\
+             data: {\"runId\":\"run-22222222-2222-2222-2222-222222222222\",\"status\":\"RUNNING\"}\n\n\
+             event: assistant\n\
+             data: {\"text\":\"followup\"}\n\n\
+             event: assistant\n\
+             data: {\"text\":\" stream\"}\n\n\
+             event: result\n\
+             data: {\"runId\":\"run-22222222-2222-2222-2222-222222222222\",\"status\":\"FINISHED\"}\n\n",
+        ))
+        .mount(&cursor)
+        .await;
+
+    request_json(
+        fixture.app.clone(),
+        "PUT",
+        "/api/agent-runtimes/cursor/credentials",
+        Some(json!({
+            "api_key": "cursor-test",
+            "api_base": cursor.uri()
+        })),
+    )
+    .await;
+    let session = request_json(
+        fixture.app.clone(),
+        "POST",
+        "/session",
+        Some(json!({
+            "runtime": "cursor",
+            "agent_id": agent_id,
+            "title": "cursor proof",
+            "prompt": "Fix the failing tests",
+            "environment": { "model": "composer-2" }
+        })),
+    )
+    .await;
+    let session_id = session["id"].as_str().unwrap();
+    assert_eq!(session["runtime"], "cursor");
+    assert_eq!(
+        session["provider_session_id"],
+        "bc-11111111-1111-1111-1111-111111111111"
+    );
+    assert_eq!(
+        session["provider_run_id"],
+        "run-11111111-1111-1111-1111-111111111111"
+    );
+
+    let events = request_raw(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/sessions/{session_id}/events/stream?key=sk-local"),
+        None,
+        "application/json",
+        StatusCode::OK,
+    )
+    .await;
+    assert!(events.contains("\"type\":\"session.status_running\""));
+    assert!(events.contains("\"type\":\"agent.message\""));
+    assert!(events.contains("gateway stream"));
+    assert!(events.contains("\"type\":\"session.status_idle\""));
+    assert!(!events.contains("cursor."));
+
+    request_raw(
+        fixture.app.clone(),
+        "POST",
+        &format!("/session/{session_id}/prompt_async"),
+        Some(
+            json!({
+                "parts": [{
+                    "type": "text",
+                    "text": "Follow up on the test failure"
+                }]
+            })
+            .to_string(),
+        ),
+        "application/json",
+        StatusCode::NO_CONTENT,
+    )
+    .await;
+    let mut updated = session.clone();
+    for _ in 0..10 {
+        updated = request_json(
+            fixture.app.clone(),
+            "GET",
+            &format!("/session/{session_id}"),
+            None,
+        )
+        .await;
+        if updated["provider_run_id"] == "run-22222222-2222-2222-2222-222222222222" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        updated["provider_run_id"],
+        "run-22222222-2222-2222-2222-222222222222"
+    );
+
+    let events = request_raw(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/sessions/{session_id}/events/stream?key=sk-local"),
+        None,
+        "application/json",
+        StatusCode::OK,
+    )
+    .await;
+    assert!(events.contains("\"type\":\"agent.message\""));
+    assert!(events.contains("followup stream"));
+    assert!(!events.contains("cursor."));
 }
 
 pub async fn exercise_skills(fixture: &AppFixture) {

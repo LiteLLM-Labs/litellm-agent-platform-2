@@ -132,6 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - Cursor requests are translated to Cursor's v1 Cloud Agent APIs.
 - The SDK sets the Managed Agents beta header and parses SSE session events.
 - Cursor stream chunks are normalized to Anthropic Managed Agents event shape.
+- The gateway exposes the same normalized stream at `/v1/sessions/{session_id}/events/stream`.
 - The SDK does not perform DB calls, idempotency checks, or vault operations.
 
 ## Supported Surface

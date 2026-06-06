@@ -52,6 +52,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/messages", post(messages))
         .route("/v1/responses", post(responses))
         .route("/v1/models", get(models))
+        .route(
+            "/v1/sessions/{session_id}/events/stream",
+            get(sessions::runtime_events),
+        )
         .merge(session_routes())
         .merge(crate::http::observability::routes::router())
         .merge(crate::http::management::routes::router())

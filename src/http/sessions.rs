@@ -32,7 +32,9 @@ use crate::{
         provision_runtime,
     },
     proxy::{auth::master_key::require_master_key, state::AppState},
-    sdk::agents::{AgentSdkError, Lap, LapConfig, SendEventsParams},
+    sdk::agents::{
+        AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams,
+    },
 };
 
 pub async fn list(
@@ -247,23 +249,16 @@ pub async fn runtime_events(
     )?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let row = session(pool, &session_id).await?;
-    if row.runtime.as_deref() != Some(CLAUDE_AGENTS_RUNTIME) {
-        return Err(GatewayError::InvalidConfig(
-            "runtime event streaming is only available for Claude Managed Agents sessions"
-                .to_owned(),
-        ));
-    }
-    let provider_session_id = row.provider_session_id.clone().ok_or_else(|| {
-        GatewayError::InvalidConfig(
-            "Claude Agents session is missing provider_session_id".to_owned(),
-        )
+    let runtime = row.runtime.as_deref().ok_or_else(|| {
+        GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
-    let client = claude_agents_sdk_client(&state).await?;
+    let client = runtime_sdk_client(&state, runtime).await?;
+    register_runtime_session(&client, &row)?;
     let provider_stream = client
         .beta()
         .sessions()
         .events()
-        .stream(&provider_session_id)
+        .stream(&row.id)
         .await
         .map_err(agent_sdk_error)?;
     let body_stream = provider_stream.map(|event| {
@@ -329,7 +324,7 @@ async fn execute_prompt(
     model: String,
 ) -> Result<(), GatewayError> {
     if row.runtime.is_some() {
-        return execute_runtime_prompt(state, row, prompt).await;
+        return execute_runtime_prompt(state, &pool, row, prompt).await;
     }
 
     let agent = agent_definition(&pool, &state, &row, &model).await?;
@@ -399,44 +394,25 @@ async fn execute_prompt(
 
 async fn execute_runtime_prompt(
     state: Arc<AppState>,
+    pool: &PgPool,
     row: SessionRow,
     prompt: String,
 ) -> Result<(), GatewayError> {
-    match row.runtime.as_deref() {
-        Some(CLAUDE_AGENTS_RUNTIME) => execute_claude_agents_prompt(state, row, prompt).await,
-        Some(CURSOR_RUNTIME) => Err(GatewayError::InvalidConfig(
-            "Cursor runtime sessions are provisioned, but the managed agents SDK does not yet expose Cursor event send/stream".to_owned(),
-        )),
-        Some(runtime) => Err(GatewayError::InvalidConfig(format!(
-            "unsupported runtime session: {runtime}"
-        ))),
-        None => Err(GatewayError::InvalidConfig(
-            "runtime session is missing runtime".to_owned(),
-        )),
-    }
-}
-
-async fn execute_claude_agents_prompt(
-    state: Arc<AppState>,
-    row: SessionRow,
-    prompt: String,
-) -> Result<(), GatewayError> {
-    let provider_session_id = row.provider_session_id.clone().ok_or_else(|| {
-        GatewayError::InvalidConfig(
-            "Claude Agents session is missing provider_session_id".to_owned(),
-        )
+    let runtime = row.runtime.as_deref().ok_or_else(|| {
+        GatewayError::InvalidConfig("runtime session is missing runtime".to_owned())
     })?;
-    let client = claude_agents_sdk_client(&state).await?;
+    let client = runtime_sdk_client(&state, runtime).await?;
+    register_runtime_session(&client, &row)?;
 
     state
         .agent_runs
         .update_status(&row.id, AgentRunStatus::Running);
-    client
+    let sent = client
         .beta()
         .sessions()
         .events()
         .send(
-            &provider_session_id,
+            &row.id,
             SendEventsParams {
                 events: vec![json!({
                     "type": "user.message",
@@ -446,17 +422,77 @@ async fn execute_claude_agents_prompt(
         )
         .await
         .map_err(agent_sdk_error)?;
+    if let Some(provider_run_id) = provider_run_id(runtime, &sent.raw) {
+        sessions::repository::set_provider_run(pool, &row.id, &provider_run_id, "running").await?;
+    }
     Ok(())
 }
 
-async fn claude_agents_sdk_client(state: &AppState) -> Result<Lap, GatewayError> {
-    let credential =
-        crate::http::agent_runtimes::load_credential(state, CLAUDE_AGENTS_RUNTIME).await?;
-    Ok(Lap::new(LapConfig {
-        anthropic_api_key: Some(credential.api_key),
-        anthropic_base_url: credential.api_base,
-        ..LapConfig::default()
-    }))
+async fn runtime_sdk_client(state: &AppState, runtime: &str) -> Result<Lap, GatewayError> {
+    let credential = crate::http::agent_runtimes::load_credential(state, runtime).await?;
+    let mut config = LapConfig::default();
+    match sdk_runtime(runtime)? {
+        AgentRuntime::ClaudeManagedAgents => {
+            config.anthropic_api_key = Some(credential.api_key);
+            config.anthropic_base_url = credential.api_base;
+        }
+        AgentRuntime::Cursor => {
+            config.cursor_api_key = Some(credential.api_key);
+            config.cursor_base_url = credential.api_base;
+        }
+    }
+    Ok(Lap::with_http_client(config, state.http.clone()))
+}
+
+fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result<(), GatewayError> {
+    let runtime = row.runtime.as_deref().ok_or_else(|| {
+        GatewayError::InvalidConfig("runtime session is missing runtime".to_owned())
+    })?;
+    let lap_agent_runtime = sdk_runtime(runtime)?;
+    let provider_session_id = match lap_agent_runtime {
+        AgentRuntime::ClaudeManagedAgents => {
+            Some(row.provider_session_id.clone().ok_or_else(|| {
+                GatewayError::InvalidConfig(
+                    "Claude Agents session is missing provider_session_id".to_owned(),
+                )
+            })?)
+        }
+        AgentRuntime::Cursor => Some(row.provider_session_id.clone().ok_or_else(|| {
+            GatewayError::InvalidConfig("Cursor session is missing provider_session_id".to_owned())
+        })?),
+    };
+    client
+        .register_session(ManagedSessionRef {
+            session_id: row.id.clone(),
+            lap_agent_runtime,
+            provider_agent_id: match lap_agent_runtime {
+                AgentRuntime::Cursor => provider_session_id.clone(),
+                AgentRuntime::ClaudeManagedAgents => None,
+            },
+            provider_session_id,
+            provider_run_id: row.provider_run_id.clone(),
+        })
+        .map_err(agent_sdk_error)
+}
+
+fn sdk_runtime(runtime: &str) -> Result<AgentRuntime, GatewayError> {
+    match runtime {
+        CLAUDE_AGENTS_RUNTIME => Ok(AgentRuntime::ClaudeManagedAgents),
+        CURSOR_RUNTIME => Ok(AgentRuntime::Cursor),
+        other => Err(GatewayError::InvalidConfig(format!(
+            "unsupported runtime session: {other}"
+        ))),
+    }
+}
+
+fn provider_run_id(runtime: &str, raw: &Value) -> Option<String> {
+    if runtime != CURSOR_RUNTIME {
+        return None;
+    }
+    raw.get("run")
+        .and_then(|run| run.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 fn agent_sdk_error(error: AgentSdkError) -> GatewayError {
