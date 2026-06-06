@@ -966,6 +966,12 @@ function ChatInner() {
           sessionId={sid}
           model={model}
           onSent={sessionRuntime ? undefined : refetch}
+          onSend={sessionRuntime ? (text) => sendMessageWithRuntimeModel({
+            sessionId: sid,
+            text,
+            model,
+            runtime: sessionRuntime,
+          }) : undefined}
           onSendStart={beginRuntimeTurn}
           disabled={Boolean(sessionRuntime && sessionStatus === "busy")}
         />

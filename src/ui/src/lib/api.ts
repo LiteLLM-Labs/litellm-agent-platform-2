@@ -757,28 +757,76 @@ export function subscribeRuntimeEvents(opts: {
   onEvent: (ev: RuntimeAgentEvent) => void;
   onError?: (err: unknown) => void;
 }): () => void {
-  let es: EventSource | null = null;
-  try {
-    es = new EventSource(runtimeEventSourceUrl(opts.sessionId));
-  } catch (e) {
-    opts.onError?.(e);
-    return () => {};
-  }
-  es.onmessage = (msg) => {
+  const abort = new AbortController();
+  const base = getHarnessServerUrl();
+
+  void (async () => {
     try {
-      opts.onEvent(JSON.parse(msg.data) as RuntimeAgentEvent);
+      const init = base
+        ? withHarnessProxyAuth({ headers: { accept: "text/event-stream" } })
+        : withAuth({ headers: { accept: "text/event-stream" } });
+      const res = await fetch(runtimeEventSourceUrl(opts.sessionId), {
+        ...init,
+        signal: abort.signal,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new ApiError(res.status, body);
+      }
+      if (!res.body) throw new Error("Runtime event stream did not return a body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (!abort.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = sseBoundaryIndex(buffer);
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary.length);
+          emitRuntimeEventFrame(frame, opts.onEvent, opts.onError);
+          boundary = sseBoundaryIndex(buffer);
+        }
+      }
     } catch (e) {
-      opts.onError?.(e);
+      if (!abort.signal.aborted) opts.onError?.(e);
     }
-  };
-  es.onerror = (e) => opts.onError?.(e);
+  })();
+
   return () => {
-    try {
-      es?.close();
-    } catch {
-      /* noop */
-    }
+    abort.abort();
   };
+}
+
+function sseBoundaryIndex(buffer: string): { index: number; length: number } | -1 {
+  const crlf = buffer.indexOf("\r\n\r\n");
+  const lf = buffer.indexOf("\n\n");
+  if (crlf === -1 && lf === -1) return -1;
+  if (crlf !== -1 && (lf === -1 || crlf < lf)) return { index: crlf, length: 4 };
+  return { index: lf, length: 2 };
+}
+
+function emitRuntimeEventFrame(
+  frame: string,
+  onEvent: (ev: RuntimeAgentEvent) => void,
+  onError?: (err: unknown) => void,
+): void {
+  const data = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+  if (!data || data === "[DONE]") return;
+  try {
+    onEvent(JSON.parse(data) as RuntimeAgentEvent);
+  } catch (e) {
+    onError?.(e);
+  }
 }
 
 export function runtimeEventSourceUrl(sessionId: string): string {
