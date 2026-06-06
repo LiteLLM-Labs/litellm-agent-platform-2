@@ -17,11 +17,13 @@ fn main() {
                 Some(ProviderModule {
                     name: path.file_name()?.to_str()?.to_owned(),
                     endpoint_module: provider_endpoint_module(&path),
+                    has_runtime: path.join("runtime").join("mod.rs").exists(),
                 })
             } else {
                 None
             }
         })
+        .filter(|provider| provider.name != "base")
         .collect();
     providers.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -42,9 +44,19 @@ fn main() {
                 .map(|module| format!("    {}::{module}::init(registry);\n", provider.name))
         })
         .collect();
+    let runtime_inits: String = providers
+        .iter()
+        .filter(|provider| provider.has_runtime)
+        .map(|provider| {
+            format!(
+                "    {}::register_runtime_adapters(registry);\n",
+                provider.name
+            )
+        })
+        .collect();
 
     let generated = format!(
-        "{mods}\npub fn register_all(registry: &mut crate::sdk::transformations::base::ProviderRegistry) {{\n{inits}}}\n"
+        "{mods}\npub fn register_all(registry: &mut crate::sdk::providers::base::ProviderRegistry) {{\n{inits}}}\n\npub(crate) fn register_runtime_adapters(registry: &mut crate::sdk::providers::base::runtime::RuntimeAdapterRegistry) {{\n{runtime_inits}}}\n"
     );
     fs::write(&dest, generated).unwrap();
 
@@ -54,6 +66,7 @@ fn main() {
 struct ProviderModule {
     name: String,
     endpoint_module: Option<String>,
+    has_runtime: bool,
 }
 
 fn provider_endpoint_module(path: &Path) -> Option<String> {

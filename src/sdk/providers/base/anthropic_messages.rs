@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::{
     errors::GatewayError,
-    sdk::{routing::Deployment, transformations::base::ProviderRequest},
+    sdk::{providers::base::ProviderRequest, routing::Deployment},
 };
 
 pub trait BaseAnthropicMessagesTransformation: Send + Sync + 'static {

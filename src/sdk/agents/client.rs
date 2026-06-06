@@ -13,7 +13,7 @@ use super::{
     responses::{ensure_success, response_json},
     types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
-use crate::sdk::{providers, transformations::runtime::RuntimeAdapter};
+use crate::sdk::{providers, providers::base::runtime::RuntimeAdapter};
 
 #[derive(Clone)]
 pub struct Lap {
@@ -245,24 +245,28 @@ impl SessionContext {
 fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
     let mut runtimes = HashMap::new();
     if let Some(api_key) = config.anthropic_api_key {
-        runtimes.insert(
-            AgentRuntime::ClaudeManagedAgents,
-            RuntimeConfig {
-                api_key,
-                base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-                adapter: providers::adapter(AgentRuntime::ClaudeManagedAgents),
-            },
-        );
+        if let Some(adapter) = providers::adapter(AgentRuntime::ClaudeManagedAgents) {
+            runtimes.insert(
+                AgentRuntime::ClaudeManagedAgents,
+                RuntimeConfig {
+                    api_key,
+                    base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
+                    adapter,
+                },
+            );
+        }
     }
     if let Some(api_key) = config.cursor_api_key {
-        runtimes.insert(
-            AgentRuntime::Cursor,
-            RuntimeConfig {
-                api_key,
-                base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
-                adapter: providers::adapter(AgentRuntime::Cursor),
-            },
-        );
+        if let Some(adapter) = providers::adapter(AgentRuntime::Cursor) {
+            runtimes.insert(
+                AgentRuntime::Cursor,
+                RuntimeConfig {
+                    api_key,
+                    base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
+                    adapter,
+                },
+            );
+        }
     }
     runtimes
 }

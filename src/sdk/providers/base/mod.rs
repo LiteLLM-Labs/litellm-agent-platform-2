@@ -3,6 +3,10 @@
 //! Implement this once per provider endpoint, such as Anthropic Messages or
 //! OpenAI Responses. Routing selects the implementation; HTTP owns networking.
 
+pub mod anthropic_messages;
+pub mod openai_responses;
+pub(crate) mod runtime;
+
 use std::{collections::HashMap, sync::Arc};
 
 use axum::http::HeaderMap;

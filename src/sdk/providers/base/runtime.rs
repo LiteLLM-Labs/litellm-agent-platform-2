@@ -3,10 +3,10 @@
 //! Provider runtimes such as Claude Managed Agents and Cursor implement this
 //! trait so the SDK client can stay runtime-agnostic.
 
-use std::{future::Future, pin::Pin};
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use crate::sdk::agents::{
-    AgentEventStream, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
+    AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
     CreateSessionParams, Environment, Lap, ManagedAgent, ManagedSessionRef, SendEventsParams,
     SendEventsResponse, Session, SessionContext,
 };
@@ -14,7 +14,26 @@ use crate::sdk::agents::{
 pub(crate) type AdapterFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, AgentSdkError>> + Send + 'a>>;
 
-pub(crate) trait RuntimeAdapter: Send + Sync {
+#[derive(Default)]
+pub(crate) struct RuntimeAdapterRegistry {
+    adapters: HashMap<AgentRuntime, Arc<dyn RuntimeAdapter>>,
+}
+
+impl RuntimeAdapterRegistry {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn register(&mut self, runtime: AgentRuntime, adapter: impl RuntimeAdapter) {
+        self.adapters.insert(runtime, Arc::new(adapter));
+    }
+
+    pub(crate) fn get(&self, runtime: AgentRuntime) -> Option<Arc<dyn RuntimeAdapter>> {
+        self.adapters.get(&runtime).cloned()
+    }
+}
+
+pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
     fn configure_request(
         &self,
         request: reqwest::RequestBuilder,

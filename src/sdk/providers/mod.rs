@@ -4,29 +4,28 @@
 
 use std::sync::Arc;
 
-use crate::sdk::{agents::AgentRuntime, transformations::runtime::RuntimeAdapter};
+use crate::sdk::{agents::AgentRuntime, providers::base::runtime::RuntimeAdapter};
 
-pub use crate::sdk::transformations::base::{
+pub use crate::sdk::providers::base::{
     Provider, ProviderRegistry, ProviderRequest, Transformation,
 };
 
-pub(crate) fn adapter(runtime: AgentRuntime) -> Arc<dyn RuntimeAdapter> {
-    match runtime {
-        AgentRuntime::ClaudeManagedAgents => {
-            Arc::new(anthropic::runtime::ClaudeManagedAgentsRuntime)
-        }
-        AgentRuntime::Cursor => Arc::new(cursor::runtime::CursorRuntime),
-    }
+pub mod base;
+
+pub(crate) fn adapter(runtime: AgentRuntime) -> Option<Arc<dyn RuntimeAdapter>> {
+    let mut registry = base::runtime::RuntimeAdapterRegistry::new();
+    register_runtime_adapters(&mut registry);
+    registry.get(runtime)
 }
 
 pub mod model {
-    pub use crate::sdk::transformations::base::{
+    pub use crate::sdk::providers::base::{
         Provider, ProviderRegistry, ProviderRequest, Transformation,
     };
 }
 
 pub mod transform {
-    pub use crate::sdk::transformations::base::{
+    pub use crate::sdk::providers::base::{
         Provider, ProviderRegistry, ProviderRequest, Transformation,
     };
 }

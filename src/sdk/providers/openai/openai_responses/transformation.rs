@@ -5,8 +5,8 @@ use crate::{
     errors::GatewayError,
     sdk::{
         routing::Deployment,
-        transformations::openai_responses::BaseOpenAiResponsesTransformation,
-        transformations::base::{ProviderRequest, Transformation},
+        providers::base::openai_responses::BaseOpenAiResponsesTransformation,
+        providers::base::{ProviderRequest, Transformation},
     },
 };
 
@@ -85,10 +85,10 @@ mod tests {
 
     use super::OpenAiResponsesTransformation;
     use crate::sdk::{
-        routing::Deployment,
-        transformations::{
-            base::Transformation, openai_responses::BaseOpenAiResponsesTransformation,
+        providers::base::{
+            openai_responses::BaseOpenAiResponsesTransformation, Transformation,
         },
+        routing::Deployment,
     };
 
     fn deployment() -> Deployment {

@@ -12,10 +12,10 @@ It exposes:
 
 Runtime-specific request shapes live behind provider-owned adapters in
 `src/sdk/providers/<provider>/runtime/`. Adding another runtime should add an
-adapter there and register it in `src/sdk/providers/mod.rs` instead of
+adapter there and register it from the provider module instead of
 adding new `match AgentRuntime` branches throughout the SDK resource layer.
 
-Base transformation traits live under `src/sdk/transformations/`, including
+Base transformation traits live under `src/sdk/providers/base/`, including
 endpoint-family bases for `anthropic_messages` and `openai_responses`. Model
 routing lives in `src/sdk/routing.rs`; provider-owned endpoint translations and
 runtimes live under `src/sdk/providers/<provider>/`.

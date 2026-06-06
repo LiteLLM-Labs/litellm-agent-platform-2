@@ -23,8 +23,8 @@ and HTTP routes.
 | Folder | Responsibility |
 |---|---|
 | `sdk/routing.rs` | **Routing.** Request/model routing above provider endpoint transformation. |
-| `sdk/transformations/` | **Base transformations.** Endpoint-family base traits and the runtime adapter base trait. |
-| `sdk/providers/` | **Provider integrations.** Each provider owns its supported capabilities: `<endpoint>/` for request transformation, `runtime/` for managed-agent adapters. |
+| `sdk/providers/base/` | **Base transformations.** Endpoint-family base traits and the runtime adapter base trait. |
+| `sdk/providers/<provider>/<endpoint>/` | **Provider integrations.** Each provider owns its supported capabilities: `<endpoint>/` for request transformation, `runtime/` for managed-agent adapters. |
 | `sdk/agents/` | **Agent Runtime SDK.** The `Lap` client, public runtime resource types, and normalized events. |
 | `proxy/` | **Proxy-server concerns**, kept out of the SDK: `config.rs` (`config.yaml` parse + env expansion + validation), `state.rs` (`AppState` — config, router, shared HTTP client), `auth/` (master-key check). |
 | `http/` | HTTP layer. Routes (`routes.rs`), the `/v1/messages` endpoint (`messages.rs`), health check, and `llm.rs` — the **only** place that does outbound networking to providers. |

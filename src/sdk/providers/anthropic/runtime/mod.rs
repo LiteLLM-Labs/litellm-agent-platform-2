@@ -5,7 +5,7 @@ use crate::sdk::agents::{
     CreateEnvironmentParams, CreateSessionParams, Environment, Lap, ManagedAgent,
     SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
 };
-use crate::sdk::transformations::runtime::{AdapterFuture, RuntimeAdapter};
+use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 
 pub(crate) struct ClaudeManagedAgentsRuntime;
 

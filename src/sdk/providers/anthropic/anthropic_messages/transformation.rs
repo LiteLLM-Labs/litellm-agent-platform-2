@@ -5,8 +5,8 @@ use crate::{
     errors::GatewayError,
     sdk::{
         routing::Deployment,
-        transformations::anthropic_messages::BaseAnthropicMessagesTransformation,
-        transformations::base::{ProviderRequest, Transformation},
+        providers::base::anthropic_messages::BaseAnthropicMessagesTransformation,
+        providers::base::{ProviderRequest, Transformation},
     },
 };
 
