@@ -4,7 +4,8 @@ use serde_json::json;
 use sqlx::PgPool;
 
 use super::{
-    super::{read_events_until_completed, request_json, request_raw, AppFixture},
+    super::{request_json, request_raw, AppFixture},
+    claude_runtime::save_anthropic_credentials,
     slack_helpers::{
         assert_slack_api_call_count, assert_slack_api_called, now_seconds, percent_encode,
         provider_id_for, signed_json_request, signed_request,
@@ -12,20 +13,36 @@ use super::{
 };
 
 pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
+    let _anthropic = save_anthropic_credentials(fixture).await;
     save_slack_secrets(fixture, agent_id).await;
     configure_agent_slack(fixture, agent_id).await;
     assert_oauth_callback(fixture, agent_id).await;
     assert_url_verification(fixture, agent_id).await;
     assert_thread_session_race(fixture, agent_id).await;
     let session_id = send_app_mention(fixture, agent_id).await;
-    let events = read_events_until_completed(fixture.app.clone(), "/event", &session_id).await;
-    assert!(events.contains("\"type\":\"message.part.delta\""));
-    assert!(events.contains("\"delta\":\"hello \""));
+    assert_runtime_session(fixture, &session_id).await;
+    assert_slack_api_call_count(fixture, "/reactions.add", 1).await;
     assert_slack_api_call_count(fixture, "/chat.postMessage", 1).await;
     assert_slack_api_called(fixture, "/chat.update").await;
     send_channel_thread_reply(fixture, agent_id).await;
+    assert_slack_api_call_count(fixture, "/reactions.add", 2).await;
     assert_slack_api_call_count(fixture, "/chat.postMessage", 2).await;
     assert_interactivity_accepts_approval(fixture, agent_id).await;
+}
+
+async fn assert_runtime_session(fixture: &AppFixture, session_id: &str) {
+    let runtime: String = sqlx::query_scalar(
+        r#"
+        SELECT runtime
+        FROM "LiteLLM_ManagedAgentSessionsTable"
+        WHERE id = $1
+        "#,
+    )
+    .bind(session_id)
+    .fetch_one(&fixture.pool)
+    .await
+    .unwrap();
+    assert_eq!(runtime, "claude_managed_agents");
 }
 
 async fn save_slack_secrets(fixture: &AppFixture, agent_id: &str) {

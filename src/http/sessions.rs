@@ -16,14 +16,16 @@ use crate::{
 
 mod execution;
 mod runtime;
+mod runtime_events_api;
 mod runtime_sdk;
 mod storage;
 mod types;
 
 use execution::execute_prompt;
-pub use runtime::runtime_event_list;
-pub use runtime::runtime_events;
+pub(crate) use runtime::create_runtime_session_for_agent;
 use runtime::{create_runtime_session, execute_runtime_prompt};
+pub(crate) use runtime_events_api::runtime_event_stream_for_session;
+pub use runtime_events_api::{runtime_event_list, runtime_events};
 use storage::{db, persist_message, resolve_session_request, session};
 pub use types::{CreateSessionRequest, MessageResponse, PromptRequest, SessionResponse};
 

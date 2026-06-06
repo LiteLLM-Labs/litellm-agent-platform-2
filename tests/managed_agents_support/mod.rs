@@ -246,6 +246,11 @@ async fn mock_slack() -> MockServer {
         .mount(&server)
         .await;
     Mock::given(method("POST"))
+        .and(path("/reactions.add"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
         .and(path("/oauth.v2.access"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "ok": true,

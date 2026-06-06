@@ -91,6 +91,35 @@ pub async fn update_message(
     }
 }
 
+pub async fn add_reaction(
+    client: &Client,
+    api_base_url: &str,
+    bot_token: &str,
+    channel: &str,
+    timestamp: &str,
+    name: &str,
+) -> Result<(), GatewayError> {
+    let response: SlackOkResponse = client
+        .post(method_url(api_base_url, "reactions.add"))
+        .bearer_auth(bot_token)
+        .json(&json!({
+            "channel": channel,
+            "timestamp": timestamp,
+            "name": name,
+        }))
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?
+        .json()
+        .await
+        .map_err(GatewayError::Upstream)?;
+    if response.ok {
+        Ok(())
+    } else {
+        Err(slack_api_error("reactions.add", response.error))
+    }
+}
+
 pub async fn oauth_access(
     client: &Client,
     api_base_url: &str,
