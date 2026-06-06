@@ -12,9 +12,9 @@ use litellm_rust::{
         config::{GatewayConfig, GeneralSettings},
         state::AppState,
     },
-    sdk::llms::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
+    sdk::{
+        llms::router::Router as ModelRouter,
+        providers::{self, llm::ProviderRegistry},
     },
 };
 use serde_json::json;

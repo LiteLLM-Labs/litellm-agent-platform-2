@@ -11,9 +11,9 @@ use super::{
     events::{stream_events, AgentEventStream},
     resources::Beta,
     responses::{ensure_success, response_json},
-    runtimes::{self, RuntimeAdapter},
     types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
+use crate::sdk::providers::runtime::{self, RuntimeAdapter};
 
 #[derive(Clone)]
 pub struct Lap {
@@ -35,11 +35,11 @@ struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct SessionContext {
-    pub(super) runtime: AgentRuntime,
-    pub(super) provider_session_id: Option<String>,
-    pub(super) agent_id: Option<String>,
-    pub(super) run_id: Option<String>,
+pub(crate) struct SessionContext {
+    pub(crate) runtime: AgentRuntime,
+    pub(crate) provider_session_id: Option<String>,
+    pub(crate) agent_id: Option<String>,
+    pub(crate) run_id: Option<String>,
 }
 
 impl Lap {
@@ -88,7 +88,7 @@ impl Lap {
         response_json(response).await
     }
 
-    pub(super) async fn stream(
+    pub(crate) async fn stream(
         &self,
         runtime: AgentRuntime,
         path: &str,
@@ -102,7 +102,7 @@ impl Lap {
         Ok(self.adapter(runtime)?.normalize_stream(stream))
     }
 
-    pub(super) fn request(
+    pub(crate) fn request(
         &self,
         runtime: AgentRuntime,
         method: Method,
@@ -163,7 +163,7 @@ impl Lap {
             .unwrap_or_else(|| self.default_runtime())
     }
 
-    pub(super) fn context_for_session(
+    pub(crate) fn context_for_session(
         &self,
         session_id: &str,
     ) -> Result<Option<SessionContext>, AgentSdkError> {
@@ -175,7 +175,7 @@ impl Lap {
         Ok(contexts.get(session_id).cloned())
     }
 
-    pub(super) fn remember_cursor_run(
+    pub(crate) fn remember_cursor_run(
         &self,
         agent_id: &str,
         run_id: &str,
@@ -188,7 +188,7 @@ impl Lap {
         Ok(())
     }
 
-    pub(super) fn cursor_run_for_agent(
+    pub(crate) fn cursor_run_for_agent(
         &self,
         agent_id: &str,
     ) -> Result<Option<String>, AgentSdkError> {
@@ -201,7 +201,7 @@ impl Lap {
             .cloned())
     }
 
-    pub(super) fn remember_session_context(
+    pub(crate) fn remember_session_context(
         &self,
         session_id: &str,
         context: SessionContext,
@@ -214,7 +214,7 @@ impl Lap {
         Ok(())
     }
 
-    pub(super) fn remember_session(
+    pub(crate) fn remember_session(
         &self,
         session_id: &str,
         runtime: AgentRuntime,
@@ -232,7 +232,7 @@ impl Lap {
 }
 
 impl SessionContext {
-    pub(super) fn cursor(agent_id: String, run_id: Option<String>) -> Self {
+    pub(crate) fn cursor(agent_id: String, run_id: Option<String>) -> Self {
         Self {
             runtime: AgentRuntime::Cursor,
             provider_session_id: Some(agent_id.clone()),
@@ -250,7 +250,7 @@ fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
             RuntimeConfig {
                 api_key,
                 base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-                adapter: runtimes::adapter(AgentRuntime::ClaudeManagedAgents),
+                adapter: runtime::adapter(AgentRuntime::ClaudeManagedAgents),
             },
         );
     }
@@ -260,7 +260,7 @@ fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
             RuntimeConfig {
                 api_key,
                 base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
-                adapter: runtimes::adapter(AgentRuntime::Cursor),
+                adapter: runtime::adapter(AgentRuntime::Cursor),
             },
         );
     }

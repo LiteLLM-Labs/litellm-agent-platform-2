@@ -1,23 +1,18 @@
-mod claude;
-mod cursor;
-mod cursor_stream;
-
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::sdk::agents::{
-    client::{Lap, SessionContext},
-    events::AgentEventStream,
-    types::{
-        AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, ManagedAgent, ManagedSessionRef, SendEventsParams,
-        SendEventsResponse, Session,
+use crate::sdk::{
+    agents::{
+        AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
+        CreateSessionParams, Environment, Lap, ManagedAgent, ManagedSessionRef, SendEventsParams,
+        SendEventsResponse, Session, SessionContext,
     },
+    providers::{anthropic, cursor},
 };
 
-pub(super) type AdapterFuture<'a, T> =
+pub(crate) type AdapterFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, AgentSdkError>> + Send + 'a>>;
 
-pub(super) trait RuntimeAdapter: Send + Sync {
+pub(crate) trait RuntimeAdapter: Send + Sync {
     fn configure_request(
         &self,
         request: reqwest::RequestBuilder,
@@ -69,9 +64,11 @@ pub(super) trait RuntimeAdapter: Send + Sync {
     ) -> AdapterFuture<'a, AgentEventStream>;
 }
 
-pub(super) fn adapter(runtime: AgentRuntime) -> Arc<dyn RuntimeAdapter> {
+pub(crate) fn adapter(runtime: AgentRuntime) -> Arc<dyn RuntimeAdapter> {
     match runtime {
-        AgentRuntime::ClaudeManagedAgents => Arc::new(claude::ClaudeManagedAgentsRuntime),
-        AgentRuntime::Cursor => Arc::new(cursor::CursorRuntime),
+        AgentRuntime::ClaudeManagedAgents => {
+            Arc::new(anthropic::runtime::ClaudeManagedAgentsRuntime)
+        }
+        AgentRuntime::Cursor => Arc::new(cursor::runtime::CursorRuntime),
     }
 }

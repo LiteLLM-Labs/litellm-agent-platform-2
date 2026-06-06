@@ -1,7 +1,5 @@
-//! Each subfolder is one provider, discovered automatically at build time (see
-//! build.rs) — `register_all` below is generated. No edits here to add one.
-//! Networking belongs in `http/llm.rs`, never in a provider.
+//! Compatibility exports for LLM provider transformation.
+//!
+//! Canonical provider implementations live under `sdk::providers`.
 
-pub mod transform;
-
-include!(concat!(env!("OUT_DIR"), "/providers_generated.rs"));
+pub use crate::sdk::providers::{anthropic, openai, register_all, transform};

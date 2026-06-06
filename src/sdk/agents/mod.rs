@@ -1,12 +1,12 @@
 mod client;
 mod events;
 mod resources;
-mod response_fields;
-mod responses;
-mod runtimes;
+pub(crate) mod response_fields;
+pub(crate) mod responses;
 mod types;
 
 pub use client::Lap;
+pub(crate) use client::SessionContext;
 pub use events::{
     parse_sse, AgentEvent, AgentEventKind, AgentEventPayload, AgentEventStream, AgentMessageData,
     AgentToolResultData, AgentToolUseData, SessionErrorData, SessionIdleData, SessionStatusData,

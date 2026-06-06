@@ -140,8 +140,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - Cursor stream chunks are normalized to Anthropic Managed Agents event shape.
 - `AgentEvent` keeps the flat JSON event shape and adds typed views through
   `kind()` and `payload()`.
-- Runtime-specific behavior is isolated behind internal adapters under
-  `src/sdk/agents/runtimes/`.
+- Runtime-specific behavior is isolated behind provider-owned adapters under
+  `src/sdk/providers/<provider>/runtime/`.
 - The gateway exposes the same normalized stream at `/v1/sessions/{session_id}/events/stream`.
   The route requires the configured master key in `Authorization: Bearer ...` or `?key=...`.
 - The SDK does not perform DB calls, idempotency checks, or vault operations.

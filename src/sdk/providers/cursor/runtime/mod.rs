@@ -1,20 +1,19 @@
 use reqwest::Method;
 use serde_json::{json, Map, Value};
 
-use super::{cursor_stream::normalize_cursor_stream, AdapterFuture, RuntimeAdapter};
+mod stream;
+
 use crate::sdk::agents::{
-    client::{Lap, SessionContext},
-    events::AgentEventStream,
     response_fields::{id, nested_id, nested_string_field},
     responses::response_json,
-    types::{
-        AgentModel, AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, ManagedAgent, ManagedSessionRef, SendEventsParams,
-        SendEventsResponse, Session,
-    },
+    AgentEventStream, AgentModel, AgentRuntime, AgentSdkError, CreateAgentParams,
+    CreateEnvironmentParams, CreateSessionParams, Environment, Lap, ManagedAgent,
+    ManagedSessionRef, SendEventsParams, SendEventsResponse, Session, SessionContext,
 };
+use crate::sdk::providers::runtime::{AdapterFuture, RuntimeAdapter};
+use stream::normalize_cursor_stream;
 
-pub(super) struct CursorRuntime;
+pub(crate) struct CursorRuntime;
 
 impl RuntimeAdapter for CursorRuntime {
     fn configure_request(

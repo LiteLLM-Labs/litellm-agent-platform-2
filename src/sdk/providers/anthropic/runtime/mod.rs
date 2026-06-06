@@ -1,17 +1,13 @@
 use serde_json::Value;
 
-use super::{AdapterFuture, RuntimeAdapter};
 use crate::sdk::agents::{
-    client::Lap,
-    response_fields::id,
-    types::{
-        AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, ManagedAgent, SendEventsParams, SendEventsResponse,
-        Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
-    },
+    response_fields::id, AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams,
+    CreateEnvironmentParams, CreateSessionParams, Environment, Lap, ManagedAgent,
+    SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
 };
+use crate::sdk::providers::runtime::{AdapterFuture, RuntimeAdapter};
 
-pub(super) struct ClaudeManagedAgentsRuntime;
+pub(crate) struct ClaudeManagedAgentsRuntime;
 
 impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
     fn configure_request(
@@ -101,7 +97,7 @@ impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
         &'a self,
         client: &'a Lap,
         session_id: &'a str,
-    ) -> AdapterFuture<'a, crate::sdk::agents::events::AgentEventStream> {
+    ) -> AdapterFuture<'a, AgentEventStream> {
         Box::pin(async move {
             let provider_session_id = provider_session_id(client, session_id)?;
             client

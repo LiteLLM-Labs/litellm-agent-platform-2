@@ -1,6 +1,6 @@
 pub mod transformation;
 
-use crate::sdk::llms::providers::transform::ProviderRegistry;
+use crate::sdk::providers::llm::ProviderRegistry;
 use transformation::OpenAiResponsesTransformation;
 
 const OPENAI_API_BASE: &str = "https://api.openai.com";

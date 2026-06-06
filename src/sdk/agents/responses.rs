@@ -1,8 +1,8 @@
 use serde_json::Value;
 
-use super::types::AgentSdkError;
+use super::AgentSdkError;
 
-pub(super) async fn response_json(response: reqwest::Response) -> Result<Value, AgentSdkError> {
+pub(crate) async fn response_json(response: reqwest::Response) -> Result<Value, AgentSdkError> {
     let response = ensure_success(response).await?;
     let text = response.text().await?;
     if text.trim().is_empty() {
@@ -11,7 +11,7 @@ pub(super) async fn response_json(response: reqwest::Response) -> Result<Value, 
     serde_json::from_str(&text).map_err(AgentSdkError::Json)
 }
 
-pub(super) async fn ensure_success(
+pub(crate) async fn ensure_success(
     response: reqwest::Response,
 ) -> Result<reqwest::Response, AgentSdkError> {
     let status = response.status();

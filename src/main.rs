@@ -10,9 +10,9 @@ use litellm_rust::{
         config::{load_config, GatewayConfig},
         state::AppState,
     },
-    sdk::llms::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router,
+    sdk::{
+        llms::router::Router,
+        providers::{self, llm::ProviderRegistry},
     },
 };
 use tokio::net::TcpListener;

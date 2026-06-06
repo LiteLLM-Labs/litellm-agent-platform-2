@@ -21,14 +21,15 @@ proxy server wraps them with config, auth, state, and HTTP routes.
 
 | Folder | Responsibility |
 |---|---|
-| `sdk/llms/` | **LLM translation layer.** One subfolder per LLM provider, auto-discovered at build time. `router.rs` maps model names → upstream deployment + handler; `providers/transform.rs` defines the transformation trait + registry. Providers translate request shape only — never make network calls. |
-| `sdk/agents/` | **Agent Runtime SDK.** The `Lap` client, public runtime resource types, normalized events, and internal runtime adapters. |
+| `sdk/llms/` | **LLM router.** `router.rs` maps model names → upstream deployment + handler. |
+| `sdk/providers/` | **Provider integrations.** Each provider owns its supported capabilities: `llm/` for request transformation, `runtime/` for managed-agent adapters. |
+| `sdk/agents/` | **Agent Runtime SDK.** The `Lap` client, public runtime resource types, and normalized events. |
 | `proxy/` | **Proxy-server concerns**, kept out of the SDK: `config.rs` (`config.yaml` parse + env expansion + validation), `state.rs` (`AppState` — config, router, shared HTTP client), `auth/` (master-key check). |
 | `http/` | HTTP layer. Routes (`routes.rs`), the `/v1/messages` endpoint (`messages.rs`), health check, and `llm.rs` — the **only** place that does outbound networking to providers. |
 | `cli/` | The `litellm-rust claude` wizard: configures Claude Code to point at the gateway (arg parsing, credential storage, terminal prompts). |
 
 ## Adding a provider
 
-Drop a folder under `sdk/llms/providers/<name>/` with a `mod.rs` (`pub fn init`) and a
-`transformation.rs`. `build.rs` wires it in automatically — no edits anywhere
-else. See [docs/architecture.md](../docs/architecture.md#providers-are-self-contained).
+Drop a provider folder under `sdk/providers/<name>/` with a `llm/mod.rs`
+(`pub fn init`) and a `llm/transformation.rs`. `build.rs` wires it in
+automatically. See [docs/architecture.md](../docs/architecture.md#providers-are-self-contained).

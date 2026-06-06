@@ -11,7 +11,7 @@ use crate::{
     },
     errors::GatewayError,
     model_prices::ModelCostMap,
-    sdk::llms::providers::transform::ProviderRequest,
+    sdk::providers::llm::ProviderRequest,
 };
 
 const MAX_STREAM_CAPTURE_BYTES: usize = 1_000_000;

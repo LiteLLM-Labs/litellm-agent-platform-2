@@ -1,4 +1,5 @@
 pub mod agents;
 pub mod llms;
+pub mod providers;
 
-pub use llms::{providers, router};
+pub use llms::router;

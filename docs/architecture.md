@@ -15,7 +15,7 @@ litellm-rust is a low-overhead gateway. A request flows through four layers:
 |---|---|---|
 | **Endpoint** | `http/messages.rs` | Receive the request, authenticate (master key) |
 | **Router** | `sdk/llms/router.rs` | Map the public model name to an upstream deployment + provider handler |
-| **Transformation** | `sdk/llms/providers/<name>/transformation.rs` | Translate the request into the provider's API shape |
+| **Transformation** | `sdk/providers/<name>/llm/transformation.rs` | Translate the request into the provider's API shape |
 | **LLM API** | `http/llm.rs` | The only place that does outbound networking |
 
 ## Two halves
@@ -25,8 +25,9 @@ separate:
 
 | Half | Folders | What it is |
 |---|---|---|
-| **LLM translation layer** | `sdk/llms/` | Provider handlers + the router that picks one. Pure request/response shaping — no auth, no server state. |
-| **Agent Runtime SDK** | `sdk/agents/` | The `Lap` client and managed-agent runtime adapters. |
+| **LLM router** | `sdk/llms/` | The router that maps public model names to provider deployments. |
+| **Provider integrations** | `sdk/providers/` | Provider-owned LLM transforms and runtime adapters. |
+| **Agent Runtime SDK** | `sdk/agents/` | The `Lap` client resources and managed-agent runtime types. |
 | **Proxy server** | `proxy/`, `http/`, `cli/` | Everything around the translation: config loading, master-key auth, shared `AppState`, HTTP endpoints, the CLI wizard. |
 
 `errors.rs` (the shared `GatewayError`) sits at the crate root — both halves use
@@ -48,7 +49,7 @@ curl http://localhost:4000/v1/messages \
 
 1. **Endpoint** (`http/messages.rs`) — `proxy::auth` checks the `Authorization: Bearer` token against the configured master key, then parses the body and reads `model`.
 2. **Router** (`sdk/llms/router.rs`) — looks up `"claude-opus-4-6"` in the route table built at boot from `config.yaml`. Returns a `Route` = `{ deployment, handler }`.
-3. **Transformation** (`sdk/llms/providers/anthropic/transformation.rs`) — rewrites the model alias to the real upstream name, builds outbound headers (`x-api-key`, `anthropic-version`).
+3. **Transformation** (`sdk/providers/anthropic/llm/transformation.rs`) — rewrites the model alias to the real upstream name, builds outbound headers (`x-api-key`, `anthropic-version`).
 4. **LLM API** (`http/llm.rs`) — sends to `https://api.anthropic.com/v1/messages`, streams the response back byte-for-byte.
 
 ## Config → routes
@@ -101,16 +102,18 @@ the sandbox when the run ends.
 
 ## Providers are self-contained
 
-Each provider is one folder under `src/sdk/llms/providers/`. `build.rs` scans for any
-subdirectory with a `mod.rs` and wires it in automatically — no edits anywhere
-else in the tree.
+Each provider is one folder under `src/sdk/providers/`. `build.rs` scans for any
+provider with an `llm/mod.rs` and wires it into the LLM registry automatically.
+Runtime adapters live beside LLM transforms under the same provider folder.
 
 To add a provider (e.g. OpenAI):
 
 ```
-src/sdk/llms/providers/openai/
-├── mod.rs              # pub fn init(registry) { registry.register("openai", ...) }
-└── transformation.rs   # impl Transformation
+src/sdk/providers/openai/
+├── mod.rs
+└── llm/
+    ├── mod.rs              # pub fn init(registry) { registry.register("openai", ...) }
+    └── transformation.rs   # impl Transformation
 ```
 
 That's the whole contract. The router, endpoint, and networking layers never
