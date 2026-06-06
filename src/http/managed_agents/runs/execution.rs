@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures_util::StreamExt;
@@ -13,9 +12,9 @@ use crate::{
         runs::{event_line, AgentRunStatus},
         sandboxes::{SandboxCommand, SandboxRunner, SandboxSession},
     },
-    db::{credentials, managed_agents::runs::repository},
+    db::managed_agents::runs::repository,
     errors::GatewayError,
-    proxy::{credential_crypto, state::AppState},
+    proxy::state::AppState,
 };
 
 pub fn spawn_managed_agent_run(
@@ -25,21 +24,10 @@ pub fn spawn_managed_agent_run(
     agent: AgentDefinition,
     prompt: String,
     run_id: String,
-    owner_id: Option<String>,
-    vault_keys: Vec<String>,
 ) {
     tokio::spawn(async move {
-        if let Err(error) = execute_managed_agent_run(
-            state.clone(),
-            &pool,
-            &agent_id,
-            agent,
-            prompt,
-            &run_id,
-            owner_id.as_deref(),
-            &vault_keys,
-        )
-        .await
+        if let Err(error) =
+            execute_managed_agent_run(state.clone(), &pool, &agent_id, agent, prompt, &run_id).await
         {
             let message = error.to_string();
             state.agent_runs.set_error(&run_id, message.clone());
@@ -69,11 +57,7 @@ async fn execute_managed_agent_run(
     agent: AgentDefinition,
     prompt: String,
     run_id: &str,
-    owner_id: Option<&str>,
-    vault_key_names: &[String],
 ) -> Result<(), GatewayError> {
-    let extra_env = resolve_vault_env(state.as_ref(), pool, vault_key_names, owner_id).await?;
-
     let mut harness_run = build_harness_run(&agent, &prompt)?;
     let context = HarnessRunContext::new(run_id);
     emit_events(
@@ -96,7 +80,6 @@ async fn execute_managed_agent_run(
         sandbox: &sandbox,
         session: &session,
         command: harness_run.command,
-        extra_env,
         context: &context,
         events: &mut harness_run.events,
     })
@@ -112,35 +95,6 @@ async fn execute_managed_agent_run(
         &harness_run.events,
     )
     .await
-}
-
-/// Resolve vault_keys for a run: decrypt personal keys first, fall back to global.
-async fn resolve_vault_env(
-    state: &AppState,
-    pool: &PgPool,
-    vault_key_names: &[String],
-    owner_id: Option<&str>,
-) -> Result<HashMap<String, String>, GatewayError> {
-    if vault_key_names.is_empty() {
-        return Ok(HashMap::new());
-    }
-    let enc_key =
-        credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
-    let owner = owner_id.unwrap_or("default");
-    let mut env = HashMap::new();
-    for key_name in vault_key_names {
-        if let Some(encrypted) = credentials::resolve_vault_key(pool, key_name, owner).await? {
-            match credential_crypto::decrypt_value(&encrypted, &enc_key) {
-                Ok(plain) => {
-                    env.insert(key_name.clone(), plain);
-                }
-                Err(e) => {
-                    tracing::warn!("failed to decrypt vault key {key_name}: {e}");
-                }
-            }
-        }
-    }
-    Ok(env)
 }
 
 async fn mark_run_running(
@@ -169,7 +123,6 @@ struct RunOutput<'a> {
     sandbox: &'a SandboxRunner,
     session: &'a SandboxSession,
     command: String,
-    extra_env: HashMap<String, String>,
     context: &'a HarnessRunContext,
     events: &'a mut HarnessEvents,
 }
@@ -181,7 +134,6 @@ async fn stream_run_output(input: RunOutput<'_>) -> Result<(), GatewayError> {
             input.session,
             SandboxCommand {
                 command: input.command,
-                extra_env: input.extra_env,
             },
         )
         .await?;

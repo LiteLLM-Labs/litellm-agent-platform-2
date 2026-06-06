@@ -69,15 +69,7 @@ async fn stream_harness_output(
     events: &mut HarnessEvents,
 ) -> Result<String, GatewayError> {
     let mut assistant_text = String::new();
-    let mut stream = sandbox
-        .start(
-            session,
-            SandboxCommand {
-                command,
-                extra_env: std::collections::HashMap::new(),
-            },
-        )
-        .await?;
+    let mut stream = sandbox.start(session, SandboxCommand { command }).await?;
     while let Some(output) = stream.next().await {
         let output = output?;
         if output.delta.is_empty() {

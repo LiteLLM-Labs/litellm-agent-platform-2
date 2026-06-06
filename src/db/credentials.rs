@@ -57,7 +57,7 @@ pub async fn upsert(
             updated_by
         )
         VALUES ($1, $2, $3, $4, $5, $5)
-        ON CONFLICT ON CONSTRAINT cred_global_unique DO UPDATE SET
+        ON CONFLICT (credential_name) WHERE scope = 'global' DO UPDATE SET
             credential_values = EXCLUDED.credential_values,
             credential_info = EXCLUDED.credential_info,
             updated_at = CURRENT_TIMESTAMP,
@@ -132,7 +132,7 @@ pub async fn upsert_vault_key(
                 scope, owner_id, created_by, updated_by
             )
             VALUES ($1, $2, $3, $4, 'personal', $5, $6, $6)
-            ON CONFLICT ON CONSTRAINT cred_personal_unique DO UPDATE SET
+            ON CONFLICT (credential_name, owner_id) WHERE scope = 'personal' DO UPDATE SET
                 credential_values = EXCLUDED.credential_values,
                 credential_info   = EXCLUDED.credential_info,
                 updated_at        = CURRENT_TIMESTAMP,
@@ -156,7 +156,7 @@ pub async fn upsert_vault_key(
                 scope, created_by, updated_by
             )
             VALUES ($1, $2, $3, $4, 'global', $5, $5)
-            ON CONFLICT ON CONSTRAINT cred_global_unique DO UPDATE SET
+            ON CONFLICT (credential_name) WHERE scope = 'global' DO UPDATE SET
                 credential_values = EXCLUDED.credential_values,
                 credential_info   = EXCLUDED.credential_info,
                 updated_at        = CURRENT_TIMESTAMP,

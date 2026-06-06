@@ -60,8 +60,6 @@ impl AgentOutputStreamKind {
 #[derive(Debug, Clone)]
 pub struct SandboxCommand {
     pub command: String,
-    /// Extra environment variables injected into the sandbox process for this run.
-    pub extra_env: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]

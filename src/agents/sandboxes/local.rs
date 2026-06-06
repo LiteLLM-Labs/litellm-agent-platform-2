@@ -50,7 +50,6 @@ impl LocalSandboxClient {
             .arg(&command.command)
             .current_dir(&sandbox.workspace_dir)
             .envs(&self.settings.envs)
-            .envs(&command.extra_env)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()

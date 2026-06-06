@@ -171,7 +171,6 @@ async fn execute_agent_run(
                 &session,
                 SandboxCommand {
                     command: harness_run.command,
-                    extra_env: std::collections::HashMap::new(),
                 },
             )
             .await?;
