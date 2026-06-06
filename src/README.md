@@ -22,6 +22,7 @@ server wraps them with config, auth, state, and HTTP routes.
 | Folder | Responsibility |
 |---|---|
 | `sdk/routing.rs` | **Routing.** Request/model routing above provider translation. |
+| `sdk/transformations/` | **Base transformations.** Shared traits implemented by provider endpoint translations and runtime adapters. |
 | `sdk/providers/` | **Provider integrations.** Each provider owns its supported capabilities: `<endpoint>/` for request transformation, `runtime/` for managed-agent adapters. |
 | `sdk/agents/` | **Agent Runtime SDK.** The `Lap` client, public runtime resource types, and normalized events. |
 | `proxy/` | **Proxy-server concerns**, kept out of the SDK: `config.rs` (`config.yaml` parse + env expansion + validation), `state.rs` (`AppState` — config, router, shared HTTP client), `auth/` (master-key check). |

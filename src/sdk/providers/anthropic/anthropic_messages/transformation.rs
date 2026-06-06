@@ -5,7 +5,7 @@ use crate::{
     errors::GatewayError,
     sdk::{
         routing::Deployment,
-        providers::{ProviderRequest, Transformation},
+        transformations::base::{ProviderRequest, Transformation},
     },
 };
 

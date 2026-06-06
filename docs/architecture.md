@@ -20,18 +20,19 @@ litellm-rust is a low-overhead gateway. A request flows through four layers:
 
 ## Two halves
 
-The code is split so LLM translation, runtime SDK, and proxy concerns stay
+The code is split so endpoint transformation, runtime SDK, and proxy concerns stay
 separate:
 
 | Half | Folders | What it is |
 |---|---|---|
-| **Routing** | `sdk/routing.rs` | Request/model routing that sits above provider translation. |
+| **Routing** | `sdk/routing.rs` | Request/model routing that sits above provider endpoint transformation. |
+| **Base transformations** | `sdk/transformations/` | Shared traits for endpoint translations and runtime adapters. |
 | **Provider integrations** | `sdk/providers/` | Provider-owned endpoint translations and runtime adapters. |
 | **Agent Runtime SDK** | `sdk/agents/` | The `Lap` client resources and managed-agent runtime types. |
-| **Proxy server** | `proxy/`, `http/`, `cli/` | Everything around the translation: config loading, master-key auth, shared `AppState`, HTTP endpoints, the CLI wizard. |
+| **Proxy server** | `proxy/`, `http/`, `cli/` | Everything around the transformation: config loading, master-key auth, shared `AppState`, HTTP endpoints, the CLI wizard. |
 
 `errors.rs` (the shared `GatewayError`) sits at the crate root — both halves use
-it. The rule: `sdk/routing.rs` and `sdk/providers/` must not depend on
+it. The rule: `sdk/routing.rs`, `sdk/transformations/`, and `sdk/providers/` must not depend on
 `proxy/`. (One bridge remains: `routing::Router::from_config` reads
 `proxy::config::GatewayConfig`; when the SDK is extracted, the proxy will build
 the route table and hand routing plain data instead.)

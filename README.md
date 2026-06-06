@@ -144,6 +144,7 @@ Subsystems:
 
 - **`src/http/`** — HTTP layer only. Route registration, auth, body extraction, response shaping. No business logic.
 - **`src/sdk/routing.rs`** — request/model routing (maps model name → deployment + handler).
+- **`src/sdk/transformations/`** — base transformation traits for endpoint translations and runtime adapters.
 - **`src/sdk/providers/`** — provider-owned endpoint translations and runtime adapters (`anthropic/anthropic_messages`, `anthropic/runtime`, `cursor/runtime`, etc.).
 - **`src/sdk/agents/`** — unified managed-agent runtime SDK (`Lap`) resources and types.
 - **`src/proxy/`** — config loading, master-key auth, `AppState`.

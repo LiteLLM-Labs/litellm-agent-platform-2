@@ -15,5 +15,6 @@ Runtime-specific request shapes live behind provider-owned adapters in
 adapter there and register it in `src/sdk/providers/mod.rs` instead of
 adding new `match AgentRuntime` branches throughout the SDK resource layer.
 
-Model routing lives in `src/sdk/routing.rs`; provider-owned endpoint
-translations and runtimes live under `src/sdk/providers/<provider>/`.
+Base transformation traits live under `src/sdk/transformations/`. Model routing
+lives in `src/sdk/routing.rs`; provider-owned endpoint translations and
+runtimes live under `src/sdk/providers/<provider>/`.

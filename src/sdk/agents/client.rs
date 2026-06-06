@@ -13,7 +13,7 @@ use super::{
     responses::{ensure_success, response_json},
     types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
-use crate::sdk::providers::{self, RuntimeAdapter};
+use crate::sdk::{providers, transformations::runtime::RuntimeAdapter};
 
 #[derive(Clone)]
 pub struct Lap {
