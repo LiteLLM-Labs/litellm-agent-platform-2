@@ -115,7 +115,13 @@ function buildSlackManifest(ag: Agent, appName: string) {
     settings: {
       event_subscriptions: {
         request_url: `${origin}/api/agents/${encodeURIComponent(ag.id)}/slack/events`,
-        bot_events: ["app_mention", "message.im", "message.mpim"],
+        bot_events: [
+          "app_mention",
+          "message.channels",
+          "message.groups",
+          "message.im",
+          "message.mpim",
+        ],
       },
       interactivity: {
         is_enabled: true,
