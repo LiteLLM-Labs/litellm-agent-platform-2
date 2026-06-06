@@ -22,6 +22,7 @@ pub(super) struct SlackIncomingMessage {
     pub channel: String,
     pub thread_ts: String,
     pub prompt: String,
+    pub requires_existing_thread: bool,
 }
 
 #[derive(Debug, Deserialize)]

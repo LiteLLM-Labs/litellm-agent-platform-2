@@ -54,15 +54,27 @@ async fn handle_event_callback(
         return Ok(());
     };
     let event_key = slack_event_key(payload, &message);
-    let row = slack::repository::ensure_thread_session(
-        &pool,
-        &agent.id,
-        &agent.harness,
-        &agent.timezone,
-        &message.channel,
-        &message.thread_ts,
-    )
-    .await?;
+    let row = match message.requires_existing_thread {
+        true => {
+            match slack::repository::get(&pool, &agent.id, &message.channel, &message.thread_ts)
+                .await?
+            {
+                Some(row) => row,
+                None => return Ok(()),
+            }
+        }
+        false => {
+            slack::repository::ensure_thread_session(
+                &pool,
+                &agent.id,
+                &agent.harness,
+                &agent.timezone,
+                &message.channel,
+                &message.thread_ts,
+            )
+            .await?
+        }
+    };
     if !slack::repository::record_event(&pool, &agent.id, &event_key).await? {
         return Ok(());
     }
@@ -91,18 +103,30 @@ fn incoming_message(payload: &Value) -> Option<SlackIncomingMessage> {
                 .and_then(Value::as_str)
                 .unwrap_or_default(),
         ),
+        requires_existing_thread: is_channel_thread_reply(event),
     })
 }
 
 fn is_supported_event(event: &Value) -> bool {
     match event.get("type").and_then(Value::as_str) {
         Some("app_mention") => true,
-        Some("message") => matches!(
-            event.get("channel_type").and_then(Value::as_str),
-            Some("im" | "mpim")
-        ),
+        Some("message") => is_direct_message(event) || is_channel_thread_reply(event),
         _ => false,
     }
+}
+
+fn is_direct_message(event: &Value) -> bool {
+    matches!(
+        event.get("channel_type").and_then(Value::as_str),
+        Some("im" | "mpim")
+    )
+}
+
+fn is_channel_thread_reply(event: &Value) -> bool {
+    matches!(
+        event.get("channel_type").and_then(Value::as_str),
+        Some("channel" | "group")
+    ) && event.get("thread_ts").and_then(Value::as_str).is_some()
 }
 
 fn clean_prompt(text: &str) -> String {

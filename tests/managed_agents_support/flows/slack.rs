@@ -23,6 +23,8 @@ pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
     assert!(events.contains("\"delta\":\"hello \""));
     assert_slack_api_call_count(fixture, "/chat.postMessage", 1).await;
     assert_slack_api_called(fixture, "/chat.update").await;
+    send_channel_thread_reply(fixture, agent_id).await;
+    assert_slack_api_call_count(fixture, "/chat.postMessage", 2).await;
     assert_interactivity_accepts_approval(fixture, agent_id).await;
 }
 
@@ -149,6 +151,34 @@ async fn send_app_mention(fixture: &AppFixture, agent_id: &str) -> String {
     )
     .await;
     wait_for_slack_session(&fixture.pool, agent_id, "C123", "1712345678.000100").await
+}
+
+async fn send_channel_thread_reply(fixture: &AppFixture, agent_id: &str) {
+    let body = json!({
+        "type": "event_callback",
+        "team_id": "T123",
+        "api_app_id": "A123",
+        "event_id": "Ev-thread-reply",
+        "event_time": now_seconds(),
+        "event": {
+            "type": "message",
+            "channel_type": "channel",
+            "user": "U123",
+            "text": "and then what?",
+            "ts": "1712345678.000200",
+            "thread_ts": "1712345678.000100",
+            "channel": "C123",
+            "event_ts": "1712345678.000200"
+        }
+    })
+    .to_string();
+    signed_json_request(
+        fixture,
+        &format!("/api/agents/{agent_id}/slack/events"),
+        body,
+        StatusCode::OK,
+    )
+    .await;
 }
 
 async fn assert_thread_session_race(fixture: &AppFixture, agent_id: &str) {
