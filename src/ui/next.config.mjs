@@ -12,10 +12,6 @@ export default function nextConfig(phase) {
       ? {
           async rewrites() {
             return [
-              {
-                source: "/runtime-events/:sessionId.sse",
-                destination: `${apiBase}/v1/sessions/:sessionId/events/stream`,
-              },
               { source: "/api/:path*", destination: `${apiBase}/api/:path*` },
               { source: "/v1/:path*", destination: `${apiBase}/v1/:path*` },
               { source: "/session/:path*", destination: `${apiBase}/session/:path*` },
