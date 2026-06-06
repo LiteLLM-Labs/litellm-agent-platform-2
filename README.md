@@ -143,8 +143,8 @@ Entry points and what runs at startup:
 Subsystems:
 
 - **`src/http/`** — HTTP layer only. Route registration, auth, body extraction, response shaping. No business logic.
-- **`src/llms/`** — provider registry, per-provider request/response transformation, model router (maps model name → deployment + handler).
-- **`src/sdk/`** — unified managed-agent runtime SDK (`Lap`) with runtime adapters for Claude Managed Agents and Cursor.
+- **`src/sdk/llms/`** — provider registry, per-provider request/response transformation, model router (maps model name → deployment + handler).
+- **`src/sdk/agents/`** — unified managed-agent runtime SDK (`Lap`) with runtime adapters for Claude Managed Agents and Cursor.
 - **`src/proxy/`** — config loading, master-key auth, `AppState`.
 - **`src/cli/`** — `lite claude` wizard: credential storage, model selector, Claude Code launcher.
 

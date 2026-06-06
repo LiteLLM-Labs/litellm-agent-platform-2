@@ -9,11 +9,11 @@ use litellm_rust::{
     agents::config::E2bSandboxParams,
     db::managed_agents::pool as managed_agents_pool,
     http::routes::router,
-    llms::{providers::transform::ProviderRegistry, router::Router as ModelRouter},
     proxy::{
         config::{GatewayConfig, GeneralSettings},
         state::AppState,
     },
+    sdk::llms::{providers::transform::ProviderRegistry, router::Router as ModelRouter},
 };
 use serde_json::{json, Value};
 use sqlx::PgPool;

@@ -7,14 +7,14 @@ use axum::{
 use litellm_rust::{
     db::managed_agents::pool as managed_agents_pool,
     http::routes::router,
-    llms::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
-    },
     proxy::{
         config::{GatewayConfig, GeneralSettings, LiteLlmParams, ModelEntry},
         provider_credentials::{self, ProviderCredentialInput},
         state::AppState,
+    },
+    sdk::llms::{
+        providers::{self, transform::ProviderRegistry},
+        router::Router as ModelRouter,
     },
 };
 use serde_json::json;

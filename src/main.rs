@@ -5,14 +5,14 @@ use clap::{Args as ClapArgs, Parser, Subcommand};
 use litellm_rust::{
     db::managed_agents::pool as managed_agents_pool,
     http::routes::router,
-    llms::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router,
-    },
     model_prices,
     proxy::{
         config::{load_config, GatewayConfig},
         state::AppState,
+    },
+    sdk::llms::{
+        providers::{self, transform::ProviderRegistry},
+        router::Router,
     },
 };
 use tokio::net::TcpListener;

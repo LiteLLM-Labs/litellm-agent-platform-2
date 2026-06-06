@@ -14,8 +14,8 @@ litellm-rust is a low-overhead gateway. A request flows through four layers:
 | Layer | File | Responsibility |
 |---|---|---|
 | **Endpoint** | `http/messages.rs` | Receive the request, authenticate (master key) |
-| **Router** | `llms/router.rs` | Map the public model name to an upstream deployment + provider handler |
-| **Transformation** | `llms/providers/<name>/transformation.rs` | Translate the request into the provider's API shape |
+| **Router** | `sdk/llms/router.rs` | Map the public model name to an upstream deployment + provider handler |
+| **Transformation** | `sdk/llms/providers/<name>/transformation.rs` | Translate the request into the provider's API shape |
 | **LLM API** | `http/llm.rs` | The only place that does outbound networking |
 
 ## Two halves
@@ -25,14 +25,14 @@ separate:
 
 | Half | Folders | What it is |
 |---|---|---|
-| **LLM translation layer** | `llms/` | Provider handlers + the router that picks one. Pure request/response shaping — no auth, no server state. |
-| **Agent Runtime SDK** | `sdk/` | The `Lap` client and managed-agent runtime adapters. |
+| **LLM translation layer** | `sdk/llms/` | Provider handlers + the router that picks one. Pure request/response shaping — no auth, no server state. |
+| **Agent Runtime SDK** | `sdk/agents/` | The `Lap` client and managed-agent runtime adapters. |
 | **Proxy server** | `proxy/`, `http/`, `cli/` | Everything around the translation: config loading, master-key auth, shared `AppState`, HTTP endpoints, the CLI wizard. |
 
 `errors.rs` (the shared `GatewayError`) sits at the crate root — both halves use
-it. The rule: `llms/` must not depend on `proxy/`. (One bridge remains:
+it. The rule: `sdk/llms/` must not depend on `proxy/`. (One bridge remains:
 `router.rs::from_config` reads `proxy::config::GatewayConfig`; when the SDK is
-extracted, the proxy will build the route table and hand `llms/` plain
+extracted, the proxy will build the route table and hand `sdk::llms` plain
 data instead.)
 
 ## Request flow
@@ -47,8 +47,8 @@ curl http://localhost:4000/v1/messages \
 ```
 
 1. **Endpoint** (`http/messages.rs`) — `proxy::auth` checks the `Authorization: Bearer` token against the configured master key, then parses the body and reads `model`.
-2. **Router** (`llms/router.rs`) — looks up `"claude-opus-4-6"` in the route table built at boot from `config.yaml`. Returns a `Route` = `{ deployment, handler }`.
-3. **Transformation** (`llms/providers/anthropic/transformation.rs`) — rewrites the model alias to the real upstream name, builds outbound headers (`x-api-key`, `anthropic-version`).
+2. **Router** (`sdk/llms/router.rs`) — looks up `"claude-opus-4-6"` in the route table built at boot from `config.yaml`. Returns a `Route` = `{ deployment, handler }`.
+3. **Transformation** (`sdk/llms/providers/anthropic/transformation.rs`) — rewrites the model alias to the real upstream name, builds outbound headers (`x-api-key`, `anthropic-version`).
 4. **LLM API** (`http/llm.rs`) — sends to `https://api.anthropic.com/v1/messages`, streams the response back byte-for-byte.
 
 ## Config → routes
@@ -101,14 +101,14 @@ the sandbox when the run ends.
 
 ## Providers are self-contained
 
-Each provider is one folder under `src/llms/providers/`. `build.rs` scans for any
+Each provider is one folder under `src/sdk/llms/providers/`. `build.rs` scans for any
 subdirectory with a `mod.rs` and wires it in automatically — no edits anywhere
 else in the tree.
 
 To add a provider (e.g. OpenAI):
 
 ```
-src/llms/providers/openai/
+src/sdk/llms/providers/openai/
 ├── mod.rs              # pub fn init(registry) { registry.register("openai", ...) }
 └── transformation.rs   # impl Transformation
 ```

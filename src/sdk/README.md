@@ -1,7 +1,7 @@
 # Agent Runtime SDK
 
 `src/sdk` is the public Rust client surface for calling managed-agent runtimes
-through one Anthropic-shaped API.
+and routing LLM gateway requests through one SDK namespace.
 
 It exposes:
 
@@ -15,6 +15,6 @@ Runtime-specific request shapes live behind internal adapters in
 instead of adding new `match AgentRuntime` branches throughout the SDK resource
 layer.
 
-Gateway model routing and LLM provider transformation live under `src/llms/`.
-`sdk::router` and `sdk::providers` remain compatibility re-exports, but new
-gateway code should import those modules from `llms`.
+Gateway model routing and LLM provider transformation live under `src/sdk/llms/`.
+`sdk::router` and `sdk::providers` remain compatibility re-exports, while new
+gateway code can import the canonical modules from `sdk::llms`.

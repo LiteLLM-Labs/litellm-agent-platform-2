@@ -1,5 +1,5 @@
 //! Proxy-server concerns: config, request auth, shared state. The LLM
-//! translation layer (`llms/`) must not depend on anything here.
+//! translation layer (`sdk::llms`) must not depend on anything here.
 
 pub mod auth;
 pub mod config;

@@ -10,8 +10,8 @@ use crate::{
         CallbackManager,
     },
     errors::GatewayError,
-    llms::providers::transform::ProviderRequest,
     model_prices::ModelCostMap,
+    sdk::llms::providers::transform::ProviderRequest,
 };
 
 const MAX_STREAM_CAPTURE_BYTES: usize = 1_000_000;
