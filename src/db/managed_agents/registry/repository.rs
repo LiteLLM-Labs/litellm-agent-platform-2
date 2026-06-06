@@ -107,7 +107,7 @@ async fn insert_agent(
     defaults: &CreateDefaults,
 ) -> Result<ManagedAgentRow, GatewayError> {
     let tools = input.tools.unwrap_or(serde_json::Value::Null);
-    let config = create_config(input.config, &tools);
+    let config = create_config(input.config, input.runtime.as_deref(), &tools);
     sqlx::query_as::<_, ManagedAgentRow>(
         r#"
         INSERT INTO "LiteLLM_ManagedAgentsTable" (
@@ -156,11 +156,17 @@ async fn insert_agent(
 
 fn create_config(
     config: Option<serde_json::Value>,
+    runtime: Option<&str>,
     tools: &serde_json::Value,
 ) -> serde_json::Value {
     let mut config = config.unwrap_or_else(|| json!({}));
-    if !tools.is_null() {
-        if let Some(object) = config.as_object_mut() {
+    if let Some(object) = config.as_object_mut() {
+        if let Some(runtime) = runtime.filter(|runtime| !runtime.trim().is_empty()) {
+            object
+                .entry("runtime".to_owned())
+                .or_insert_with(|| runtime.to_owned().into());
+        }
+        if !tools.is_null() {
             object
                 .entry("tools".to_owned())
                 .or_insert_with(|| tools.clone());

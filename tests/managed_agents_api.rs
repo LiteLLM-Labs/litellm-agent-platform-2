@@ -70,8 +70,7 @@ async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
             "name": "runtime-agent",
             "owner_id": "user-1",
             "runtime": "claude_managed_agents",
-            "harness": "claude_managed_agents",
-            "config": { "runtime": "claude_managed_agents" }
+            "harness": "claude_managed_agents"
         })),
     )
     .await;
@@ -92,5 +91,9 @@ async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
     )
     .await;
     assert_eq!(explicit_empty_tools["tools"], json!([]));
+    assert_eq!(
+        explicit_empty_tools["config"]["runtime"],
+        "claude_managed_agents"
+    );
     assert_eq!(explicit_empty_tools["config"]["tools"], json!([]));
 }

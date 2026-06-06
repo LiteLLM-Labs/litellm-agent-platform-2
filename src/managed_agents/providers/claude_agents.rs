@@ -115,15 +115,21 @@ async fn create_agent(
 }
 
 fn agent_tools(agent: &ManagedAgentRow) -> Value {
-    let tools = if should_use_default_tools(agent) {
-        Value::Null
-    } else {
-        agent.tools.clone()
-    };
+    let tools = configured_tools(agent);
     toolset_payload(
         AGENT_TOOLSET,
         &selected_tool_ids(&tools, TOOLS, &[AGENT_TOOLSET]),
     )
+}
+
+fn configured_tools(agent: &ManagedAgentRow) -> Value {
+    if let Some(tools) = agent.config.get("tools") {
+        return tools.clone();
+    }
+    if should_use_default_tools(agent) {
+        return Value::Null;
+    }
+    agent.tools.clone()
 }
 
 fn should_use_default_tools(agent: &ManagedAgentRow) -> bool {
