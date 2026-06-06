@@ -4,6 +4,7 @@ use sqlx::PgPool;
 
 use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
+mod claude_runtime;
 mod cursor_runtime;
 mod sessions;
 mod slack;

@@ -4,6 +4,7 @@ mod form;
 mod interactivity;
 mod oauth;
 mod replies;
+mod reply_format;
 mod reply_lock;
 mod reply_storage;
 mod reply_stream;
