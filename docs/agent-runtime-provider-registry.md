@@ -94,7 +94,12 @@ pub trait AgentProvider: Send + Sync + 'static {
     fn id(&self) -> &'static str;
     fn default_base_url(&self) -> &'static str;
 
-    fn configured_runtime(&self, config: &LapConfig) -> Option<RuntimeConfig>;
+    fn supports_config(&self, config: &LapConfig) -> bool;
+
+    fn extract_runtime_config(
+        &self,
+        config: &LapConfig,
+    ) -> Result<RuntimeConfig, AgentSdkError>;
 
     fn apply_auth_headers(
         &self,
@@ -142,7 +147,7 @@ pub trait AgentProvider: Send + Sync + 'static {
     fn send_events_from_response(
         &self,
         session_id: &str,
-        context: SessionContext,
+        context: &SessionContext,
         raw: Value,
     ) -> Result<SessionEventUpdate, AgentSdkError>;
 
@@ -151,10 +156,24 @@ pub trait AgentProvider: Send + Sync + 'static {
         session_id: &str,
         context: &SessionContext,
     ) -> Result<AgentRequest<()>, AgentSdkError>;
+}
 
-    fn normalize_stream(&self, stream: AgentEventStream) -> AgentEventStream {
-        stream
-    }
+pub trait StreamProvider: AgentProvider {
+    fn normalize_stream(&self, stream: AgentEventStream) -> AgentEventStream;
+}
+
+pub enum AgentRequest<B> {
+    Http {
+        method: Method,
+        path: String,
+        body: B,
+    },
+    Synthetic(SyntheticResource),
+}
+
+pub enum SyntheticResource {
+    Environment(Environment),
+    Session(SessionContextUpdate),
 }
 ```
 
@@ -163,11 +182,19 @@ The exact names can change during implementation, but the important boundary is:
 - `client.rs` owns HTTP execution, default-runtime resolution, session memory,
   and public SDK resources.
 - providers own runtime IDs, auth headers, path/body construction, response
-  parsing, synthetic-resource behavior, and stream normalization.
+  parsing, synthetic-resource behavior, and optional stream normalization.
 
 Helper return types such as `SessionContextUpdate` and `SessionEventUpdate`
 should carry both the public SDK response and any remembered provider state, such
 as a provider-local agent ID or run ID.
+
+`supports_config` answers only whether the provider has enough configuration to
+participate. `extract_runtime_config` returns the fully usable config for that
+provider, or an error if the matching configuration is malformed.
+
+Synthetic resources are explicit request variants, not hidden provider hooks.
+This lets `client.rs` decide when no HTTP should be executed, and makes those
+paths easy to trace and test.
 
 ## What `client.rs` Looks Like
 
@@ -217,9 +244,15 @@ impl Lap {
         runtime: &AgentRuntimeId,
         request: AgentRequest<Value>,
     ) -> Result<Value, AgentSdkError> {
+        let AgentRequest::Http { method, path, body } = request else {
+            return Err(AgentSdkError::InvalidRequest(
+                "synthetic request cannot be executed as HTTP".to_owned(),
+            ));
+        };
+
         let response = self
-            .request(runtime, request.method, &request.path)?
-            .json(&request.body)
+            .request(runtime, method, &path)?
+            .json(&body)
             .send()
             .await?;
 
@@ -231,15 +264,23 @@ impl Lap {
         runtime: &AgentRuntimeId,
         request: AgentRequest<()>,
     ) -> Result<AgentEventStream, AgentSdkError> {
-        let provider = self.provider(runtime)?;
+        let AgentRequest::Http { method, path, body: () } = request else {
+            return Err(AgentSdkError::InvalidRequest(
+                "synthetic request cannot be streamed".to_owned(),
+            ));
+        };
+
         let response = self
-            .request(runtime, request.method, &request.path)?
+            .request(runtime, method, &path)?
             .header(header::ACCEPT, "text/event-stream")
             .send()
             .await?;
 
         let stream = stream_events(ensure_success(response).await?);
-        Ok(provider.normalize_stream(stream))
+        Ok(match self.stream_provider(runtime)? {
+            Some(provider) => provider.normalize_stream(stream),
+            None => stream,
+        })
     }
 }
 ```
@@ -258,6 +299,34 @@ impl Agents<'_> {
     }
 }
 
+impl Sessions<'_> {
+    pub async fn create(&self, params: CreateSessionParams) -> Result<Session, AgentSdkError> {
+        let runtime = self.client.resolve_runtime(params.lap_agent_runtime.clone())?;
+        let provider = self.client.provider(&runtime)?;
+        let update = match provider.create_session_request(params)? {
+            AgentRequest::Http { method, path, body } => {
+                let raw = self
+                    .client
+                    .execute(&runtime, AgentRequest::Http { method, path, body })
+                    .await?;
+
+                provider.session_from_response(raw)?
+            }
+            AgentRequest::Synthetic(SyntheticResource::Session(update)) => update,
+            AgentRequest::Synthetic(_) => {
+                return Err(AgentSdkError::InvalidRequest(
+                    "session create returned the wrong synthetic resource".to_owned(),
+                ));
+            }
+        };
+
+        self.client
+            .remember_session_context(&update.session.id, update.context)?;
+
+        Ok(update.session)
+    }
+}
+
 impl SessionEvents<'_> {
     pub async fn send(
         &self,
@@ -268,7 +337,7 @@ impl SessionEvents<'_> {
         let provider = self.client.provider(&context.runtime)?;
         let request = provider.send_events_request(session_id, &context, params)?;
         let raw = self.client.execute(&context.runtime, request).await?;
-        let update = provider.send_events_from_response(session_id, context, raw)?;
+        let update = provider.send_events_from_response(session_id, &context, raw)?;
 
         self.client
             .remember_session_context(session_id, update.context)?;
@@ -295,8 +364,9 @@ runtimes, for example, may need:
 - stream event normalization
 
 Those behaviors are still provider-specific and should stay out of `client.rs`.
-The trait should provide default Anthropic-shaped behavior where useful, while
-allowing unusual runtimes to override the pieces they need.
+The provider contract should keep the Anthropic-shaped request/response flow
+straightforward, while companion traits and explicit synthetic request variants
+leave room for unusual runtimes.
 
 ## Runtime IDs
 
@@ -359,7 +429,7 @@ would still require one central enum update.
   should it be a follow-up migration after the provider trait lands?
 - Should provider config extraction stay on `LapConfig`, or should `LapConfig`
   move toward a map keyed by runtime ID?
-- Should stream normalization live on the provider trait, or should it be a
-  separate event transformation trait?
-- Should synthetic resources, such as provider-local sessions or environments,
-  be represented as provider hooks or as explicit no-op request variants?
+- Should optional provider extensions use companion traits like
+  `StreamProvider`, or should the registry store explicit extension metadata?
+- Are explicit `AgentRequest::Synthetic` variants enough for provider-local
+  sessions and environments, or should each resource have its own action enum?
