@@ -33,6 +33,15 @@ async fn responses_uses_db_backed_openai_credentials() {
     };
 
     let upstream = MockServer::start().await;
+    mount_openai_response(&upstream).await;
+    let config = test_config(upstream.uri());
+    save_openai_credential(&pool, &config, upstream.uri()).await;
+
+    let body = post_response(config, pool).await;
+    assert_eq!(body["output_text"], "ok");
+}
+
+async fn mount_openai_response(upstream: &MockServer) {
     Mock::given(method("POST"))
         .and(path("/v1/responses"))
         .and(header_match("authorization", "Bearer sk-openai-db"))
@@ -44,22 +53,25 @@ async fn responses_uses_db_backed_openai_credentials() {
             "output": [],
             "output_text": "ok"
         })))
-        .mount(&upstream)
+        .mount(upstream)
         .await;
+}
 
-    let config = test_config(upstream.uri());
+async fn save_openai_credential(pool: &PgPool, config: &GatewayConfig, api_base: String) {
     provider_credentials::save(
-        &pool,
-        &config,
+        pool,
+        config,
         "openai",
         ProviderCredentialInput {
             api_key: "sk-openai-db".to_owned(),
-            api_base: upstream.uri(),
+            api_base,
         },
     )
     .await
     .unwrap();
+}
 
+async fn post_response(config: GatewayConfig, pool: PgPool) -> serde_json::Value {
     let app = router(build_state(config, pool));
     let response = app
         .oneshot(
@@ -83,8 +95,7 @@ async fn responses_uses_db_backed_openai_credentials() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(body["output_text"], "ok");
+    serde_json::from_slice(&body).unwrap()
 }
 
 async fn test_pool() -> Option<PgPool> {

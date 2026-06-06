@@ -48,21 +48,6 @@ impl Lap {
         Self::with_http(configured_http_client(), runtimes)
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_http_client(config: LapConfig, http: reqwest::Client) -> Self {
-        let mut runtimes = HashMap::new();
-        if let Some(api_key) = config.anthropic_api_key {
-            runtimes.insert(
-                AgentRuntime::ClaudeManagedAgents,
-                RuntimeConfig {
-                    api_key,
-                    base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-                },
-            );
-        }
-        Self::with_http(http, runtimes)
-    }
-
     fn with_http(http: reqwest::Client, runtimes: HashMap<AgentRuntime, RuntimeConfig>) -> Self {
         Self {
             inner: Arc::new(Inner {

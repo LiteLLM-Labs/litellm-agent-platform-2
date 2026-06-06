@@ -128,7 +128,7 @@ async fn execute_managed_agent_run(
     emit_events(
         &state,
         pool,
-        &agent_id,
+        agent_id,
         run_id,
         harness_run.events.start(&context),
     )
@@ -136,15 +136,7 @@ async fn execute_managed_agent_run(
 
     let sandbox = SandboxRunner::from_settings(state.http.clone(), &state.config.general_settings)?;
     let session = sandbox.create(run_id).await?;
-    if let Some(sandbox_id) = session.sandbox_id.clone() {
-        state.agent_runs.set_sandbox_id(run_id, sandbox_id.clone());
-        repository::set_running(pool, run_id, Some(&sandbox_id)).await?;
-    } else {
-        repository::set_running(pool, run_id, None).await?;
-    }
-    state
-        .agent_runs
-        .update_status(run_id, AgentRunStatus::Running);
+    set_run_running(&state, pool, run_id, session.sandbox_id.as_deref()).await?;
 
     let run_result = async {
         let mut stream = sandbox
@@ -161,7 +153,7 @@ async fn execute_managed_agent_run(
                 continue;
             }
             let events = harness_run.events.output(&context, output);
-            emit_events(&state, pool, &agent_id, run_id, events).await?;
+            emit_events(&state, pool, agent_id, run_id, events).await?;
         }
         Ok::<(), GatewayError>(())
     }
@@ -177,11 +169,29 @@ async fn execute_managed_agent_run(
     emit_events(
         &state,
         pool,
-        &agent_id,
+        agent_id,
         run_id,
         harness_run.events.complete(&context),
     )
     .await?;
+    Ok(())
+}
+
+async fn set_run_running(
+    state: &AppState,
+    pool: &PgPool,
+    run_id: &str,
+    sandbox_id: Option<&str>,
+) -> Result<(), GatewayError> {
+    if let Some(sandbox_id) = sandbox_id {
+        state
+            .agent_runs
+            .set_sandbox_id(run_id, sandbox_id.to_owned());
+    }
+    repository::set_running(pool, run_id, sandbox_id).await?;
+    state
+        .agent_runs
+        .update_status(run_id, AgentRunStatus::Running);
     Ok(())
 }
 

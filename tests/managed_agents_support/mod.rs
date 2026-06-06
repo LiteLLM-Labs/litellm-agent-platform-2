@@ -24,6 +24,7 @@ use wiremock::{
 };
 
 pub mod flows;
+mod session_flow;
 
 pub struct AppFixture {
     pub app: axum::Router,

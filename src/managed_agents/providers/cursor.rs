@@ -12,16 +12,10 @@ pub async fn provision(
 ) -> Result<RuntimeProvision, GatewayError> {
     let source = source(&input.environment)?;
     let target = target(agent, &input)?;
-    let model = input
-        .environment
-        .get("model")
-        .and_then(Value::as_str)
-        .or_else(|| agent.config.get("model").and_then(Value::as_str))
-        .unwrap_or("claude-4-sonnet");
     let body = json!({
         "prompt": { "text": input.prompt },
         "source": source,
-        "model": model,
+        "model": model(agent, &input.environment),
         "target": target
     });
     let url = format!("{}/v0/agents", credential.api_base.trim_end_matches('/'));
@@ -42,8 +36,31 @@ pub async fn provision(
             "cursor launch failed: {payload}"
         )));
     }
+    let provider_id = provider_id(agent, &payload);
+    Ok(RuntimeProvision {
+        runtime_agent_id: provider_id.clone(),
+        provider_session_id: None,
+        provider_run_id: Some(provider_id),
+        provider_url: provider_url(&payload),
+        metadata: json!({
+            "runtime": "cursor",
+            "launch_request": body,
+            "launch_response": payload,
+        }),
+    })
+}
+
+fn model<'a>(agent: &'a ManagedAgentRow, environment: &'a Value) -> &'a str {
+    environment
+        .get("model")
+        .and_then(Value::as_str)
+        .or_else(|| agent.config.get("model").and_then(Value::as_str))
+        .unwrap_or("claude-4-sonnet")
+}
+
+fn provider_id(agent: &ManagedAgentRow, payload: &Value) -> String {
     let fallback_id = runtime_agent_id(agent, "cursor");
-    let provider_id = payload
+    payload
         .get("id")
         .and_then(Value::as_str)
         .or_else(|| {
@@ -53,23 +70,15 @@ pub async fn provision(
                 .and_then(Value::as_str)
         })
         .unwrap_or(&fallback_id)
-        .to_owned();
-    let provider_url = payload
+        .to_owned()
+}
+
+fn provider_url(payload: &Value) -> Option<String> {
+    payload
         .get("url")
         .and_then(Value::as_str)
         .or_else(|| payload.get("webUrl").and_then(Value::as_str))
-        .map(str::to_owned);
-    Ok(RuntimeProvision {
-        runtime_agent_id: provider_id.clone(),
-        provider_session_id: None,
-        provider_run_id: Some(provider_id),
-        provider_url,
-        metadata: json!({
-            "runtime": "cursor",
-            "launch_request": body,
-            "launch_response": payload,
-        }),
-    })
+        .map(str::to_owned)
 }
 
 fn source(environment: &Value) -> Result<Value, GatewayError> {

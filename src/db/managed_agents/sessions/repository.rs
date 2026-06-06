@@ -8,6 +8,17 @@ use crate::{
 
 use super::schema::SessionRow;
 
+pub struct CreateRuntimeSession<'a> {
+    pub runtime: &'a str,
+    pub agent_id: &'a str,
+    pub title: &'a str,
+    pub timezone: Option<&'a str>,
+    pub runtime_agent_ref_id: Option<&'a str>,
+    pub environment: Value,
+    pub provider_session_id: Option<&'a str>,
+    pub provider_run_id: Option<&'a str>,
+}
+
 pub async fn create(
     pool: &PgPool,
     harness: &str,
@@ -37,14 +48,7 @@ pub async fn create(
 
 pub async fn create_runtime(
     pool: &PgPool,
-    runtime: &str,
-    agent_id: &str,
-    title: &str,
-    timezone: Option<&str>,
-    runtime_agent_ref_id: Option<&str>,
-    environment: Value,
-    provider_session_id: Option<&str>,
-    provider_run_id: Option<&str>,
+    params: CreateRuntimeSession<'_>,
 ) -> Result<SessionRow, GatewayError> {
     let session_id = id("ses");
     sqlx::query_as::<_, SessionRow>(
@@ -59,15 +63,15 @@ pub async fn create_runtime(
         "#,
     )
     .bind(session_id)
-    .bind(runtime)
-    .bind(agent_id)
-    .bind(title)
+    .bind(params.runtime)
+    .bind(params.agent_id)
+    .bind(params.title)
     .bind(now_ms())
-    .bind(timezone)
-    .bind(runtime_agent_ref_id)
-    .bind(environment)
-    .bind(provider_session_id)
-    .bind(provider_run_id)
+    .bind(params.timezone)
+    .bind(params.runtime_agent_ref_id)
+    .bind(params.environment)
+    .bind(params.provider_session_id)
+    .bind(params.provider_run_id)
     .fetch_one(pool)
     .await
     .map_err(GatewayError::Database)

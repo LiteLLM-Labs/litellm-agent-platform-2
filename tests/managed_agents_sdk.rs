@@ -1,7 +1,8 @@
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
     parse_sse, AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
-    CreateSessionParams, Lap, LapConfig, SendEventsParams, MANAGED_AGENTS_BETA,
+    CreateSessionParams, Environment, Lap, LapConfig, SendEventsParams, SendEventsResponse,
+    Session, MANAGED_AGENTS_BETA,
 };
 use serde_json::json;
 use wiremock::{
@@ -59,6 +60,18 @@ async fn creates_claude_managed_agent_with_anthropic_shape() {
 #[tokio::test]
 async fn creates_session_and_sends_events_with_runtime_ids() {
     let server = MockServer::start().await;
+    mount_session_event_mocks(&server).await;
+
+    let client = client(&server);
+    let environment = create_environment(&client).await;
+    let session = create_session(&client, environment.id).await;
+    let sent = send_user_event(&client, &session.id).await;
+
+    assert_eq!(session.id, "sesn_123");
+    assert_eq!(sent.raw, json!({ "data": [] }));
+}
+
+async fn mount_session_event_mocks(server: &MockServer) {
     Mock::given(method("POST"))
         .and(path("/v1/environments"))
         .and(body_json(json!({
@@ -69,7 +82,7 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
             }
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "env_123" })))
-        .mount(&server)
+        .mount(server)
         .await;
     Mock::given(method("POST"))
         .and(path("/v1/sessions"))
@@ -79,7 +92,7 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
             "title": "Quickstart session"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "sesn_123" })))
-        .mount(&server)
+        .mount(server)
         .await;
     Mock::given(method("POST"))
         .and(path("/v1/sessions/sesn_123/events"))
@@ -90,11 +103,12 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
             }]
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [] })))
-        .mount(&server)
+        .mount(server)
         .await;
+}
 
-    let client = client(&server);
-    let environment = client
+async fn create_environment(client: &Lap) -> Environment {
+    client
         .beta()
         .environments()
         .create(CreateEnvironmentParams {
@@ -105,26 +119,32 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
             scope: None,
         })
         .await
-        .unwrap();
-    let session = client
+        .unwrap()
+}
+
+async fn create_session(client: &Lap, environment_id: String) -> Session {
+    client
         .beta()
         .sessions()
         .create(CreateSessionParams {
             agent: "agent_123".to_owned(),
-            environment_id: environment.id,
+            environment_id,
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: None,
             metadata: None,
             resources: None,
         })
         .await
-        .unwrap();
-    let sent = client
+        .unwrap()
+}
+
+async fn send_user_event(client: &Lap, session_id: &str) -> SendEventsResponse {
+    client
         .beta()
         .sessions()
         .events()
         .send(
-            &session.id,
+            session_id,
             SendEventsParams {
                 events: vec![json!({
                     "type": "user.message",
@@ -133,10 +153,7 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
             },
         )
         .await
-        .unwrap();
-
-    assert_eq!(session.id, "sesn_123");
-    assert_eq!(sent.raw, json!({ "data": [] }));
+        .unwrap()
 }
 
 #[tokio::test]
