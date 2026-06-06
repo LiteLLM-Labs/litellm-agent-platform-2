@@ -168,6 +168,18 @@ function CursorIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function OpenCodeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <rect width="48" height="48" rx="10" fill="#171717" />
+      <path
+        fill="#fff"
+        d="M14.6 31.6 7 24l7.6-7.6 2.8 2.8-4.8 4.8 4.8 4.8-2.8 2.8Zm18.8 0-2.8-2.8 4.8-4.8-4.8-4.8 2.8-2.8L41 24l-7.6 7.6ZM21.1 35h-4.2l10-22h4.2l-10 22Z"
+      />
+    </svg>
+  );
+}
+
 function FallbackIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
@@ -184,6 +196,7 @@ const ICONS: Record<string, (p: SVGProps<SVGSVGElement>) => ReactNode> = {
   cursor: CursorIcon,
   gmail: GmailIcon,
   linear: LinearIcon,
+  opencode: OpenCodeIcon,
   pylon: PylonIcon,
   slack: SlackIcon,
 };

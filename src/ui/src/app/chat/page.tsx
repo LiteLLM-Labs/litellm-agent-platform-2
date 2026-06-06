@@ -65,14 +65,14 @@ function shortPrompt(prompt: string): string {
 }
 
 function runtimeLabel(runtime?: string): string {
-  if (runtime === "claude_agents") return "Claude Managed Agents";
+  if (runtime === "claude_managed_agents" || runtime === "claude_agents") return "Claude Managed Agents";
   if (runtime === "cursor") return "Cursor";
   return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
 }
 
-function providerSessionUrl(runtime?: AgentRuntimeId, providerSessionId?: string, providerUrl?: string): string | null {
+function providerSessionUrl(runtime?: string, providerSessionId?: string, providerUrl?: string): string | null {
   if (providerUrl) return providerUrl;
-  if (runtime === "claude_agents" && providerSessionId) {
+  if ((runtime === "claude_managed_agents" || runtime === "claude_agents") && providerSessionId) {
     return `https://platform.claude.com/workspaces/default/agent-sessions/${encodeURIComponent(providerSessionId)}`;
   }
   return null;

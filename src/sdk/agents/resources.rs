@@ -1,16 +1,13 @@
-use reqwest::Method;
 use serde_json::{json, Value};
 
 use super::{
     client::{Lap, SessionContext},
-    cursor,
-    events::AgentEventStream,
-    response_fields::{id, nested_id, nested_string_field},
-    responses::response_json,
+    cursor, opencode,
+    response_fields::{id, nested_id},
+    session_events::SessionEvents,
     types::{
         AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, ManagedAgent, SendEventsParams, SendEventsResponse,
-        Session,
+        CreateSessionParams, Environment, ManagedAgent, Session,
     },
 };
 
@@ -48,6 +45,9 @@ impl Agents<'_> {
         match runtime {
             AgentRuntime::ClaudeManagedAgents => self.create_claude_agent(runtime, params).await,
             AgentRuntime::Cursor => self.create_cursor_agent(runtime, params).await,
+            AgentRuntime::OpenCode => Err(AgentSdkError::InvalidRequest(
+                "agents.create is not supported for opencode".to_owned(),
+            )),
         }
     }
 
@@ -107,6 +107,9 @@ impl Environments<'_> {
                 let raw = json!({ "id": params.name });
                 Ok(Environment { id: id(&raw)?, raw })
             }
+            AgentRuntime::OpenCode => Err(AgentSdkError::InvalidRequest(
+                "environments.create is not supported for opencode".to_owned(),
+            )),
         }
     }
 }
@@ -124,6 +127,7 @@ impl<'a> Sessions<'a> {
         match runtime {
             AgentRuntime::ClaudeManagedAgents => self.create_claude_session(runtime, params).await,
             AgentRuntime::Cursor => self.create_cursor_session(params),
+            AgentRuntime::OpenCode => self.create_opencode_session(params).await,
         }
     }
 
@@ -159,128 +163,22 @@ impl<'a> Sessions<'a> {
         )?;
         Ok(session)
     }
-}
 
-pub struct SessionEvents<'a> {
-    client: &'a Lap,
-}
-
-impl SessionEvents<'_> {
-    pub async fn send(
+    async fn create_opencode_session(
         &self,
-        session_id: &str,
-        params: SendEventsParams,
-    ) -> Result<SendEventsResponse, AgentSdkError> {
-        let runtime = self.client.runtime_for_session(session_id)?;
-        match runtime {
-            AgentRuntime::ClaudeManagedAgents => self.send_claude_events(session_id, params).await,
-            AgentRuntime::Cursor => self.send_cursor_events(session_id, params).await,
-        }
-    }
-
-    pub async fn stream(&self, session_id: &str) -> Result<AgentEventStream, AgentSdkError> {
-        let runtime = self.client.runtime_for_session(session_id)?;
-        match runtime {
-            AgentRuntime::ClaudeManagedAgents => self.stream_claude_events(session_id).await,
-            AgentRuntime::Cursor => self.stream_cursor_events(session_id).await,
-        }
-    }
-
-    async fn send_claude_events(
-        &self,
-        session_id: &str,
-        params: SendEventsParams,
-    ) -> Result<SendEventsResponse, AgentSdkError> {
-        let provider_session_id = self.provider_session_id(session_id)?;
+        params: CreateSessionParams,
+    ) -> Result<Session, AgentSdkError> {
         let raw = self
             .client
             .post(
-                AgentRuntime::ClaudeManagedAgents,
-                &format!("/v1/sessions/{provider_session_id}/events"),
-                &params,
+                AgentRuntime::OpenCode,
+                "/session",
+                &opencode::session_body(params.title),
             )
             .await?;
-        Ok(SendEventsResponse { raw })
-    }
-
-    async fn send_cursor_events(
-        &self,
-        session_id: &str,
-        params: SendEventsParams,
-    ) -> Result<SendEventsResponse, AgentSdkError> {
-        let agent_id = self.cursor_agent_id(session_id)?;
-        let body = json!({ "prompt": cursor::prompt_from_events(&params.events)? });
-        let raw = self
-            .client
-            .post(
-                AgentRuntime::Cursor,
-                &format!("/v1/agents/{agent_id}/runs"),
-                &body,
-            )
-            .await?;
-        let run_id = nested_string_field(&raw, "run", "id")?;
+        let session = Session { id: id(&raw)?, raw };
         self.client
-            .remember_session_context(session_id, SessionContext::cursor(agent_id, Some(run_id)))?;
-        Ok(SendEventsResponse { raw })
-    }
-
-    async fn stream_claude_events(
-        &self,
-        session_id: &str,
-    ) -> Result<AgentEventStream, AgentSdkError> {
-        let provider_session_id = self.provider_session_id(session_id)?;
-        self.client
-            .stream(
-                AgentRuntime::ClaudeManagedAgents,
-                &format!("/v1/sessions/{provider_session_id}/events/stream"),
-            )
-            .await
-    }
-
-    async fn stream_cursor_events(
-        &self,
-        session_id: &str,
-    ) -> Result<AgentEventStream, AgentSdkError> {
-        let context = self.client.context_for_session(session_id)?;
-        let agent_id = cursor::agent_id_from_context(session_id, context.as_ref());
-        let run_id = match context.and_then(|context| context.run_id) {
-            Some(run_id) => run_id,
-            None => self.latest_cursor_run_id(&agent_id).await?,
-        };
-        self.client
-            .stream(
-                AgentRuntime::Cursor,
-                &format!("/v1/agents/{agent_id}/runs/{run_id}/stream"),
-            )
-            .await
-    }
-
-    fn provider_session_id(&self, session_id: &str) -> Result<String, AgentSdkError> {
-        Ok(self
-            .client
-            .context_for_session(session_id)?
-            .and_then(|context| context.provider_session_id)
-            .unwrap_or_else(|| session_id.to_owned()))
-    }
-
-    fn cursor_agent_id(&self, session_id: &str) -> Result<String, AgentSdkError> {
-        Ok(cursor::agent_id_from_context(
-            session_id,
-            self.client.context_for_session(session_id)?.as_ref(),
-        ))
-    }
-
-    async fn latest_cursor_run_id(&self, agent_id: &str) -> Result<String, AgentSdkError> {
-        let response = self
-            .client
-            .request(
-                AgentRuntime::Cursor,
-                Method::GET,
-                &format!("/v1/agents/{agent_id}"),
-            )?
-            .send()
-            .await?;
-        let raw = response_json(response).await?;
-        cursor::run_id(&raw).ok_or(AgentSdkError::MissingField("latestRunId"))
+            .remember_session(&session.id, AgentRuntime::OpenCode)?;
+        Ok(session)
     }
 }

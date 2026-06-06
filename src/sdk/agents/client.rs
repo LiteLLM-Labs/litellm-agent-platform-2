@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use reqwest::{header, Method};
+use reqwest::{header, Method, StatusCode};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -12,10 +12,8 @@ use super::{
     events::{stream_events, AgentEventStream},
     resources::Beta,
     responses::{ensure_success, response_json},
-    types::{
-        AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef, ANTHROPIC_VERSION,
-        MANAGED_AGENTS_BETA,
-    },
+    runtime_config::{configured_http_client, runtime_configs, RuntimeConfig},
+    types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
 
 #[derive(Clone)]
@@ -28,12 +26,6 @@ struct Inner {
     runtimes: HashMap<AgentRuntime, RuntimeConfig>,
     session_contexts: Mutex<HashMap<String, SessionContext>>,
     cursor_run_ids: Mutex<HashMap<String, String>>,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeConfig {
-    api_key: String,
-    base_url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +55,7 @@ impl Lap {
         } = session;
         let agent_id = match lap_agent_runtime {
             AgentRuntime::Cursor => provider_agent_id.or_else(|| provider_session_id.clone()),
-            AgentRuntime::ClaudeManagedAgents => provider_agent_id,
+            AgentRuntime::ClaudeManagedAgents | AgentRuntime::OpenCode => provider_agent_id,
         };
         self.remember_session_context(
             &session_id,
@@ -97,11 +89,16 @@ impl Lap {
         path: &str,
         body: &T,
     ) -> Result<Value, AgentSdkError> {
-        let response = self
+        let mut response = self
             .request(runtime, Method::POST, path)?
             .json(body)
             .send()
             .await?;
+        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(request) = self.opencode_bearer_request(Method::POST, path)? {
+                response = request.json(body).send().await?;
+            }
+        }
         response_json(response).await
     }
 
@@ -110,14 +107,22 @@ impl Lap {
         runtime: AgentRuntime,
         path: &str,
     ) -> Result<AgentEventStream, AgentSdkError> {
-        let response = self
+        let mut response = self
             .request(runtime, Method::GET, path)?
             .header(header::ACCEPT, "text/event-stream")
             .send()
             .await?;
+        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(request) = self.opencode_bearer_request(Method::GET, path)? {
+                response = request
+                    .header(header::ACCEPT, "text/event-stream")
+                    .send()
+                    .await?;
+            }
+        }
         let stream = stream_events(ensure_success(response).await?);
         match runtime {
-            AgentRuntime::ClaudeManagedAgents => Ok(stream),
+            AgentRuntime::ClaudeManagedAgents | AgentRuntime::OpenCode => Ok(stream),
             AgentRuntime::Cursor => Ok(normalize_cursor_stream(stream)),
         }
     }
@@ -138,13 +143,25 @@ impl Lap {
             .http
             .request(method, format!("{}{}", config.base_url, path))
             .header(header::CONTENT_TYPE, "application/json");
-        Ok(match runtime {
-            AgentRuntime::ClaudeManagedAgents => request
-                .header("x-api-key", &config.api_key)
-                .header("anthropic-version", ANTHROPIC_VERSION)
-                .header("anthropic-beta", MANAGED_AGENTS_BETA),
-            AgentRuntime::Cursor => request.bearer_auth(&config.api_key),
-        })
+        Ok(config.authorize(request))
+    }
+
+    fn opencode_bearer_request(
+        &self,
+        method: Method,
+        path: &str,
+    ) -> Result<Option<reqwest::RequestBuilder>, AgentSdkError> {
+        let config = self
+            .inner
+            .runtimes
+            .get(&AgentRuntime::OpenCode)
+            .ok_or(AgentSdkError::RuntimeNotConfigured(AgentRuntime::OpenCode))?;
+        let request = self
+            .inner
+            .http
+            .request(method, format!("{}{}", config.base_url, path))
+            .header(header::CONTENT_TYPE, "application/json");
+        Ok(config.authorize_opencode_bearer(request))
     }
 
     pub(super) fn default_runtime(&self) -> Result<AgentRuntime, AgentSdkError> {
@@ -255,31 +272,4 @@ impl SessionContext {
             run_id,
         }
     }
-}
-
-fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
-    let mut runtimes = HashMap::new();
-    if let Some(api_key) = config.anthropic_api_key {
-        runtimes.insert(
-            AgentRuntime::ClaudeManagedAgents,
-            RuntimeConfig {
-                api_key,
-                base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-            },
-        );
-    }
-    if let Some(api_key) = config.cursor_api_key {
-        runtimes.insert(
-            AgentRuntime::Cursor,
-            RuntimeConfig {
-                api_key,
-                base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
-            },
-        );
-    }
-    runtimes
-}
-
-fn configured_http_client() -> reqwest::Client {
-    reqwest::Client::new()
 }

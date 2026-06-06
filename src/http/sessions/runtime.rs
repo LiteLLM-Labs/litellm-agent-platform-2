@@ -18,7 +18,7 @@ use crate::{
     },
     errors::GatewayError,
     managed_agents::providers::{
-        base::{validate_runtime, RuntimeCredential, RuntimeSessionInput},
+        base::{normalize_runtime, RuntimeCredential, RuntimeSessionInput},
         provision_runtime,
     },
     proxy::{auth::master_key::require_master_key, state::AppState},
@@ -208,13 +208,9 @@ fn require_events_master_key(
 
 fn validated_runtime(input: &CreateSessionRequest) -> Result<String, GatewayError> {
     let runtime = input.runtime.clone().unwrap_or_default();
-    if validate_runtime(&runtime) {
-        Ok(runtime)
-    } else {
-        Err(GatewayError::InvalidJsonMessage(format!(
-            "unsupported runtime: {runtime}"
-        )))
-    }
+    normalize_runtime(&runtime)
+        .map(str::to_owned)
+        .ok_or_else(|| GatewayError::InvalidJsonMessage(format!("unsupported runtime: {runtime}")))
 }
 
 async fn load_agent(

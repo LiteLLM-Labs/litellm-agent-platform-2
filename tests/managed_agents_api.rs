@@ -14,6 +14,7 @@ async fn managed_agent_endpoints_round_trip_against_postgres() {
         return;
     };
 
+    flows::assert_agent_runtime_catalog(&fixture).await;
     let agent_id = flows::create_agent(&fixture).await;
     flows::exercise_agent_lifecycle(&fixture, &agent_id).await;
     flows::exercise_memory(&fixture, &agent_id).await;
