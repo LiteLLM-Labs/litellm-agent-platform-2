@@ -10,7 +10,7 @@ use crate::sdk::agents::{
     CreateEnvironmentParams, CreateSessionParams, Environment, Lap, ManagedAgent,
     ManagedSessionRef, SendEventsParams, SendEventsResponse, Session, SessionContext,
 };
-use crate::sdk::providers::runtime::{AdapterFuture, RuntimeAdapter};
+use crate::sdk::translation::runtime::{AdapterFuture, RuntimeAdapter};
 use stream::normalize_cursor_stream;
 
 pub(crate) struct CursorRuntime;

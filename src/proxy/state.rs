@@ -10,7 +10,7 @@ use crate::{
     mcp::registry::McpServerRegistry,
     model_prices::ModelCostMap,
     proxy::{auth::api_keys::GatewayApiKeyStore, config::GatewayConfig},
-    sdk::llms::router::Router,
+    sdk::routing::llms::Router,
 };
 
 #[derive(Debug)]

@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     errors::GatewayError,
     proxy::config::GatewayConfig,
-    sdk::providers::llm::{ProviderRegistry, Transformation},
+    sdk::translation::llm::{ProviderRegistry, Transformation},
 };
 
 #[derive(Debug, Clone)]

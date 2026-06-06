@@ -40,7 +40,7 @@ fn main() {
         .collect();
 
     let generated = format!(
-        "{mods}\npub fn register_all(registry: &mut crate::sdk::providers::llm::ProviderRegistry) {{\n{inits}}}\n"
+        "{mods}\npub fn register_all(registry: &mut crate::sdk::translation::llm::ProviderRegistry) {{\n{inits}}}\n"
     );
     fs::write(&dest, generated).unwrap();
 

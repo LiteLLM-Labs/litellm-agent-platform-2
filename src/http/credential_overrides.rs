@@ -1,7 +1,7 @@
 use crate::{
     errors::GatewayError,
     proxy::{provider_credentials, state::AppState},
-    sdk::llms::router::Route,
+    sdk::routing::llms::Route,
 };
 
 pub async fn apply(state: &AppState, mut route: Route) -> Result<Route, GatewayError> {

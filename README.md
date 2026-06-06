@@ -143,7 +143,8 @@ Entry points and what runs at startup:
 Subsystems:
 
 - **`src/http/`** — HTTP layer only. Route registration, auth, body extraction, response shaping. No business logic.
-- **`src/sdk/llms/`** — model router (maps model name → deployment + handler).
+- **`src/sdk/routing/`** — request/model routing (maps model name → deployment + handler).
+- **`src/sdk/translation/`** — shared translation traits for LLM calls and managed-agent runtimes.
 - **`src/sdk/providers/`** — provider-owned LLM transforms and runtime adapters (`anthropic/llm`, `anthropic/runtime`, `cursor/runtime`, etc.).
 - **`src/sdk/agents/`** — unified managed-agent runtime SDK (`Lap`) resources and types.
 - **`src/proxy/`** — config loading, master-key auth, `AppState`.

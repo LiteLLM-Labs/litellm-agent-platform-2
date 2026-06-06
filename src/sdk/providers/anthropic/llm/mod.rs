@@ -1,6 +1,6 @@
 pub mod transformation;
 
-use crate::sdk::providers::llm::ProviderRegistry;
+use crate::sdk::translation::llm::ProviderRegistry;
 use transformation::AnthropicTransformation;
 
 pub fn init(registry: &mut ProviderRegistry) {

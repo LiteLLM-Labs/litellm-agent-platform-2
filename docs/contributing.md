@@ -91,7 +91,8 @@ editing. See `src/sdk/providers/anthropic/llm/` for a reference implementation.
 ```
 src/
   sdk/
-    llms/      # model router — no auth, no server state
+    routing/   # request/model routing above translation
+    translation/ # shared translation traits
     providers/ # provider-owned llm/ and runtime/ modules
     agents/    # Agent Runtime SDK client resources + types
   proxy/       # config, master-key auth, AppState
