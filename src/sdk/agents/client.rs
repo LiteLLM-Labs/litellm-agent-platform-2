@@ -3,16 +3,16 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use reqwest::{header, Method};
-use serde::Serialize;
-use serde_json::Value;
-
 use super::{
-    events::{stream_events, AgentEventStream},
+    events::AgentEventStream,
+    providers::{
+        register_all,
+        transform::{AgentProviderRegistry, ProviderSessionContext},
+    },
     types::{
         AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
         CreateSessionParams, Environment, LapConfig, ManagedAgent, SendEventsParams,
-        SendEventsResponse, Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
+        SendEventsResponse, Session,
     },
 };
 
@@ -22,53 +22,22 @@ pub struct Lap {
 }
 
 struct Inner {
-    http: reqwest::Client,
-    runtimes: HashMap<AgentRuntime, RuntimeConfig>,
-    session_runtimes: Mutex<HashMap<String, AgentRuntime>>,
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeConfig {
-    api_key: String,
-    base_url: String,
+    providers: AgentProviderRegistry,
+    session_contexts: Mutex<HashMap<String, ProviderSessionContext>>,
 }
 
 impl Lap {
     pub fn new(config: LapConfig) -> Self {
-        let mut runtimes = HashMap::new();
-        if let Some(api_key) = config.anthropic_api_key {
-            runtimes.insert(
-                AgentRuntime::ClaudeManagedAgents,
-                RuntimeConfig {
-                    api_key,
-                    base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-                },
-            );
-        }
-        Self::with_http(configured_http_client(), runtimes)
+        Self::with_http_client(config, configured_http_client())
     }
 
-    #[cfg(test)]
     pub(crate) fn with_http_client(config: LapConfig, http: reqwest::Client) -> Self {
-        let mut runtimes = HashMap::new();
-        if let Some(api_key) = config.anthropic_api_key {
-            runtimes.insert(
-                AgentRuntime::ClaudeManagedAgents,
-                RuntimeConfig {
-                    api_key,
-                    base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-                },
-            );
-        }
-        Self::with_http(http, runtimes)
-    }
-
-    fn with_http(http: reqwest::Client, runtimes: HashMap<AgentRuntime, RuntimeConfig>) -> Self {
+        let mut providers = AgentProviderRegistry::new();
+        register_all(&mut providers, &config, http);
         Self {
             inner: Arc::new(Inner {
-                http,
-                runtimes,
-                session_runtimes: Mutex::new(HashMap::new()),
+                providers,
+                session_contexts: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -77,92 +46,55 @@ impl Lap {
         Beta { client: self }
     }
 
-    async fn post<T: Serialize>(
-        &self,
-        runtime: AgentRuntime,
-        path: &str,
-        body: &T,
-    ) -> Result<Value, AgentSdkError> {
-        let response = self
-            .request(runtime, Method::POST, path)?
-            .json(body)
-            .send()
-            .await?;
-        response_json(response).await
-    }
-
-    async fn stream(
-        &self,
-        runtime: AgentRuntime,
-        path: &str,
-    ) -> Result<AgentEventStream, AgentSdkError> {
-        let response = self
-            .request(runtime, Method::GET, path)?
-            .header(header::ACCEPT, "text/event-stream")
-            .send()
-            .await?;
-        ensure_success(response).await.map(stream_events)
-    }
-
-    fn request(
-        &self,
-        runtime: AgentRuntime,
-        method: Method,
-        path: &str,
-    ) -> Result<reqwest::RequestBuilder, AgentSdkError> {
-        let config = self
-            .inner
-            .runtimes
-            .get(&runtime)
-            .ok_or(AgentSdkError::RuntimeNotConfigured(runtime))?;
-        Ok(self
-            .inner
-            .http
-            .request(method, format!("{}{}", config.base_url, path))
-            .header(header::CONTENT_TYPE, "application/json")
-            .header("x-api-key", &config.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("anthropic-beta", MANAGED_AGENTS_BETA))
-    }
-
     fn default_runtime(&self) -> Result<AgentRuntime, AgentSdkError> {
-        if self.inner.runtimes.len() == 1 {
-            self.inner
-                .runtimes
-                .keys()
-                .copied()
-                .next()
-                .ok_or(AgentSdkError::NoRuntimesConfigured)
-        } else if self.inner.runtimes.is_empty() {
+        if let Some(runtime) = self.inner.providers.only_runtime() {
+            Ok(runtime)
+        } else if self.inner.providers.is_empty() {
             Err(AgentSdkError::NoRuntimesConfigured)
         } else {
             Err(AgentSdkError::RuntimeRequired)
         }
     }
 
-    fn runtime_for_session(&self, session_id: &str) -> Result<AgentRuntime, AgentSdkError> {
+    fn provider(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<super::providers::transform::AgentProvider, AgentSdkError> {
+        self.inner
+            .providers
+            .get(runtime)
+            .ok_or(AgentSdkError::RuntimeNotConfigured(runtime))
+    }
+
+    fn context_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<ProviderSessionContext>, AgentSdkError> {
         let sessions = self
             .inner
-            .session_runtimes
+            .session_contexts
             .lock()
             .map_err(|_| AgentSdkError::StateLock)?;
-        sessions
-            .get(session_id)
-            .copied()
-            .map(Ok)
-            .unwrap_or_else(|| self.default_runtime())
+        Ok(sessions.get(session_id).cloned())
+    }
+
+    fn runtime_for_session(&self, session_id: &str) -> Result<AgentRuntime, AgentSdkError> {
+        let Some(context) = self.context_for_session(session_id)? else {
+            return self.default_runtime();
+        };
+        Ok(context.runtime)
     }
 
     fn remember_session(
         &self,
         session_id: &str,
-        runtime: AgentRuntime,
+        context: ProviderSessionContext,
     ) -> Result<(), AgentSdkError> {
         self.inner
-            .session_runtimes
+            .session_contexts
             .lock()
             .map_err(|_| AgentSdkError::StateLock)?
-            .insert(session_id.to_owned(), runtime);
+            .insert(session_id.to_owned(), context);
         Ok(())
     }
 }
@@ -198,12 +130,11 @@ pub struct Agents<'a> {
 impl Agents<'_> {
     pub async fn create(&self, params: CreateAgentParams) -> Result<ManagedAgent, AgentSdkError> {
         let runtime = params.lap_agent_runtime;
-        let raw = self.client.post(runtime, "/v1/agents", &params).await?;
-        Ok(ManagedAgent {
-            id: id(&raw)?,
-            version: raw.get("version").and_then(Value::as_u64),
-            raw,
-        })
+        self.client
+            .provider(runtime)?
+            .handler
+            .create_agent(params)
+            .await
     }
 }
 
@@ -217,11 +148,11 @@ impl Environments<'_> {
         params: CreateEnvironmentParams,
     ) -> Result<Environment, AgentSdkError> {
         let runtime = params.lap_agent_runtime;
-        let raw = self
-            .client
-            .post(runtime, "/v1/environments", &params)
-            .await?;
-        Ok(Environment { id: id(&raw)?, raw })
+        self.client
+            .provider(runtime)?
+            .handler
+            .create_environment(params)
+            .await
     }
 }
 
@@ -235,9 +166,15 @@ impl<'a> Sessions<'a> {
             .lap_agent_runtime
             .map(Ok)
             .unwrap_or_else(|| self.client.default_runtime())?;
-        let raw = self.client.post(runtime, "/v1/sessions", &params).await?;
-        let session = Session { id: id(&raw)?, raw };
-        self.client.remember_session(&session.id, runtime)?;
+        let provider_session = self
+            .client
+            .provider(runtime)?
+            .handler
+            .create_session(params)
+            .await?;
+        let session = provider_session.session;
+        self.client
+            .remember_session(&session.id, provider_session.context)?;
         Ok(session)
     }
 
@@ -259,50 +196,30 @@ impl SessionEvents<'_> {
         params: SendEventsParams,
     ) -> Result<SendEventsResponse, AgentSdkError> {
         let runtime = self.client.runtime_for_session(session_id)?;
-        let raw = self
+        let context = self.client.context_for_session(session_id)?;
+        let sent = self
             .client
-            .post(
-                runtime,
-                &format!("/v1/sessions/{session_id}/events"),
-                &params,
-            )
+            .provider(runtime)?
+            .handler
+            .send_events(session_id, params, context)
             .await?;
-        Ok(SendEventsResponse { raw })
+        if let Some(context) = sent.context {
+            self.client.remember_session(session_id, context)?;
+        }
+        Ok(sent.response)
     }
 
     pub async fn stream(&self, session_id: &str) -> Result<AgentEventStream, AgentSdkError> {
         let runtime = self.client.runtime_for_session(session_id)?;
+        let context = self.client.context_for_session(session_id)?;
         self.client
-            .stream(runtime, &format!("/v1/sessions/{session_id}/events/stream"))
+            .provider(runtime)?
+            .handler
+            .stream_events(session_id, context)
             .await
     }
 }
 
 fn configured_http_client() -> reqwest::Client {
     reqwest::Client::new()
-}
-
-async fn response_json(response: reqwest::Response) -> Result<Value, AgentSdkError> {
-    let response = ensure_success(response).await?;
-    let text = response.text().await?;
-    if text.trim().is_empty() {
-        return Ok(Value::Object(Default::default()));
-    }
-    serde_json::from_str(&text).map_err(AgentSdkError::Json)
-}
-
-async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, AgentSdkError> {
-    let status = response.status();
-    if status.is_success() {
-        return Ok(response);
-    }
-    let body = response.text().await.unwrap_or_default();
-    Err(AgentSdkError::Provider { status, body })
-}
-
-fn id(raw: &Value) -> Result<String, AgentSdkError> {
-    raw.get("id")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or(AgentSdkError::MissingId)
 }

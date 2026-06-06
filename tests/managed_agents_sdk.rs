@@ -13,6 +13,16 @@ fn client(server: &MockServer) -> Lap {
     let config = LapConfig {
         anthropic_api_key: Some("sk-ant-test".to_owned()),
         anthropic_base_url: server.uri(),
+        ..LapConfig::default()
+    };
+    Lap::new(config)
+}
+
+fn cursor_client(server: &MockServer) -> Lap {
+    let config = LapConfig {
+        cursor_api_key: Some("cursor-test".to_owned()),
+        cursor_base_url: server.uri(),
+        ..LapConfig::default()
     };
     Lap::new(config)
 }
@@ -169,7 +179,7 @@ async fn streams_session_events() {
 }
 
 #[test]
-fn parses_sse_and_rejects_unknown_runtime() {
+fn parses_sse_and_resolves_supported_runtimes() {
     let events = parse_sse(
         "event: agent.message\n\
          data: {\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}\n\n",
@@ -177,5 +187,137 @@ fn parses_sse_and_rejects_unknown_runtime() {
     .unwrap();
 
     assert_eq!(events[0].event_type, "agent.message");
-    assert!(AgentRuntime::try_from("cursor").is_err());
+    assert_eq!(
+        AgentRuntime::try_from("cursor").unwrap(),
+        AgentRuntime::Cursor
+    );
+    assert!(AgentRuntime::try_from("not-a-runtime").is_err());
+}
+
+#[tokio::test]
+async fn cursor_provider_creates_runs_and_normalizes_stream_events() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/agents"))
+        .and(header("authorization", "Bearer cursor-test"))
+        .and(body_json(json!({
+            "prompt": { "text": "Create fibonacci.txt" },
+            "model": { "id": "composer-2" },
+            "repos": [{
+                "url": "https://github.com/acme/app",
+                "startingRef": "main"
+            }],
+            "name": "Quickstart session",
+            "env": {
+                "type": "cloud",
+                "name": "quickstart-env"
+            }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "agent": {
+                "id": "bc-00000000-0000-0000-0000-000000000001",
+                "name": "Quickstart session",
+                "status": "ACTIVE",
+                "latestRunId": "run-00000000-0000-0000-0000-000000000001"
+            },
+            "run": {
+                "id": "run-00000000-0000-0000-0000-000000000001",
+                "agentId": "bc-00000000-0000-0000-0000-000000000001",
+                "status": "CREATING"
+            }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/v1/agents/bc-00000000-0000-0000-0000-000000000001/runs",
+        ))
+        .and(header("authorization", "Bearer cursor-test"))
+        .and(body_json(json!({
+            "prompt": { "text": "Add a troubleshooting note" }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "run": {
+                "id": "run-00000000-0000-0000-0000-000000000002",
+                "agentId": "bc-00000000-0000-0000-0000-000000000001",
+                "status": "CREATING"
+            }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/v1/agents/bc-00000000-0000-0000-0000-000000000001/runs/run-00000000-0000-0000-0000-000000000002/stream",
+        ))
+        .and(header("authorization", "Bearer cursor-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "event: assistant\n\
+             data: {\"text\":\"I'll update it.\"}\n\n\
+             event: tool_call\n\
+             data: {\"callId\":\"call-1\",\"name\":\"edit_file\",\"status\":\"running\",\"args\":{\"path\":\"README.md\"}}\n\n\
+             event: result\n\
+             data: {\"runId\":\"run-00000000-0000-0000-0000-000000000002\",\"status\":\"FINISHED\",\"text\":\"Done.\"}\n\n",
+        ))
+        .mount(&server)
+        .await;
+
+    let client = cursor_client(&server);
+    let session = client
+        .beta()
+        .sessions()
+        .create(CreateSessionParams {
+            agent: "lap-agent-definition".to_owned(),
+            environment_id: "quickstart-env".to_owned(),
+            title: "Quickstart session".to_owned(),
+            lap_agent_runtime: Some(AgentRuntime::Cursor),
+            metadata: None,
+            resources: Some(json!({
+                "prompt": { "text": "Create fibonacci.txt" },
+                "model": { "id": "composer-2" },
+                "repos": [{
+                    "url": "https://github.com/acme/app",
+                    "startingRef": "main"
+                }]
+            })),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(session.id, "bc-00000000-0000-0000-0000-000000000001");
+
+    client
+        .beta()
+        .sessions()
+        .events()
+        .send(
+            &session.id,
+            SendEventsParams {
+                events: vec![json!({
+                    "type": "user.message",
+                    "content": [{ "type": "text", "text": "Add a troubleshooting note" }]
+                })],
+            },
+        )
+        .await
+        .unwrap();
+
+    let mut stream = client
+        .beta()
+        .sessions()
+        .events()
+        .stream(&session.id)
+        .await
+        .unwrap();
+    let first = stream.next().await.unwrap().unwrap();
+    let second = stream.next().await.unwrap().unwrap();
+    let third = stream.next().await.unwrap().unwrap();
+
+    assert_eq!(first.event_type, "agent.message");
+    assert_eq!(first.data["content"][0]["text"], "I'll update it.");
+    assert_eq!(second.event_type, "agent.tool_use");
+    assert_eq!(second.data["name"], "edit_file");
+    assert_eq!(second.data["id"], "call-1");
+    assert_eq!(second.data["input"]["path"], "README.md");
+    assert_eq!(third.event_type, "session.status_idle");
+    assert_eq!(third.data["result"], "Done.");
 }
