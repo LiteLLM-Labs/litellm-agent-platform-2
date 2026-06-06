@@ -33,7 +33,7 @@ import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
-import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval } from "@/lib/api";
+import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel } from "@/lib/api";
 import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
 import type { Agent, AgentRuntimeId, HarnessMessage, HarnessMessagePart } from "@/lib/types";
@@ -93,6 +93,11 @@ function runtimeEventText(ev: RuntimeAgentEvent): string {
   return "";
 }
 
+function normalizedRuntimeEventType(ev: RuntimeAgentEvent): string {
+  const type = ev.type;
+  return typeof type === "string" ? type : "";
+}
+
 function runtimeEventPartKind(ev: RuntimeAgentEvent): "text" | "thinking" {
   const part = ev.part;
   if (part && typeof part === "object") {
@@ -119,16 +124,43 @@ function runtimeErrorMessage(ev: RuntimeAgentEvent): string {
 }
 
 function isRuntimeAssistantTextEvent(type: string): boolean {
-  return type === "assistant_response" || type === "agent.message";
+  return type === "assistant_response";
 }
 
 function isRuntimeThinkingEvent(type: string): boolean {
-  return type === "thinking_back" || type === "agent.thinking" || type === "agent.reasoning";
+  return type === "thinking_back";
+}
+
+function isRuntimeToolEvent(type: string): boolean {
+  return type === "tool_call" || type === "tool_result";
+}
+
+function runtimeToolId(ev: RuntimeAgentEvent): string {
+  const id = ev.id ?? ev.tool_use_id;
+  return typeof id === "string" && id ? id : `tool_${Date.now().toString(36)}`;
+}
+
+function optimisticUserMessage(sessionId: string, text: string): HarnessMessage {
+  const stamp = Date.now().toString(36);
+  const messageId = `${sessionId}_runtime_user_${stamp}`;
+  return {
+    info: { id: messageId, role: "user", sessionID: sessionId },
+    parts: [
+      {
+        id: `${messageId}_text`,
+        messageID: messageId,
+        sessionID: sessionId,
+        type: "text",
+        text,
+      },
+    ],
+  };
 }
 
 function ChatInner() {
   const sp = useSearchParams();
   const sid = sp.get("id");
+  const autostartPrompt = sp.get("autostart") === "1" ? sp.get("prompt")?.trim() : "";
   const [messages, setMessages] = useState<HarnessMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>(FALLBACK_MODELS);
@@ -154,6 +186,7 @@ function ChatInner() {
     textPartId: string;
     thinkingPartId: string;
   } | null>(null);
+  const autostartedRef = useRef<string | null>(null);
 
   const refetch = useCallback(async () => {
     if (!sid) return;
@@ -238,30 +271,6 @@ function ChatInner() {
     const s = await createSession(undefined, next);
     router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
   }, [sid, sessionHarness, router]);
-
-  const appendRuntimeUserMessage = useCallback((text: string) => {
-    if (!sid) return;
-    const stamp = Date.now().toString(36);
-    setMessages((prev) => [
-      ...(prev ?? []),
-      {
-        info: {
-          id: `${sid}_user_${stamp}`,
-          role: "user",
-          sessionID: sid,
-        },
-        parts: [
-          {
-            id: `${sid}_user_${stamp}_text`,
-            messageID: `${sid}_user_${stamp}`,
-            sessionID: sid,
-            type: "text",
-            text,
-          },
-        ],
-      },
-    ]);
-  }, [sid]);
 
   const runtimeAssistantIds = useCallback(() => {
     if (!sid) return null;
@@ -369,22 +378,100 @@ function ChatInner() {
     });
   }, [runtimeAssistantIds, sid]);
 
+  const appendRuntimeToolEvent = useCallback((ev: RuntimeAgentEvent) => {
+    const ids = runtimeAssistantIds();
+    if (!ids) return;
+    const toolId = runtimeToolId(ev);
+    const partId = `${ids.messageId}_${toolId}`;
+    const name = typeof ev.name === "string" ? ev.name : "tool";
+    const status = typeof ev.status === "string" ? ev.status : ev.type === "tool_result" ? "completed" : "running";
+    setMessages((prev) => {
+      let next = prev ?? [];
+      let idx = next.findIndex((m) => m.info.id === ids.messageId);
+      if (idx === -1) {
+        next = [
+          ...next,
+          {
+            info: { id: ids.messageId, role: "assistant", sessionID: sid ?? undefined },
+            parts: [],
+          },
+        ];
+        idx = next.length - 1;
+      } else {
+        next = [...next];
+      }
+      const msg = next[idx];
+      let foundPart = false;
+      const parts = msg.parts.map((part) => {
+        if (part.id !== partId || part.type !== "tool") return part;
+        foundPart = true;
+        return {
+          ...part,
+          tool: part.tool || name,
+          state: {
+            ...part.state,
+            status,
+            input: part.state.input ?? ev.input,
+            output: ev.output ?? part.state.output,
+            error: ev.error ?? part.state.error,
+          },
+        } as HarnessMessagePart;
+      });
+      if (!foundPart) {
+        parts.push({
+          id: partId,
+          messageID: ids.messageId,
+          sessionID: sid ?? undefined,
+          type: "tool",
+          tool: name,
+          state: {
+            status,
+            input: ev.input,
+            output: ev.output,
+            error: ev.error,
+          },
+        });
+      }
+      next[idx] = { ...msg, parts };
+      return next;
+    });
+  }, [runtimeAssistantIds, sid]);
+
+  const beginRuntimeTurn = useCallback((text?: string) => {
+    if (!sessionRuntime || !sid) return;
+    runtimeAssistantRef.current = null;
+    const ids = runtimeAssistantIds();
+    if (!ids) return;
+    const trimmed = text?.trim();
+    setMessages((prev) => {
+      const next = [...(prev ?? [])];
+      if (trimmed) {
+        next.push(optimisticUserMessage(sid, trimmed));
+      }
+      next.push({
+        info: { id: ids.messageId, role: "assistant", sessionID: sid },
+        parts: [],
+      });
+      return next;
+    });
+    setSessionStatus("busy");
+  }, [runtimeAssistantIds, sessionRuntime, sid]);
+
   const handleRuntimeEvent = useCallback((ev: RuntimeAgentEvent) => {
     eventBufferRef.current = [
       ...eventBufferRef.current.slice(-499),
       { ts: Date.now(), ev: ev as Frame["ev"] },
     ];
 
-    if (
-      ev.type === "session.status_running" ||
-      ev.type === "session.thread_status_running"
-    ) {
+    const type = normalizedRuntimeEventType(ev);
+
+    if (type === "session.status_running") {
       ensureRuntimeAssistantMessage();
       setSessionStatus("busy");
       return;
     }
 
-    if (ev.type === "session.status") {
+    if (type === "session.status") {
       const status = ev.status;
       const statusType =
         typeof status === "string"
@@ -403,37 +490,34 @@ function ChatInner() {
       return;
     }
 
-    if (ev.type === "session.status_idle" || ev.type === "session.thread_status_idle") {
+    if (type === "session.status_idle") {
       setSessionStatus("idle");
       finishRuntimeAssistantMessage();
       return;
     }
 
-    if (ev.type === "session.error") {
+    if (type === "session.error") {
       setError(`Error: ${runtimeErrorMessage(ev)}`);
       setSessionStatus("idle");
       runtimeAssistantRef.current = null;
       return;
     }
 
-    if (!isRuntimeAssistantTextEvent(ev.type) && !isRuntimeThinkingEvent(ev.type)) return;
-    ensureRuntimeAssistantMessage();
-    const delta = runtimeEventText(ev);
-    if (delta) {
-      appendRuntimePartText(isRuntimeThinkingEvent(ev.type) ? "thinking" : runtimeEventPartKind(ev), delta);
-    }
-    setSessionStatus("busy");
-  }, [appendRuntimePartText, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
-
-  const onComposerSent = useCallback((text: string) => {
-    if (sessionRuntime) {
-      appendRuntimeUserMessage(text);
+    if (isRuntimeToolEvent(type)) {
       ensureRuntimeAssistantMessage();
+      appendRuntimeToolEvent(ev);
       setSessionStatus("busy");
       return;
     }
-    void refetch();
-  }, [appendRuntimeUserMessage, ensureRuntimeAssistantMessage, refetch, sessionRuntime]);
+
+    if (!isRuntimeAssistantTextEvent(type) && !isRuntimeThinkingEvent(type)) return;
+    ensureRuntimeAssistantMessage();
+    const delta = runtimeEventText(ev);
+    if (delta) {
+      appendRuntimePartText(isRuntimeThinkingEvent(type) ? "thinking" : runtimeEventPartKind(ev), delta);
+    }
+    setSessionStatus("busy");
+  }, [appendRuntimePartText, appendRuntimeToolEvent, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
@@ -443,9 +527,28 @@ function ChatInner() {
       onEvent: handleRuntimeEvent,
       onError: (err) => setError(err instanceof Error ? err.message : String(err)),
     });
+    if (autostartPrompt && autostartedRef.current !== sid) {
+      autostartedRef.current = sid;
+      beginRuntimeTurn(autostartPrompt);
+      void sendMessageWithRuntimeModel({
+        sessionId: sid,
+        text: autostartPrompt,
+        model,
+        runtime: sessionRuntime,
+      })
+        .then(() => {
+          if (!sessionRuntime) return refetch();
+        })
+        .then(() => router.replace(`/chat/?id=${encodeURIComponent(sid)}`))
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : String(err));
+          setSessionStatus("idle");
+          runtimeAssistantRef.current = null;
+        });
+    }
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, sessionLoaded, refetch, handleRuntimeEvent]);
+  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
 
   const onApprovalAccept = useCallback(async (id: string, args: Record<string, unknown>) => {
     setApprovalBusy(true);
@@ -776,7 +879,8 @@ function ChatInner() {
         <Composer
           sessionId={sid}
           model={model}
-          onSent={onComposerSent}
+          onSent={sessionRuntime ? undefined : refetch}
+          onSendStart={beginRuntimeTurn}
           disabled={Boolean(sessionRuntime && sessionStatus === "busy")}
         />
       </div>

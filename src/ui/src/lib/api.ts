@@ -427,6 +427,21 @@ export async function sendMessage(opts: {
   }
 }
 
+export async function sendMessageWithRuntimeModel(opts: {
+  sessionId: string;
+  text: string;
+  model: string;
+  runtime?: AgentRuntimeId;
+}): Promise<void> {
+  const model =
+    opts.runtime === "claude_agents"
+      ? "anthropic/*"
+      : opts.runtime === "cursor"
+        ? "cursor/*"
+        : opts.model;
+  return sendMessage({ sessionId: opts.sessionId, text: opts.text, model });
+}
+
 export async function abortSession(id: string): Promise<void> {
   await reqHarness(`/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
 }
