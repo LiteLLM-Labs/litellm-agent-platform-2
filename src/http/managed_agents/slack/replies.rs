@@ -67,7 +67,16 @@ async fn run_locked_slack_prompt(
         baseline_seq,
     );
     enqueue_or_report(&state, pool, &message, &mut reply, &session_id, &agent).await?;
-    reply.run(event_stream.rx).await
+    match reply.run(event_stream.rx).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let message = format!("Agent run failed: {error}");
+            if let Err(update_error) = reply.finish_start_error(&message).await {
+                warn!("slack failure update failed: {update_error}");
+            }
+            Err(error)
+        }
+    }
 }
 
 async fn post_placeholder(
