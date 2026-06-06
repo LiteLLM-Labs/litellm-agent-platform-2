@@ -455,6 +455,7 @@ async fn claude_agents_sdk_client(state: &AppState) -> Result<Lap, GatewayError>
     Ok(Lap::new(LapConfig {
         anthropic_api_key: Some(credential.api_key),
         anthropic_base_url: credential.api_base,
+        ..LapConfig::default()
     }))
 }
 

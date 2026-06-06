@@ -125,10 +125,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Contract
 
 - `LapConfig::anthropic(...)` configures the `claude_managed_agents` runtime.
+- `LapConfig::cursor(...)` configures the `cursor` runtime.
 - `lap_agent_runtime` is the only LAP-specific create parameter.
 - `agent.id`, `environment.id`, and `session.id` are provider/runtime IDs.
 - The SDK forwards Anthropic-shaped payloads to the runtime provider.
+- Cursor requests are translated to Cursor's v1 Cloud Agent APIs.
 - The SDK sets the Managed Agents beta header and parses SSE session events.
+- Cursor stream chunks are normalized to Anthropic Managed Agents event shape.
 - The SDK does not perform DB calls, idempotency checks, or vault operations.
 
 ## Supported Surface
@@ -141,7 +144,12 @@ client.beta().sessions().events().send(...)
 client.beta().sessions().events().stream(...)
 ```
 
-`claude_managed_agents` is the only runtime implemented in this first slice.
+Implemented runtimes:
+
+```text
+claude_managed_agents
+cursor
+```
 
 ## Future Python Sugar
 

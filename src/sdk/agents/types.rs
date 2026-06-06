@@ -4,19 +4,23 @@ use serde::Serialize;
 use serde_json::Value;
 
 pub const CLAUDE_MANAGED_AGENTS: &str = "claude_managed_agents";
+pub const CURSOR: &str = "cursor";
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
+pub const DEFAULT_CURSOR_BASE_URL: &str = "https://api.cursor.com";
 pub const MANAGED_AGENTS_BETA: &str = "managed-agents-2026-04-01";
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentRuntime {
     ClaudeManagedAgents,
+    Cursor,
 }
 
 impl AgentRuntime {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ClaudeManagedAgents => CLAUDE_MANAGED_AGENTS,
+            Self::Cursor => CURSOR,
         }
     }
 }
@@ -27,6 +31,7 @@ impl TryFrom<&str> for AgentRuntime {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value {
             CLAUDE_MANAGED_AGENTS => Ok(Self::ClaudeManagedAgents),
+            CURSOR => Ok(Self::Cursor),
             runtime => Err(AgentSdkError::UnsupportedRuntime(runtime.to_owned())),
         }
     }
@@ -42,12 +47,21 @@ impl fmt::Display for AgentRuntime {
 pub struct LapConfig {
     pub anthropic_api_key: Option<String>,
     pub anthropic_base_url: String,
+    pub cursor_api_key: Option<String>,
+    pub cursor_base_url: String,
 }
 
 impl LapConfig {
     pub fn anthropic(api_key: impl Into<String>) -> Self {
         Self {
             anthropic_api_key: Some(api_key.into()),
+            ..Self::default()
+        }
+    }
+
+    pub fn cursor(api_key: impl Into<String>) -> Self {
+        Self {
+            cursor_api_key: Some(api_key.into()),
             ..Self::default()
         }
     }
@@ -58,6 +72,8 @@ impl Default for LapConfig {
         Self {
             anthropic_api_key: None,
             anthropic_base_url: DEFAULT_ANTHROPIC_BASE_URL.to_owned(),
+            cursor_api_key: None,
+            cursor_base_url: DEFAULT_CURSOR_BASE_URL.to_owned(),
         }
     }
 }
@@ -174,6 +190,10 @@ pub enum AgentSdkError {
     },
     #[error("provider response is missing id")]
     MissingId,
+    #[error("provider response is missing {0}")]
+    MissingField(&'static str),
+    #[error("invalid managed agent SDK request: {0}")]
+    InvalidRequest(String),
     #[error("managed agent SDK state lock failed")]
     StateLock,
     #[error("http client error: {0}")]
