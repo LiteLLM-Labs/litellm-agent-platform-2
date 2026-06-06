@@ -2,5 +2,6 @@
 //! which deployment a request maps to. Must not depend on `proxy/` so it can
 //! ship standalone.
 
+pub mod agents;
 pub mod providers;
 pub mod router;
