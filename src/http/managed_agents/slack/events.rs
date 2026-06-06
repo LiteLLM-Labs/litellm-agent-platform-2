@@ -136,6 +136,9 @@ fn is_direct_message(event: &Value) -> bool {
 }
 
 fn is_channel_thread_reply(event: &Value) -> bool {
+    if event.get("type").and_then(Value::as_str) != Some("message") {
+        return false;
+    }
     matches!(
         event.get("channel_type").and_then(Value::as_str),
         Some("channel" | "group")
@@ -223,5 +226,22 @@ mod tests {
         assert_eq!(second.thread_ts, "dm:D123");
         assert_eq!(first.reply_thread_ts, "1.000001");
         assert_eq!(second.reply_thread_ts, "1.000002");
+    }
+
+    #[test]
+    fn threaded_mentions_can_create_sessions() {
+        let message = incoming_message(&json!({
+            "event": {
+                "type": "app_mention",
+                "channel_type": "channel",
+                "channel": "C123",
+                "thread_ts": "1.000001",
+                "ts": "1.000002",
+                "text": "<@B123> hello"
+            }
+        }))
+        .unwrap();
+        assert_eq!(message.thread_ts, "1.000001");
+        assert!(!message.requires_existing_thread);
     }
 }
