@@ -654,6 +654,27 @@ function ChatInner() {
     return unsub;
   }, [sid, sessionLoaded, refetch, handleRuntimeEvent, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
 
+  useEffect(() => {
+    if (!sid || !sessionRuntime || sessionStatus !== "busy") return;
+    let active = true;
+    const replay = () => {
+      listRuntimeEvents(sid)
+        .then((events) => {
+          if (!active) return;
+          events.forEach(handleRuntimeEvent);
+        })
+        .catch((err) => {
+          if (active) setError(err instanceof Error ? err.message : String(err));
+        });
+    };
+    replay();
+    const timer = window.setInterval(replay, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [sid, sessionRuntime, sessionStatus, handleRuntimeEvent]);
+
   const onApprovalAccept = useCallback(async (id: string, args: Record<string, unknown>) => {
     setApprovalBusy(true);
     try {

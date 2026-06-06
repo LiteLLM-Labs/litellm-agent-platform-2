@@ -53,6 +53,7 @@ pub async fn create_agent(fixture: &AppFixture) -> String {
         Some(json!({
             "name": "ops-agent",
             "owner_id": "user-1",
+            "harness": "claude-code",
             "prompt": "watch deploys"
         })),
     )
