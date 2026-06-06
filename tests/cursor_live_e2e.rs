@@ -65,13 +65,42 @@ async fn run_session_stream(client: &Lap, agent_id: &str) -> Result<(), Box<dyn 
         .stream(&session.id)
         .await?;
     let mut saw_terminal_event = false;
+    let mut assistant_response = String::new();
+    let mut fallback_response = String::new();
 
     timeout(Duration::from_secs(180), async {
         while let Some(event) = stream.next().await {
             let event = event?;
             println!("cursor live event: {}", event.event_type);
             match event.event_type.as_str() {
+                "agent.message" => {
+                    if let Some(text) = message_text(&event.data) {
+                        println!("cursor live response delta: {text:?}");
+                        assistant_response.push_str(&text);
+                    } else {
+                        println!(
+                            "cursor live text event data: {}",
+                            serde_json::Value::Object(event.data.clone())
+                        );
+                    }
+                }
+                "cursor.text-delta" => {
+                    if let Some(text) = message_text(&event.data) {
+                        fallback_response.push_str(&text);
+                    }
+                }
                 "session.status_idle" => {
+                    if let Some(text) = message_text(&event.data) {
+                        println!("cursor live terminal response: {text:?}");
+                        if assistant_response.trim().is_empty() {
+                            assistant_response.push_str(&text);
+                        }
+                    } else if !event.data.is_empty() {
+                        println!(
+                            "cursor live terminal event data: {}",
+                            serde_json::Value::Object(event.data.clone())
+                        );
+                    }
                     saw_terminal_event = true;
                     break;
                 }
@@ -88,8 +117,40 @@ async fn run_session_stream(client: &Lap, agent_id: &str) -> Result<(), Box<dyn 
     if !saw_terminal_event {
         return Err("Cursor live stream ended without session.status_idle".into());
     }
+    if assistant_response.trim().is_empty() {
+        assistant_response = fallback_response;
+    }
+    if assistant_response.trim().is_empty() {
+        return Err("Cursor live stream finished without assistant text".into());
+    }
+    println!(
+        "\ncursor live final response: {}",
+        assistant_response.trim()
+    );
 
     Ok(())
+}
+
+fn message_text(data: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    for key in ["text", "delta", "token", "result", "message", "content"] {
+        if let Some(text) = data.get(key).and_then(serde_json::Value::as_str) {
+            return Some(text.to_owned());
+        }
+    }
+    let content = data.get("content")?.as_array()?;
+    let mut text = String::new();
+    for block in content {
+        if block.get("type").and_then(serde_json::Value::as_str) == Some("text") {
+            if let Some(value) = block.get("text").and_then(serde_json::Value::as_str) {
+                text.push_str(value);
+            }
+        }
+    }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 async fn archive_cursor_agent(api_key: &str, agent_id: &str) -> Result<(), Box<dyn Error>> {
