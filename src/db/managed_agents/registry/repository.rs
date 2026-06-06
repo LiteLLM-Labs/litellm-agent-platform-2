@@ -159,14 +159,17 @@ fn create_config(
     runtime: Option<&str>,
     tools: &serde_json::Value,
 ) -> serde_json::Value {
-    let mut config = config.unwrap_or_else(|| json!({}));
-    if let Some(object) = config.as_object_mut() {
-        if let Some(runtime) = runtime.filter(|runtime| !runtime.trim().is_empty()) {
-            object.insert("runtime".to_owned(), runtime.to_owned().into());
-        }
-        if !tools.is_null() {
-            object.insert("tools".to_owned(), tools.clone());
-        }
+    let mut config = config
+        .filter(|value| value.is_object())
+        .unwrap_or_else(|| json!({}));
+    let Some(object) = config.as_object_mut() else {
+        return json!({});
+    };
+    if let Some(runtime) = runtime.filter(|runtime| !runtime.trim().is_empty()) {
+        object.insert("runtime".to_owned(), runtime.to_owned().into());
+    }
+    if !tools.is_null() {
+        object.insert("tools".to_owned(), tools.clone());
     }
     config
 }

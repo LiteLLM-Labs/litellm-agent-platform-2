@@ -123,7 +123,7 @@ fn agent_tools(agent: &ManagedAgentRow) -> Value {
 }
 
 fn configured_tools(agent: &ManagedAgentRow) -> Value {
-    if let Some(tools) = agent.config.get("tools") {
+    if let Some(tools) = agent.config.get("tools").filter(|tools| tools.is_array()) {
         return tools.clone();
     }
     if should_use_default_tools(agent) {

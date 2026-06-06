@@ -75,6 +75,15 @@ async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
     assert_eq!(created["harness"], "claude-code");
     assert!(created["tools"].is_null());
     assert_eq!(created["config"]["runtime"], "claude_managed_agents");
+}
+
+#[tokio::test]
+async fn runtime_agent_create_preserves_tool_config_against_postgres() {
+    let _guard = DB_TEST_LOCK.lock().await;
+    let Some(fixture) = AppFixture::new().await else {
+        eprintln!("skipping managed agent integration test: TEST_DATABASE_URL is not set");
+        return;
+    };
 
     let explicit_empty_tools = create_test_agent(
         &fixture,
@@ -106,6 +115,23 @@ async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
     .await;
     assert_eq!(overriding_tools["tools"], json!([]));
     assert_eq!(overriding_tools["config"]["tools"], json!([]));
+
+    let normalized_config = create_test_agent(
+        &fixture,
+        json!({
+            "name": "normalized-config-agent",
+            "owner_id": "user-1",
+            "runtime": "claude_managed_agents",
+            "tools": [],
+            "config": "invalid"
+        }),
+    )
+    .await;
+    assert_eq!(
+        normalized_config["config"]["runtime"],
+        "claude_managed_agents"
+    );
+    assert_eq!(normalized_config["config"]["tools"], json!([]));
 }
 
 async fn create_test_agent(fixture: &AppFixture, body: Value) -> Value {
