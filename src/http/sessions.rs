@@ -92,56 +92,68 @@ async fn create_runtime_session(
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
     let row = sessions::repository::create_runtime(
         pool,
-        &runtime,
-        &agent.id,
-        &title,
-        input.timezone.as_deref().or(input.tz.as_deref()),
-        None,
-        environment.clone(),
-        None,
-        None,
+        sessions::repository::CreateRuntimeSession {
+            runtime: &runtime,
+            agent_id: &agent.id,
+            title: &title,
+            timezone: input.timezone.as_deref().or(input.tz.as_deref()),
+            runtime_agent_ref_id: None,
+            environment: environment.clone(),
+            provider_session_id: None,
+            provider_run_id: None,
+        },
     )
     .await?;
-    state.agent_runs.track_run(&agent.id, &row.id);
     let prompt = input
         .prompt
         .or_else(|| agent.prompt.clone())
         .filter(|prompt| !prompt.trim().is_empty())
         .unwrap_or_else(|| format!("Start a session for {}.", agent.name));
-    let provision = provision_runtime(
-        &state.http,
-        &runtime,
-        &agent,
-        credential,
-        RuntimeSessionInput {
-            session_id: row.id.clone(),
-            prompt,
-            environment,
-        },
-    )
-    .await?;
-    let runtime_ref = runtime_refs::repository::upsert(
-        pool,
-        &agent.id,
-        &runtime,
-        UpsertRuntimeRef {
-            runtime_agent_id: provision.runtime_agent_id,
-            provider_session_id: provision.provider_session_id.clone(),
-            provider_run_id: provision.provider_run_id.clone(),
-            provider_url: provision.provider_url,
-            metadata: provision.metadata,
-        },
-    )
-    .await?;
-    let row = sessions::repository::set_runtime_refs(
-        pool,
-        &row.id,
-        &runtime_ref.id,
-        provision.provider_session_id.as_deref(),
-        provision.provider_run_id.as_deref(),
-        "running",
-    )
-    .await?;
+    let provisioned = async {
+        let provision = provision_runtime(
+            &state.http,
+            &runtime,
+            &agent,
+            credential,
+            RuntimeSessionInput {
+                session_id: row.id.clone(),
+                prompt,
+                environment,
+            },
+        )
+        .await?;
+        let runtime_ref = runtime_refs::repository::upsert(
+            pool,
+            &agent.id,
+            &runtime,
+            UpsertRuntimeRef {
+                runtime_agent_id: provision.runtime_agent_id,
+                provider_session_id: provision.provider_session_id.clone(),
+                provider_run_id: provision.provider_run_id.clone(),
+                provider_url: provision.provider_url,
+                metadata: provision.metadata,
+            },
+        )
+        .await?;
+        sessions::repository::set_runtime_refs(
+            pool,
+            &row.id,
+            &runtime_ref.id,
+            provision.provider_session_id.as_deref(),
+            provision.provider_run_id.as_deref(),
+            "running",
+        )
+        .await
+    }
+    .await;
+    let row = match provisioned {
+        Ok(row) => row,
+        Err(error) => {
+            let _ = sessions::repository::delete(pool, &row.id).await;
+            return Err(error);
+        }
+    };
+    state.agent_runs.track_run(&agent.id, &row.id);
     Ok(SessionResponse::from(row))
 }
 
@@ -196,6 +208,11 @@ pub async fn prompt_async(
     state
         .agent_runs
         .track_run(row.agent_id.as_deref().unwrap_or(&row.harness), &session_id);
+
+    if row.runtime.is_some() {
+        execute_runtime_prompt(state, &pool, row, prompt).await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
 
     tokio::spawn(async move {
         if let Err(error) = execute_prompt(state.clone(), pool, row, prompt, model).await {

@@ -244,7 +244,15 @@ pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str
         .and(body_json(json!({
             "prompt": { "text": "watch deploys\n\nFix the failing tests" },
             "model": { "id": "composer-2" },
-            "name": "ops-agent"
+            "name": "ops-agent",
+            "source": {
+                "repository": "https://github.com/acme/app",
+                "ref": "main"
+            },
+            "target": {
+                "autoCreatePr": true,
+                "branchName": "agent/cursor-proof"
+            }
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "agent": {
@@ -331,7 +339,13 @@ pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str
             "agent_id": agent_id,
             "title": "cursor proof",
             "prompt": "Fix the failing tests",
-            "environment": { "model": "composer-2" }
+            "environment": {
+                "model": "composer-2",
+                "repository": "https://github.com/acme/app",
+                "ref": "main",
+                "target_branch": "agent/cursor-proof",
+                "auto_create_pr": true
+            }
         })),
     )
     .await;
@@ -378,20 +392,13 @@ pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str
         StatusCode::NO_CONTENT,
     )
     .await;
-    let mut updated = session.clone();
-    for _ in 0..10 {
-        updated = request_json(
-            fixture.app.clone(),
-            "GET",
-            &format!("/session/{session_id}"),
-            None,
-        )
-        .await;
-        if updated["provider_run_id"] == "run-22222222-2222-2222-2222-222222222222" {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    let updated = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/session/{session_id}"),
+        None,
+    )
+    .await;
     assert_eq!(
         updated["provider_run_id"],
         "run-22222222-2222-2222-2222-222222222222"

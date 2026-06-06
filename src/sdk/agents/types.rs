@@ -82,6 +82,8 @@ impl Default for LapConfig {
 pub struct CreateAgentParams {
     #[serde(skip)]
     pub lap_agent_runtime: AgentRuntime,
+    #[serde(skip)]
+    pub lap_provider_options: Option<Value>,
     pub name: String,
     pub model: AgentModel,
     pub system: String,

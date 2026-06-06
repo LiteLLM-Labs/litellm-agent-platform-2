@@ -27,6 +27,7 @@ struct Inner {
     http: reqwest::Client,
     runtimes: HashMap<AgentRuntime, RuntimeConfig>,
     session_contexts: Mutex<HashMap<String, SessionContext>>,
+    cursor_run_ids: Mutex<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +120,7 @@ impl Lap {
                 http,
                 runtimes,
                 session_contexts: Mutex::new(HashMap::new()),
+                cursor_run_ids: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -223,6 +225,25 @@ impl Lap {
         Ok(contexts.get(session_id).cloned())
     }
 
+    fn remember_cursor_run(&self, agent_id: &str, run_id: &str) -> Result<(), AgentSdkError> {
+        self.inner
+            .cursor_run_ids
+            .lock()
+            .map_err(|_| AgentSdkError::StateLock)?
+            .insert(agent_id.to_owned(), run_id.to_owned());
+        Ok(())
+    }
+
+    fn cursor_run_for_agent(&self, agent_id: &str) -> Result<Option<String>, AgentSdkError> {
+        Ok(self
+            .inner
+            .cursor_run_ids
+            .lock()
+            .map_err(|_| AgentSdkError::StateLock)?
+            .get(agent_id)
+            .cloned())
+    }
+
     fn remember_session_context(
         &self,
         session_id: &str,
@@ -314,8 +335,12 @@ impl Agents<'_> {
                     .client
                     .post(runtime, "/v1/agents", &cursor_create_agent_body(params))
                     .await?;
+                let agent_id = nested_id(&raw, "agent")?;
+                if let Some(run_id) = cursor_run_id(&raw) {
+                    self.client.remember_cursor_run(&agent_id, &run_id)?;
+                }
                 Ok(ManagedAgent {
-                    id: nested_id(&raw, "agent")?,
+                    id: agent_id,
                     version: None,
                     raw,
                 })
@@ -368,17 +393,17 @@ impl<'a> Sessions<'a> {
                 Ok(session)
             }
             AgentRuntime::Cursor => {
-                if !params.agent.starts_with("bc-") {
+                if params.agent.trim().is_empty() {
                     return Err(AgentSdkError::InvalidRequest(
-                        "cursor sessions.create requires a Cursor runtime agent id returned by agents.create"
-                            .to_owned(),
+                        "cursor sessions.create requires a non-empty Cursor agent id".to_owned(),
                     ));
                 }
                 let raw = json!({ "id": params.agent });
                 let session = Session { id: id(&raw)?, raw };
+                let run_id = self.client.cursor_run_for_agent(&session.id)?;
                 self.client.remember_session_context(
                     &session.id,
-                    SessionContext::cursor(session.id.clone(), None),
+                    SessionContext::cursor(session.id.clone(), run_id),
                 )?;
                 Ok(session)
             }
@@ -488,7 +513,7 @@ impl SessionEvents<'_> {
             .send()
             .await?;
         let raw = response_json(response).await?;
-        string_field(&raw, "latestRunId")
+        cursor_run_id(&raw).ok_or(AgentSdkError::MissingField("latestRunId"))
     }
 }
 
@@ -536,13 +561,6 @@ fn nested_id(raw: &Value, parent: &'static str) -> Result<String, AgentSdkError>
         .ok_or(AgentSdkError::MissingId)
 }
 
-fn string_field(raw: &Value, field: &'static str) -> Result<String, AgentSdkError> {
-    raw.get(field)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or(AgentSdkError::MissingField(field))
-}
-
 fn nested_string_field(
     raw: &Value,
     parent: &'static str,
@@ -555,11 +573,29 @@ fn nested_string_field(
         .ok_or(AgentSdkError::MissingField(field))
 }
 
+fn cursor_run_id(raw: &Value) -> Option<String> {
+    raw.get("run")
+        .and_then(|value| value.get("id"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            raw.get("agent")
+                .and_then(|value| value.get("latestRunId"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| raw.get("latestRunId").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
 fn cursor_create_agent_body(params: CreateAgentParams) -> Value {
     let mut body = Map::new();
     body.insert("prompt".to_owned(), json!({ "text": params.system }));
     body.insert("name".to_owned(), Value::String(params.name));
     body.insert("model".to_owned(), cursor_model(params.model));
+    if let Some(Value::Object(options)) = params.lap_provider_options {
+        for (key, value) in options {
+            body.insert(key, value);
+        }
+    }
     if !params.mcp_servers.is_empty() {
         body.insert(
             "mcpServers".to_owned(),
@@ -593,19 +629,17 @@ fn cursor_model(model: AgentModel) -> Value {
 }
 
 fn cursor_mcp_server(server: Value) -> Value {
-    let name = server
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let url = server
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    json!({
-        "name": name,
-        "type": "http",
-        "url": url,
-    })
+    let mut server = match server {
+        Value::Object(server) => server,
+        _ => Map::new(),
+    };
+    match server.get("type").and_then(Value::as_str) {
+        Some("url") | None => {
+            server.insert("type".to_owned(), Value::String("http".to_owned()));
+        }
+        _ => {}
+    }
+    Value::Object(server)
 }
 
 fn cursor_prompt_from_events(events: &[Value]) -> Result<Value, AgentSdkError> {

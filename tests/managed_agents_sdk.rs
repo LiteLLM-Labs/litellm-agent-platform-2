@@ -3,7 +3,7 @@ use litellm_rust::sdk::agents::{
     parse_sse, AgentEvent, AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
     CreateSessionParams, Lap, LapConfig, ManagedSessionRef, SendEventsParams, MANAGED_AGENTS_BETA,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use wiremock::{
     matchers::{body_json, header, method, path},
     Mock, MockServer, ResponseTemplate,
@@ -69,6 +69,7 @@ async fn creates_claude_managed_agent_with_anthropic_shape() {
         .agents()
         .create(CreateAgentParams {
             lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
+            lap_provider_options: None,
             name: "Coding Assistant".to_owned(),
             model: AgentModel::from("claude-opus-4-8"),
             system: "Write clean code.".to_owned(),
@@ -261,6 +262,21 @@ async fn cursor_provider_stream_conforms_to_anthropic_reference_events() {
         .await;
     Mock::given(method("GET"))
         .and(path(
+            "/v1/agents/bc-00000000-0000-0000-0000-000000000001/runs/run-00000000-0000-0000-0000-000000000001/stream",
+        ))
+        .and(header("authorization", "Bearer cursor-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            "event: status\n\
+             data: {\"runId\":\"run-00000000-0000-0000-0000-000000000001\",\"status\":\"RUNNING\"}\n\n\
+             event: assistant\n\
+             data: {\"text\":\"initial\"}\n\n\
+             event: result\n\
+             data: {\"runId\":\"run-00000000-0000-0000-0000-000000000001\",\"status\":\"FINISHED\"}\n\n",
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
             "/v1/agents/bc-00000000-0000-0000-0000-000000000001/runs/run-00000000-0000-0000-0000-000000000002/stream",
         ))
         .and(header("authorization", "Bearer cursor-test"))
@@ -299,6 +315,7 @@ async fn cursor_provider_stream_conforms_to_anthropic_reference_events() {
         .agents()
         .create(CreateAgentParams {
             lap_agent_runtime: AgentRuntime::Cursor,
+            lap_provider_options: None,
             name: "Coding Assistant".to_owned(),
             model: AgentModel::from("composer-2"),
             system: "You are a coding assistant.".to_owned(),
@@ -327,6 +344,20 @@ async fn cursor_provider_stream_conforms_to_anthropic_reference_events() {
         .unwrap();
 
     assert_eq!(session.id, "bc-00000000-0000-0000-0000-000000000001");
+    let mut initial_stream = client
+        .beta()
+        .sessions()
+        .events()
+        .stream(&session.id)
+        .await
+        .unwrap();
+    let mut initial_events = Vec::new();
+    while let Some(event) = initial_stream.next().await {
+        initial_events.push(event.unwrap());
+    }
+    assert_eq!(initial_events[1].event_type, "agent.message");
+    assert_eq!(initial_events[1].data["content"][0]["text"], "initial");
+
     client
         .register_session(ManagedSessionRef {
             session_id: "lap_ses_123".to_owned(),
@@ -375,11 +406,29 @@ async fn cursor_provider_stream_conforms_to_anthropic_reference_events() {
     let second = &events[2];
     let third = &events[3];
     assert_eq!(first.event_type, "agent.message");
-    assert_eq!(first.data["content"][0]["text"], "I'll update it.");
+    assert_eq!(
+        Value::Object(first.data.clone()),
+        json!({
+            "content": [{
+                "type": "text",
+                "text": "I'll update it."
+            }]
+        })
+    );
     assert_eq!(second.event_type, "agent.tool_use");
-    assert_eq!(second.data["name"], "edit_file");
-    assert_eq!(second.data["id"], "call-1");
-    assert_eq!(second.data["input"]["path"], "README.md");
+    assert_eq!(
+        Value::Object(second.data.clone()),
+        json!({
+            "id": "call-1",
+            "name": "edit_file",
+            "input": { "path": "README.md" }
+        })
+    );
     assert_eq!(third.event_type, "session.status_idle");
-    assert_eq!(third.data["stop_reason"]["type"], "end_turn");
+    assert_eq!(
+        Value::Object(third.data.clone()),
+        json!({
+            "stop_reason": { "type": "end_turn" }
+        })
+    );
 }
