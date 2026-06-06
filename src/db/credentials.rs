@@ -8,6 +8,12 @@ pub struct CredentialRow {
     pub credential_values: Value,
 }
 
+#[derive(Debug, Clone, FromRow)]
+pub struct CredentialMetadataRow {
+    pub credential_name: String,
+    pub credential_info: Option<Value>,
+}
+
 pub async fn get_by_name(
     pool: &PgPool,
     credential_name: &str,
@@ -59,6 +65,24 @@ pub async fn upsert(
     .await
     .map_err(GatewayError::Database)?;
     Ok(())
+}
+
+pub async fn list_by_prefix(
+    pool: &PgPool,
+    prefix: &str,
+) -> Result<Vec<CredentialMetadataRow>, GatewayError> {
+    sqlx::query_as::<_, CredentialMetadataRow>(
+        r#"
+        SELECT credential_name, credential_info
+        FROM "LiteLLM_CredentialsTable"
+        WHERE substring(credential_name from 1 for char_length($1)) = $1
+        ORDER BY credential_name ASC
+        "#,
+    )
+    .bind(prefix)
+    .fetch_all(pool)
+    .await
+    .map_err(GatewayError::Database)
 }
 
 pub async fn delete_by_name(pool: &PgPool, credential_name: &str) -> Result<bool, GatewayError> {

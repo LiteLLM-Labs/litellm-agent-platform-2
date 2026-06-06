@@ -921,6 +921,14 @@ export async function updateAgent(id: string, fields: Partial<Agent>): Promise<A
   return jsonOrThrow<Agent>(res);
 }
 
+export async function createSlackOAuthState(agentId: string): Promise<string> {
+  const res = await req(`/api/agents/${encodeURIComponent(agentId)}/slack/oauth-state`, {
+    method: "POST",
+  });
+  const data = await jsonOrThrow<{ state: string }>(res);
+  return data.state;
+}
+
 export async function deleteAgent(id: string): Promise<void> {
   await req(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
