@@ -431,10 +431,10 @@ export async function sendMessageWithRuntimeModel(opts: {
   sessionId: string;
   text: string;
   model: string;
-  runtime?: AgentRuntimeId;
+  runtime?: AgentRuntimeId | "claude_agents";
 }): Promise<void> {
   const model =
-    opts.runtime === "claude_managed_agents"
+    opts.runtime === "claude_managed_agents" || opts.runtime === "claude_agents"
       ? "anthropic/*"
       : opts.runtime === "cursor"
         ? "cursor/*"
@@ -783,8 +783,20 @@ export function subscribeRuntimeEvents(opts: {
 
 export function runtimeEventSourceUrl(sessionId: string): string {
   const localKey = getStoredMasterKey();
-  const qs = localKey ? `?key=${encodeURIComponent(localKey)}` : "";
-  return `${BASE}/session/${encodeURIComponent(sessionId)}/runtime_events${qs}`;
+  const remoteBase = getHarnessServerUrl();
+  const params = new URLSearchParams();
+  if (remoteBase) params.set("base", remoteBase);
+  if (localKey) params.set("key", localKey);
+  const targetKey = getHarnessServerKey();
+  if (targetKey) params.set("target_key", targetKey);
+  const qs = params.toString();
+  const encoded = encodeURIComponent(sessionId);
+  const path = remoteBase
+    ? `/api/harness-proxy/v1/sessions/${encoded}/events/stream`
+    : typeof window !== "undefined" && window.location.port === "3210"
+      ? `/runtime-events/${encoded}.sse`
+      : `/v1/sessions/${encoded}/events/stream`;
+  return `${BASE}${path}${qs ? `?${qs}` : ""}`;
 }
 
 export function harnessEventSourceUrl(): string {

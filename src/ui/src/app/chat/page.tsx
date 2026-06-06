@@ -73,24 +73,31 @@ function runtimeLabel(runtime?: string): string {
 function providerSessionUrl(runtime?: string, providerSessionId?: string, providerUrl?: string): string | null {
   if (providerUrl) return providerUrl;
   if ((runtime === "claude_managed_agents" || runtime === "claude_agents") && providerSessionId) {
-    return `https://platform.claude.com/workspaces/default/agent-sessions/${encodeURIComponent(providerSessionId)}`;
+    return `https://platform.claude.com/workspaces/default/sessions/${encodeURIComponent(providerSessionId)}`;
   }
   return null;
 }
 
-function runtimeEventText(ev: RuntimeAgentEvent): string {
-  const value = ev.text ?? ev.delta ?? ev.content;
+function runtimeTextValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    return value
-      .map((block) => {
-        if (!block || typeof block !== "object") return "";
-        const text = (block as { text?: unknown }).text;
-        return typeof text === "string" ? text : "";
-      })
-      .join("");
+    return value.map(runtimeTextValue).join("");
   }
-  return "";
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  return [
+    record.text,
+    record.thinking,
+    record.content,
+    record.delta,
+    record.content_block,
+  ]
+    .map(runtimeTextValue)
+    .join("");
+}
+
+function runtimeEventText(ev: RuntimeAgentEvent): string {
+  return runtimeTextValue(ev.text ?? ev.delta ?? ev.content ?? ev.content_block);
 }
 
 function normalizedRuntimeEventType(ev: RuntimeAgentEvent): string {
@@ -124,15 +131,26 @@ function runtimeErrorMessage(ev: RuntimeAgentEvent): string {
 }
 
 function isRuntimeAssistantTextEvent(type: string): boolean {
-  return type === "assistant_response";
+  return (
+    type === "assistant_response" ||
+    type === "agent.message" ||
+    type === "content_block_start" ||
+    type === "content_block_delta" ||
+    type === "message_delta"
+  );
 }
 
 function isRuntimeThinkingEvent(type: string): boolean {
-  return type === "thinking_back";
+  return type === "thinking_back" || type === "agent.thinking" || type === "agent.reasoning";
 }
 
 function isRuntimeToolEvent(type: string): boolean {
-  return type === "tool_call" || type === "tool_result";
+  return (
+    type === "tool_call" ||
+    type === "tool_result" ||
+    type === "agent.tool_use" ||
+    type === "agent.tool_result"
+  );
 }
 
 function runtimeToolId(ev: RuntimeAgentEvent): string {
