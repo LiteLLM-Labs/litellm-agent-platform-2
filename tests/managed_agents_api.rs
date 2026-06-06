@@ -76,5 +76,21 @@ async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
     )
     .await;
     assert_eq!(created["harness"], "claude-code");
+    assert!(created["tools"].is_null());
     assert_eq!(created["config"]["runtime"], "claude_managed_agents");
+
+    let explicit_empty_tools = request_json(
+        fixture.app.clone(),
+        "POST",
+        "/api/agents",
+        Some(json!({
+            "name": "empty-tools-agent",
+            "owner_id": "user-1",
+            "runtime": "claude_managed_agents",
+            "tools": []
+        })),
+    )
+    .await;
+    assert_eq!(explicit_empty_tools["tools"], json!([]));
+    assert_eq!(explicit_empty_tools["config"]["tools"], json!([]));
 }

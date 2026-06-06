@@ -106,6 +106,8 @@ async fn insert_agent(
     input: CreateManagedAgent,
     defaults: &CreateDefaults,
 ) -> Result<ManagedAgentRow, GatewayError> {
+    let tools = input.tools.unwrap_or(serde_json::Value::Null);
+    let config = create_config(input.config, &tools);
     sqlx::query_as::<_, ManagedAgentRow>(
         r#"
         INSERT INTO "LiteLLM_ManagedAgentsTable" (
@@ -127,7 +129,7 @@ async fn insert_agent(
     .bind(input.name)
     .bind(&defaults.model)
     .bind(&defaults.system)
-    .bind(input.tools.unwrap_or_else(|| json!([])))
+    .bind(&tools)
     .bind(defaults.cron.clone())
     .bind(&defaults.session_id)
     .bind(defaults.now)
@@ -142,7 +144,7 @@ async fn insert_agent(
             .on_failure
             .unwrap_or_else(|| "pause_and_notify".to_owned()),
     )
-    .bind(input.config.unwrap_or_else(|| json!({})))
+    .bind(config)
     .bind(input.owner_id)
     .bind(input.description)
     .bind(defaults.harness.clone())
@@ -150,6 +152,21 @@ async fn insert_agent(
     .fetch_one(conn)
     .await
     .map_err(GatewayError::Database)
+}
+
+fn create_config(
+    config: Option<serde_json::Value>,
+    tools: &serde_json::Value,
+) -> serde_json::Value {
+    let mut config = config.unwrap_or_else(|| json!({}));
+    if !tools.is_null() {
+        if let Some(object) = config.as_object_mut() {
+            object
+                .entry("tools".to_owned())
+                .or_insert_with(|| tools.clone());
+        }
+    }
+    config
 }
 
 pub async fn list(

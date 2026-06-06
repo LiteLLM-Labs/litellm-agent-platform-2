@@ -115,10 +115,19 @@ async fn create_agent(
 }
 
 fn agent_tools(agent: &ManagedAgentRow) -> Value {
+    let tools = if should_use_default_tools(agent) {
+        Value::Null
+    } else {
+        agent.tools.clone()
+    };
     toolset_payload(
         AGENT_TOOLSET,
-        &selected_tool_ids(&agent.tools, TOOLS, &[AGENT_TOOLSET]),
+        &selected_tool_ids(&tools, TOOLS, &[AGENT_TOOLSET]),
     )
+}
+
+fn should_use_default_tools(agent: &ManagedAgentRow) -> bool {
+    agent.tools.as_array().is_some_and(Vec::is_empty) && agent.config.get("tools").is_none()
 }
 
 async fn create_environment(
