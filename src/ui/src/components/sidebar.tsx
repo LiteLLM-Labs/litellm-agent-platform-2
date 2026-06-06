@@ -9,6 +9,7 @@ import {
   FileText,
   Inbox,
   KeyRound,
+  MessageCircle,
   Plus,
   Puzzle,
   ServerCog,
@@ -90,14 +91,14 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
   }, [pathname]);
 
   const onNew = async () => {
-    router.push("/sessions/");
+    router.push("/chat/");
   };
 
   const onDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     setSessions((prev) => prev?.filter((s) => s.id !== id) ?? null);
     await deleteSession(id);
-    if (id === activeId) router.push("/sessions/");
+    if (id === activeId) router.push("/chat/");
   };
 
   const currentPath = pathname ?? "";
@@ -143,9 +144,15 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
     {
       label: "Agent Platform",
       icon: Bot,
-      home: "/agents/",
+      home: "/chat/",
       description: "Agents, inbox, integrations, skills",
       items: [
+        {
+          label: "Chat",
+          href: "/chat/",
+          icon: MessageCircle,
+          active: (path) => path === "/" || path.startsWith("/chat") || path.startsWith("/sessions"),
+        },
         {
           label: "Agents",
           href: "/agents/",
