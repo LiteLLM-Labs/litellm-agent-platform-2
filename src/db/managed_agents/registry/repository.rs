@@ -2,6 +2,7 @@ use serde_json::json;
 use sqlx::{PgConnection, PgPool};
 
 use crate::{
+    agents::harnesses,
     db::managed_agents::{id, now_ms},
     errors::GatewayError,
 };
@@ -38,7 +39,7 @@ struct CreateDefaults {
     title: String,
     model: String,
     system: String,
-    runtime: String,
+    harness: String,
     cron: Option<String>,
     timezone: String,
 }
@@ -59,11 +60,12 @@ impl CreateDefaults {
                 .clone()
                 .or_else(|| input.prompt.clone())
                 .unwrap_or_default(),
-            runtime: input
-                .runtime
-                .clone()
-                .or_else(|| input.harness.clone())
-                .unwrap_or_else(|| "claude_managed_agents".to_owned()),
+            harness: input
+                .harness
+                .as_deref()
+                .filter(|harness| harnesses::is_supported(harness))
+                .unwrap_or(harnesses::claude_code::ID)
+                .to_owned(),
             cron: input
                 .schedule
                 .as_ref()
@@ -89,7 +91,7 @@ async fn insert_session(
         "#,
     )
     .bind(&defaults.session_id)
-    .bind("cc")
+    .bind(&defaults.harness)
     .bind(&defaults.agent_id)
     .bind(&defaults.title)
     .bind(defaults.now)
@@ -143,7 +145,7 @@ async fn insert_agent(
     .bind(input.config.unwrap_or_else(|| json!({})))
     .bind(input.owner_id)
     .bind(input.description)
-    .bind(defaults.runtime.clone())
+    .bind(defaults.harness.clone())
     .bind(input.skill_ids.unwrap_or_else(|| json!([])))
     .fetch_one(conn)
     .await

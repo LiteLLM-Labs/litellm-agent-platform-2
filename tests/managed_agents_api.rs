@@ -53,3 +53,28 @@ async fn rejects_invalid_file_base64_against_postgres() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn runtime_agent_create_keeps_legacy_harness_against_postgres() {
+    let _guard = DB_TEST_LOCK.lock().await;
+    let Some(fixture) = AppFixture::new().await else {
+        eprintln!("skipping managed agent integration test: TEST_DATABASE_URL is not set");
+        return;
+    };
+
+    let created = request_json(
+        fixture.app.clone(),
+        "POST",
+        "/api/agents",
+        Some(json!({
+            "name": "runtime-agent",
+            "owner_id": "user-1",
+            "runtime": "claude_managed_agents",
+            "harness": "claude_managed_agents",
+            "config": { "runtime": "claude_managed_agents" }
+        })),
+    )
+    .await;
+    assert_eq!(created["harness"], "claude-code");
+    assert_eq!(created["config"]["runtime"], "claude_managed_agents");
+}

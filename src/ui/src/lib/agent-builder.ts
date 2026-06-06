@@ -559,7 +559,6 @@ export function createInputFromDraft(draft: AgentDraft) {
     description: draft.description.trim(),
     model: draft.model.trim() || DEFAULT_MODEL,
     runtime,
-    harness: runtime,
     system: draft.system,
     prompt: draft.system,
     tools: draft.tools,
