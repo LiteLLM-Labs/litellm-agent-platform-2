@@ -18,12 +18,31 @@ import { Textarea } from "@/components/ui/textarea";
 import { createAgent, createSession, listAgentRuntimes, listAgents, listSessions } from "@/lib/api";
 import type { AgentRuntime, AgentRuntimeId } from "@/lib/types";
 
-function runtimeIconId(id: AgentRuntimeId) {
+type RuntimeDisplayId = AgentRuntimeId | "codex" | "bedrock_agent_core";
+
+const RUNTIME_OPTIONS: RuntimeDisplayId[] = [
+  "claude_agents",
+  "cursor",
+  "codex",
+  "bedrock_agent_core",
+];
+
+function runtimeIconId(id: RuntimeDisplayId) {
   return id === "claude_agents" ? "claude" : id;
 }
 
-function runtimeLabel(id: AgentRuntimeId): string {
-  return id === "claude_agents" ? "Claude Managed Agents" : "Cursor";
+function runtimeLabel(id: RuntimeDisplayId): string {
+  if (id === "claude_agents") return "Claude Agents";
+  if (id === "bedrock_agent_core") return "Bedrock AgentCore";
+  if (id === "codex") return "Codex";
+  return "Cursor";
+}
+
+function runtimeSubtitle(id: RuntimeDisplayId): string {
+  if (id === "claude_agents") return "Anthropic sessions and tools";
+  if (id === "bedrock_agent_core") return "AWS managed agents";
+  if (id === "codex") return "Code tasks and reviews";
+  return "Background repo agents";
 }
 
 function promptTitle(prompt: string): string {
@@ -144,36 +163,52 @@ export default function SessionsPage() {
               placeholder="Ask or build anything"
               className="min-h-24 resize-none border-0 bg-transparent px-4 py-4 text-[15px] text-[#20201f] shadow-none outline-none placeholder:text-[#77736d] focus-visible:ring-0"
             />
-            <div className="flex items-center gap-2 border-t border-black/10 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 border-t border-black/10 bg-[#faf9f7] px-3 py-3">
               <Select value={runtime} onValueChange={(value) => setRuntime(value as AgentRuntimeId)}>
-                <SelectTrigger className="h-8 w-[230px] border-0 bg-transparent px-2 text-sm text-[#20201f] shadow-none focus:ring-0">
+                <SelectTrigger className="h-10 w-auto min-w-[230px] rounded-full border border-black/10 bg-white px-3 text-left text-[#20201f] shadow-sm transition-colors hover:bg-[#fbfaf8] focus:ring-1 focus:ring-black/15">
                   <SelectValue>
-                    <span className="flex items-center gap-2">
-                      <BrandIcon id={runtimeIconId(runtime)} className="size-4" />
-                      {selectedRuntime?.name ?? runtimeLabel(runtime)}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-[#f3f1ee]">
+                        <BrandIcon id={runtimeIconId(runtime)} className="size-4" />
+                      </span>
+                      <span className="truncate text-sm font-medium">
+                        {selectedRuntime?.name ?? runtimeLabel(runtime)}
+                      </span>
                     </span>
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
-                  {(["claude_agents", "cursor"] as AgentRuntimeId[]).map((id) => {
+                <SelectContent className="w-[340px]">
+                  {RUNTIME_OPTIONS.map((id) => {
                     const item = runtimes.find((runtimeItem) => runtimeItem.id === id);
+                    const selectable = id === "claude_agents" || id === "cursor";
                     return (
-                      <SelectItem key={id} value={id}>
-                        <span className="flex items-center gap-2">
-                          <BrandIcon id={runtimeIconId(id)} className="size-4" />
-                          {item?.name ?? runtimeLabel(id)}
-                          {!item?.connected && (
-                            <span className="text-xs text-muted-foreground">missing key</span>
-                          )}
+                      <SelectItem key={id} value={id} disabled={!selectable} className="py-3">
+                        <span className="flex min-w-0 items-center gap-3">
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+                            <BrandIcon id={runtimeIconId(id)} className="size-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-medium">
+                              {item?.name ?? runtimeLabel(id)}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {selectable
+                                ? item?.connected
+                                  ? runtimeSubtitle(id)
+                                  : "missing key"
+                                : "preview"}
+                            </span>
+                          </span>
                         </span>
                       </SelectItem>
                     );
                   })}
                 </SelectContent>
               </Select>
-              <span className="ml-auto hidden font-mono text-xs text-[#77736d] sm:inline">
-                {runtime === "claude_agents" ? "claude sonnet 4.6" : "cursor background agent"}
+              <span className="hidden rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-xs text-[#77736d] sm:inline">
+                {runtime === "claude_agents" ? "anthropic/*" : "cursor/*"}
               </span>
+              <div className="ml-auto" />
               <Button variant="ghost" size="icon-sm" disabled className="text-[#5d5a55]">
                 <Mic className="size-4" />
               </Button>
