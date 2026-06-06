@@ -4,10 +4,11 @@ Source layout for the litellm-rust gateway. A request flows
 `endpoint → router → transformation → llm api`; see
 [docs/architecture.md](../docs/architecture.md) for the full picture.
 
-The codebase splits request routing, provider translation, managed-agent runtime
-SDK, and proxy concerns. SDK routing lives in `sdk/routing.rs`,
-provider-specific implementations live under `sdk/providers/`, and the proxy
-server wraps them with config, auth, state, and HTTP routes.
+The codebase splits request routing, provider endpoint transformation,
+managed-agent runtime SDK, and proxy concerns. SDK routing lives in
+`sdk/routing.rs`, provider-specific implementations live under
+`sdk/providers/`, and the proxy server wraps them with config, auth, state,
+and HTTP routes.
 
 ## Entrypoints
 
@@ -21,8 +22,8 @@ server wraps them with config, auth, state, and HTTP routes.
 
 | Folder | Responsibility |
 |---|---|
-| `sdk/routing.rs` | **Routing.** Request/model routing above provider translation. |
-| `sdk/transformations/` | **Base transformations.** Shared traits implemented by provider endpoint translations and runtime adapters. |
+| `sdk/routing.rs` | **Routing.** Request/model routing above provider endpoint transformation. |
+| `sdk/transformations/` | **Base transformations.** Endpoint-family base traits and the runtime adapter base trait. |
 | `sdk/providers/` | **Provider integrations.** Each provider owns its supported capabilities: `<endpoint>/` for request transformation, `runtime/` for managed-agent adapters. |
 | `sdk/agents/` | **Agent Runtime SDK.** The `Lap` client, public runtime resource types, and normalized events. |
 | `proxy/` | **Proxy-server concerns**, kept out of the SDK: `config.rs` (`config.yaml` parse + env expansion + validation), `state.rs` (`AppState` — config, router, shared HTTP client), `auth/` (master-key check). |

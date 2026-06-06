@@ -1,7 +1,7 @@
 # Agent Runtime SDK
 
 `src/sdk` is the public Rust client surface for request routing and provider
-translation across LLM calls and managed-agent runtimes.
+endpoint transformation across model APIs and managed-agent runtimes.
 
 It exposes:
 
@@ -15,6 +15,7 @@ Runtime-specific request shapes live behind provider-owned adapters in
 adapter there and register it in `src/sdk/providers/mod.rs` instead of
 adding new `match AgentRuntime` branches throughout the SDK resource layer.
 
-Base transformation traits live under `src/sdk/transformations/`. Model routing
-lives in `src/sdk/routing.rs`; provider-owned endpoint translations and
+Base transformation traits live under `src/sdk/transformations/`, including
+endpoint-family bases for `anthropic_messages` and `openai_responses`. Model
+routing lives in `src/sdk/routing.rs`; provider-owned endpoint translations and
 runtimes live under `src/sdk/providers/<provider>/`.

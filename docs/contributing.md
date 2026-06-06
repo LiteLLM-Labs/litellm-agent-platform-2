@@ -92,7 +92,7 @@ editing. See `src/sdk/providers/anthropic/anthropic_messages/` for a reference i
 src/
   sdk/
     routing.rs # request/model routing above provider endpoint transformation
-    transformations/ # base traits implemented by provider endpoints/runtimes
+    transformations/ # endpoint-family base traits + runtime adapter base trait
     providers/ # provider-owned endpoint/ and runtime/ modules
     agents/    # Agent Runtime SDK client resources + types
   proxy/       # config, master-key auth, AppState
