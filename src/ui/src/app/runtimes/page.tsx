@@ -89,7 +89,7 @@ export default function RuntimesPage() {
             <div>
               <h2 className="text-lg font-semibold">Runtime Credentials</h2>
               <p className="text-sm text-muted-foreground">
-                Connect Cursor and Claude Agents before starting runtime sessions.
+                Connect SDK agent runtimes before starting runtime sessions.
               </p>
               {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
             </div>
@@ -179,7 +179,7 @@ export default function RuntimesPage() {
 function RuntimeLogo({ id }: { id: AgentRuntimeId }) {
   return (
     <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground shadow-sm">
-      <BrandIcon id={id === "claude_agents" ? "claude" : id} className="size-5" />
+      <BrandIcon id={id === "claude_managed_agents" ? "claude" : id} className="size-5" />
     </span>
   );
 }

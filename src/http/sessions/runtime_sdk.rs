@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use crate::{
     db::managed_agents::sessions::schema::SessionRow,
     errors::GatewayError,
-    managed_agents::providers::base::{CLAUDE_AGENTS_RUNTIME, CURSOR_RUNTIME},
+    managed_agents::providers::base::{normalize_runtime, CURSOR_RUNTIME},
     proxy::state::AppState,
     sdk::agents::{
         AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams,
@@ -30,9 +30,8 @@ pub(super) async fn runtime_sdk_client(
             config.cursor_base_url = credential.api_base;
         }
         AgentRuntime::OpenCode => {
-            return Err(GatewayError::InvalidConfig(
-                "OpenCode runtime is not wired for gateway sessions".to_owned(),
-            ));
+            config.opencode_base_url = Some(credential.api_base);
+            config.opencode_api_key = Some(credential.api_key);
         }
     }
     Ok(Lap::with_http_client(config, state.http.clone()))
@@ -78,7 +77,7 @@ pub(super) fn provider_event_line<T: Serialize>(
 }
 
 pub(super) fn provider_run_id(runtime: &str, raw: &Value) -> Option<String> {
-    if runtime != CURSOR_RUNTIME {
+    if normalize_runtime(runtime) != Some(CURSOR_RUNTIME) {
         return None;
     }
     raw.get("run")
@@ -106,9 +105,11 @@ fn provider_session_id(row: &SessionRow, runtime: AgentRuntime) -> Result<String
         AgentRuntime::Cursor => row.provider_session_id.clone().ok_or_else(|| {
             GatewayError::InvalidConfig("Cursor session is missing provider_session_id".to_owned())
         }),
-        AgentRuntime::OpenCode => Err(GatewayError::InvalidConfig(
-            "OpenCode runtime is not wired for gateway sessions".to_owned(),
-        )),
+        AgentRuntime::OpenCode => row.provider_session_id.clone().ok_or_else(|| {
+            GatewayError::InvalidConfig(
+                "OpenCode session is missing provider_session_id".to_owned(),
+            )
+        }),
     }
 }
 
@@ -127,11 +128,11 @@ fn error_event_line(message: String) -> String {
 }
 
 fn sdk_runtime(runtime: &str) -> Result<AgentRuntime, GatewayError> {
-    match runtime {
-        CLAUDE_AGENTS_RUNTIME => Ok(AgentRuntime::ClaudeManagedAgents),
-        CURSOR_RUNTIME => Ok(AgentRuntime::Cursor),
-        other => Err(GatewayError::InvalidConfig(format!(
-            "unsupported runtime session: {other}"
-        ))),
-    }
+    let Some(runtime) = normalize_runtime(runtime) else {
+        return Err(GatewayError::InvalidConfig(format!(
+            "unsupported runtime session: {runtime}"
+        )));
+    };
+    AgentRuntime::try_from(runtime)
+        .map_err(|_| GatewayError::InvalidConfig(format!("unsupported runtime session: {runtime}")))
 }

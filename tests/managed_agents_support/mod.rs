@@ -227,6 +227,7 @@ async fn reset_tables(pool: &PgPool) {
     sqlx::query(
         r#"
         TRUNCATE
+          "LiteLLM_CredentialsTable",
           "LiteLLM_ManagedAgentInboxItemsTable",
           "LiteLLM_ManagedAgentRunsTable",
           "LiteLLM_ManagedAgentFilesTable",

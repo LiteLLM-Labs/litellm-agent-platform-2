@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db::managed_agents::registry::schema::ManagedAgentRow;
+use crate::{
+    db::managed_agents::registry::schema::ManagedAgentRow,
+    sdk::agents::{AgentRuntime, CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
+};
 
-pub const CURSOR_RUNTIME: &str = "cursor";
-pub const CLAUDE_AGENTS_RUNTIME: &str = "claude_agents";
+pub const CURSOR_RUNTIME: &str = CURSOR;
+pub const CLAUDE_AGENTS_RUNTIME: &str = CLAUDE_MANAGED_AGENTS;
+pub const CLAUDE_AGENTS_RUNTIME_LEGACY: &str = "claude_agents";
 
 #[derive(Debug, Clone)]
 pub struct RuntimeCredential {
@@ -29,15 +33,22 @@ pub struct RuntimeProvision {
 }
 
 pub fn validate_runtime(runtime: &str) -> bool {
-    matches!(runtime, CURSOR_RUNTIME | CLAUDE_AGENTS_RUNTIME)
+    normalize_runtime(runtime).is_some()
+}
+
+pub fn normalize_runtime(runtime: &str) -> Option<&'static str> {
+    match runtime {
+        CLAUDE_AGENTS_RUNTIME | CLAUDE_AGENTS_RUNTIME_LEGACY => Some(CLAUDE_AGENTS_RUNTIME),
+        CURSOR_RUNTIME => Some(CURSOR_RUNTIME),
+        OPENCODE => Some(OPENCODE),
+        _ => None,
+    }
 }
 
 pub fn default_api_base(runtime: &str) -> Option<&'static str> {
-    match runtime {
-        CURSOR_RUNTIME => Some("https://api.cursor.com"),
-        CLAUDE_AGENTS_RUNTIME => Some("https://api.anthropic.com"),
-        _ => None,
-    }
+    AgentRuntime::try_from(normalize_runtime(runtime)?)
+        .ok()
+        .map(AgentRuntime::default_api_base)
 }
 
 pub fn runtime_agent_id(agent: &ManagedAgentRow, runtime: &str) -> String {

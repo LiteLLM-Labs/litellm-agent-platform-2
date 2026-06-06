@@ -19,13 +19,62 @@ pub enum AgentRuntime {
     OpenCode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentRuntimeCatalogEntry {
+    pub runtime: AgentRuntime,
+    pub id: &'static str,
+    pub name: &'static str,
+    pub default_api_base: &'static str,
+}
+
 impl AgentRuntime {
+    pub const CATALOG: [AgentRuntimeCatalogEntry; 3] = [
+        AgentRuntimeCatalogEntry {
+            runtime: Self::ClaudeManagedAgents,
+            id: CLAUDE_MANAGED_AGENTS,
+            name: "Claude Agents",
+            default_api_base: DEFAULT_ANTHROPIC_BASE_URL,
+        },
+        AgentRuntimeCatalogEntry {
+            runtime: Self::Cursor,
+            id: CURSOR,
+            name: "Cursor",
+            default_api_base: DEFAULT_CURSOR_BASE_URL,
+        },
+        AgentRuntimeCatalogEntry {
+            runtime: Self::OpenCode,
+            id: OPENCODE,
+            name: "OpenCode",
+            default_api_base: DEFAULT_OPENCODE_BASE_URL,
+        },
+    ];
+
+    pub fn catalog() -> &'static [AgentRuntimeCatalogEntry] {
+        &Self::CATALOG
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ClaudeManagedAgents => CLAUDE_MANAGED_AGENTS,
             Self::Cursor => CURSOR,
             Self::OpenCode => OPENCODE,
         }
+    }
+
+    pub fn name(self) -> &'static str {
+        Self::catalog()
+            .iter()
+            .find(|entry| entry.runtime == self)
+            .map(|entry| entry.name)
+            .unwrap_or_else(|| self.as_str())
+    }
+
+    pub fn default_api_base(self) -> &'static str {
+        Self::catalog()
+            .iter()
+            .find(|entry| entry.runtime == self)
+            .map(|entry| entry.default_api_base)
+            .unwrap_or_default()
     }
 }
 
@@ -54,6 +103,7 @@ pub struct LapConfig {
     pub anthropic_base_url: String,
     pub cursor_api_key: Option<String>,
     pub cursor_base_url: String,
+    pub opencode_api_key: Option<String>,
     pub opencode_base_url: Option<String>,
     pub opencode_username: String,
     pub opencode_password: Option<String>,
@@ -89,6 +139,7 @@ impl Default for LapConfig {
             anthropic_base_url: DEFAULT_ANTHROPIC_BASE_URL.to_owned(),
             cursor_api_key: None,
             cursor_base_url: DEFAULT_CURSOR_BASE_URL.to_owned(),
+            opencode_api_key: None,
             opencode_base_url: None,
             opencode_username: "opencode".to_owned(),
             opencode_password: None,

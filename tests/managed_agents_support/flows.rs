@@ -10,6 +10,18 @@ mod sessions;
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use sessions::exercise_sessions;
 
+pub async fn assert_agent_runtime_catalog(fixture: &AppFixture) {
+    let response = request_json(fixture.app.clone(), "GET", "/api/agent-runtimes", None).await;
+    let runtimes = response["runtimes"].as_array().unwrap();
+    let ids: Vec<_> = runtimes
+        .iter()
+        .map(|runtime| runtime["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["claude_managed_agents", "cursor", "opencode"]);
+    assert!(!ids.contains(&"claude_agents"));
+    assert_eq!(runtimes[2]["default_api_base"], "http://127.0.0.1:4096");
+}
+
 pub async fn create_agent(fixture: &AppFixture) -> String {
     let created = request_json(
         fixture.app.clone(),

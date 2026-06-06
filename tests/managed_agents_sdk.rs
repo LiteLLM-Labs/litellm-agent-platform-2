@@ -2,7 +2,9 @@
 mod sdk_support;
 
 use futures_util::StreamExt;
-use litellm_rust::sdk::agents::{parse_sse, AgentModel, AgentRuntime, CreateAgentParams};
+use litellm_rust::sdk::agents::{
+    parse_sse, AgentModel, AgentRuntime, CreateAgentParams, CreateSessionParams, Lap, LapConfig,
+};
 use serde_json::json;
 use wiremock::{
     matchers::{header, method, path},
@@ -86,6 +88,34 @@ async fn streams_opencode_global_events() {
 }
 
 #[tokio::test]
+async fn creates_opencode_session_with_bearer_auth() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/session"))
+        .and(header("authorization", "Bearer sk-master"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "sesn_bearer",
+            "title": "Bearer session"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Lap::new(LapConfig {
+        opencode_api_key: Some("sk-master".to_owned()),
+        opencode_base_url: Some(server.uri()),
+        ..LapConfig::default()
+    });
+    let session = client
+        .beta()
+        .sessions()
+        .create(CreateSessionParams::opencode("Bearer session"))
+        .await
+        .unwrap();
+
+    assert_eq!(session.id, "sesn_bearer");
+}
+
+#[tokio::test]
 async fn rejects_opencode_agent_create_before_network() {
     let server = MockServer::start().await;
     let error = sdk_support::opencode_client(&server)
@@ -125,6 +155,14 @@ fn parses_sse_and_resolves_supported_runtimes() {
     assert_eq!(
         AgentRuntime::try_from("opencode").unwrap(),
         AgentRuntime::OpenCode
+    );
+    let catalog_ids: Vec<_> = AgentRuntime::catalog()
+        .iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(
+        catalog_ids,
+        vec!["claude_managed_agents", "cursor", "opencode"]
     );
     assert!(AgentRuntime::try_from("not-a-runtime").is_err());
 }

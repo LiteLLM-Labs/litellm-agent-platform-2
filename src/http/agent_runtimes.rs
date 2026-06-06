@@ -12,10 +12,11 @@ use crate::{
     db::credentials,
     errors::GatewayError,
     managed_agents::providers::base::{
-        default_api_base, validate_runtime, RuntimeCredential, CLAUDE_AGENTS_RUNTIME,
-        CURSOR_RUNTIME,
+        default_api_base, normalize_runtime, RuntimeCredential, CLAUDE_AGENTS_RUNTIME,
+        CLAUDE_AGENTS_RUNTIME_LEGACY,
     },
     proxy::{auth::master_key::require_master_key, credential_crypto, state::AppState},
+    sdk::agents::{AgentRuntime, AgentRuntimeCatalogEntry},
 };
 
 #[derive(Debug, Serialize)]
@@ -61,7 +62,7 @@ pub async fn save(
     Json(input): Json<SaveRuntimeCredentialRequest>,
 ) -> Result<Json<AgentRuntimesResponse>, GatewayError> {
     require_admin(&state, &headers)?;
-    validate(&runtime)?;
+    let runtime = canonical_runtime(&runtime)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let api_key = input.api_key.trim();
     if api_key.is_empty() {
@@ -74,12 +75,12 @@ pub async fn save(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| default_api_base(&runtime).unwrap_or_default());
+        .unwrap_or_else(|| default_api_base(runtime).unwrap_or_default());
     let key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
     credentials::upsert(
         pool,
-        &credential_name(&runtime),
+        &credential_name(runtime),
         json!({
             "api_key": credential_crypto::encrypt_value(api_key, &key)?,
             "api_base": credential_crypto::encrypt_value(api_base, &key)?,
@@ -99,12 +100,18 @@ pub async fn delete(
     Path(runtime): Path<String>,
 ) -> Result<(StatusCode, Json<DeleteRuntimeCredentialResponse>), GatewayError> {
     require_admin(&state, &headers)?;
-    validate(&runtime)?;
+    let runtime = canonical_runtime(&runtime)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
+    let deleted = credentials::delete_by_name(pool, &credential_name(runtime)).await?;
+    let deleted_legacy = if runtime == CLAUDE_AGENTS_RUNTIME {
+        credentials::delete_by_name(pool, &credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY)).await?
+    } else {
+        false
+    };
     Ok((
         StatusCode::OK,
         Json(DeleteRuntimeCredentialResponse {
-            ok: credentials::delete_by_name(pool, &credential_name(&runtime)).await?,
+            ok: deleted || deleted_legacy,
         }),
     ))
 }
@@ -113,12 +120,27 @@ pub async fn load_credential(
     state: &AppState,
     runtime: &str,
 ) -> Result<RuntimeCredential, GatewayError> {
-    validate(runtime)?;
+    let runtime = canonical_runtime(runtime)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    let Some(row) = credentials::get_by_name(pool, &credential_name(runtime)).await? else {
-        return Err(GatewayError::InvalidJsonMessage(format!(
-            "{runtime} credentials are not configured"
-        )));
+    let row = match credentials::get_by_name(pool, &credential_name(runtime)).await? {
+        Some(row) => row,
+        None if runtime == CLAUDE_AGENTS_RUNTIME => {
+            match credentials::get_by_name(pool, &credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY))
+                .await?
+            {
+                Some(row) => row,
+                None => {
+                    return Err(GatewayError::InvalidJsonMessage(format!(
+                        "{runtime} credentials are not configured"
+                    )))
+                }
+            }
+        }
+        None => {
+            return Err(GatewayError::InvalidJsonMessage(format!(
+                "{runtime} credentials are not configured"
+            )))
+        }
     };
     let key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
@@ -136,22 +158,25 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayErr
 
 async fn runtime_values(state: &AppState) -> Result<Vec<RuntimeResponse>, GatewayError> {
     let mut values = Vec::new();
-    for runtime in [CURSOR_RUNTIME, CLAUDE_AGENTS_RUNTIME] {
-        values.push(runtime_value(state, runtime).await?);
+    for entry in AgentRuntime::catalog() {
+        values.push(runtime_value(state, *entry).await?);
     }
     Ok(values)
 }
 
-async fn runtime_value(state: &AppState, runtime: &str) -> Result<RuntimeResponse, GatewayError> {
-    let credential = match load_credential(state, runtime).await {
+async fn runtime_value(
+    state: &AppState,
+    entry: AgentRuntimeCatalogEntry,
+) -> Result<RuntimeResponse, GatewayError> {
+    let credential = match load_credential(state, entry.id).await {
         Ok(value) => Some(value),
         Err(GatewayError::InvalidJsonMessage(_)) | Err(GatewayError::MissingDatabase) => None,
         Err(error) => return Err(error),
     };
     Ok(RuntimeResponse {
-        id: runtime.to_owned(),
-        name: runtime_name(runtime).to_owned(),
-        default_api_base: default_api_base(runtime).unwrap_or_default().to_owned(),
+        id: entry.id.to_owned(),
+        name: entry.name.to_owned(),
+        default_api_base: entry.default_api_base.to_owned(),
         connected: credential.is_some(),
         api_base: credential.as_ref().map(|value| value.api_base.clone()),
         masked_api_key: credential.map(|value| mask(&value.api_key)),
@@ -162,22 +187,9 @@ fn credential_name(runtime: &str) -> String {
     format!("agent-runtime:{runtime}")
 }
 
-fn validate(runtime: &str) -> Result<(), GatewayError> {
-    if validate_runtime(runtime) {
-        Ok(())
-    } else {
-        Err(GatewayError::InvalidJsonMessage(format!(
-            "unsupported runtime: {runtime}"
-        )))
-    }
-}
-
-fn runtime_name(runtime: &str) -> &str {
-    match runtime {
-        CURSOR_RUNTIME => "Cursor",
-        CLAUDE_AGENTS_RUNTIME => "Claude Agents",
-        _ => runtime,
-    }
+fn canonical_runtime(runtime: &str) -> Result<&'static str, GatewayError> {
+    normalize_runtime(runtime)
+        .ok_or_else(|| GatewayError::InvalidJsonMessage(format!("unsupported runtime: {runtime}")))
 }
 
 fn decrypt(

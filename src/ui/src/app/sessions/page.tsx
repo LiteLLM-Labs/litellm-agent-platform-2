@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowUp, Bot, Mic, Paperclip } from "lucide-react";
+import { ArrowUp, Mic, Paperclip } from "lucide-react";
 import { BrandIcon } from "@/components/brand-icons";
 import { Sidebar } from "@/components/sidebar";
 import { Button } from "@/components/ui/button";
@@ -18,31 +18,39 @@ import { Textarea } from "@/components/ui/textarea";
 import { createAgent, createSession, listAgentRuntimes, listAgents, listSessions } from "@/lib/api";
 import type { AgentRuntime, AgentRuntimeId } from "@/lib/types";
 
-type RuntimeDisplayId = AgentRuntimeId | "codex" | "bedrock_agent_core";
+const CLAUDE_RUNTIME: AgentRuntimeId = "claude_managed_agents";
 
-const RUNTIME_OPTIONS: RuntimeDisplayId[] = [
-  "claude_agents",
-  "cursor",
-  "codex",
-  "bedrock_agent_core",
-];
-
-function runtimeIconId(id: RuntimeDisplayId) {
-  return id === "claude_agents" ? "claude" : id;
+function runtimeIconId(id: string) {
+  return id === "claude_managed_agents" || id === "claude_agents" ? "claude" : id;
 }
 
-function runtimeLabel(id: RuntimeDisplayId): string {
-  if (id === "claude_agents") return "Claude Agents";
-  if (id === "bedrock_agent_core") return "Bedrock AgentCore";
-  if (id === "codex") return "Codex";
-  return "Cursor";
+function runtimeLabel(runtime: AgentRuntime | AgentRuntimeId): string {
+  if (typeof runtime !== "string") return runtime.name;
+  if (runtime === "claude_managed_agents") return "Claude Agents";
+  if (runtime === "cursor") return "Cursor";
+  if (runtime === "opencode") return "OpenCode";
+  return runtime;
 }
 
-function runtimeSubtitle(id: RuntimeDisplayId): string {
-  if (id === "claude_agents") return "Anthropic sessions and tools";
-  if (id === "bedrock_agent_core") return "AWS managed agents";
-  if (id === "codex") return "Code tasks and reviews";
-  return "Background repo agents";
+function runtimeSubtitle(runtime: AgentRuntime): string {
+  if (!runtime.connected) return "missing key";
+  if (runtime.id === "claude_managed_agents") return "Anthropic sessions and tools";
+  if (runtime.id === "cursor") return "Background repo agents";
+  if (runtime.id === "opencode") return "OpenCode server sessions";
+  return "Managed runtime sessions";
+}
+
+function modelForRuntime(runtime: AgentRuntimeId): string {
+  if (runtime === "claude_managed_agents") return "claude-sonnet-4-6";
+  if (runtime === "opencode") return "opencode/default";
+  return "claude-4-sonnet";
+}
+
+function runtimeRoutePrefix(runtime: AgentRuntimeId | ""): string {
+  if (runtime === "claude_managed_agents") return "anthropic/*";
+  if (runtime === "cursor") return "cursor/*";
+  if (runtime === "opencode") return "opencode/*";
+  return "runtime/*";
 }
 
 function promptTitle(prompt: string): string {
@@ -54,7 +62,7 @@ function promptTitle(prompt: string): string {
 export default function SessionsPage() {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
-  const [runtime, setRuntime] = useState<AgentRuntimeId>("claude_agents");
+  const [runtime, setRuntime] = useState<AgentRuntimeId | "">("");
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [repository, setRepository] = useState("");
   const [ref, setRef] = useState("main");
@@ -67,6 +75,10 @@ export default function SessionsPage() {
     Promise.all([listAgentRuntimes(), listSessions(), listAgents()])
       .then(([nextRuntimes, nextSessions, nextAgents]) => {
         setRuntimes(nextRuntimes);
+        setRuntime((current) => {
+          if (current && nextRuntimes.some((item) => item.id === current)) return current;
+          return nextRuntimes.find((item) => item.id === CLAUDE_RUNTIME)?.id ?? nextRuntimes[0]?.id ?? "";
+        });
         setSessionCount(nextSessions.length);
         setAgentCount(nextAgents.length);
       })
@@ -78,6 +90,7 @@ export default function SessionsPage() {
     [runtime, runtimes],
   );
   const canStart =
+    runtime !== "" &&
     prompt.trim().length > 0 &&
     !starting &&
     selectedRuntime?.connected &&
@@ -85,7 +98,8 @@ export default function SessionsPage() {
 
   const startSession = async () => {
     const trimmed = prompt.trim();
-    if (!trimmed || starting) return;
+    const runtimeId = runtime;
+    if (!trimmed || starting || !runtimeId) return;
     setStarting(true);
     setError(null);
     try {
@@ -93,16 +107,16 @@ export default function SessionsPage() {
       const agent = await createAgent({
         name: title,
         owner_id: "default",
-        description: `Started from ${runtimeLabel(runtime)} landing prompt.`,
-        model: runtime === "claude_agents" ? "claude-sonnet-4-6" : "claude-4-sonnet",
-        harness: runtime,
+        description: `Started from ${runtimeLabel(selectedRuntime ?? runtimeId)} landing prompt.`,
+        model: modelForRuntime(runtimeId),
+        harness: runtimeId,
         system: "You are a helpful managed agent. Use available tools when they help complete the user's request.",
         tools: [{ type: "agent_toolset_20260401" }],
         mcp_servers: [],
         skills: [],
       });
       const environment =
-        runtime === "cursor"
+        runtimeId === "cursor"
           ? {
               repository,
               ref,
@@ -111,7 +125,7 @@ export default function SessionsPage() {
             }
           : {};
       const session = await createSession(title, agent.id, {
-        runtime,
+        runtime: runtimeId,
         environment,
       });
       const params = new URLSearchParams({
@@ -172,31 +186,25 @@ export default function SessionsPage() {
                         <BrandIcon id={runtimeIconId(runtime)} className="size-4" />
                       </span>
                       <span className="truncate text-sm font-medium">
-                        {selectedRuntime?.name ?? runtimeLabel(runtime)}
+                        {selectedRuntime?.name ?? (runtime ? runtimeLabel(runtime) : "Select runtime")}
                       </span>
                     </span>
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="w-[340px]">
-                  {RUNTIME_OPTIONS.map((id) => {
-                    const item = runtimes.find((runtimeItem) => runtimeItem.id === id);
-                    const selectable = id === "claude_agents" || id === "cursor";
+                  {runtimes.map((item) => {
                     return (
-                      <SelectItem key={id} value={id} disabled={!selectable} className="py-3">
+                      <SelectItem key={item.id} value={item.id} disabled={!item.connected} className="py-3">
                         <span className="flex min-w-0 items-center gap-3">
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
-                            <BrandIcon id={runtimeIconId(id)} className="size-4" />
+                            <BrandIcon id={runtimeIconId(item.id)} className="size-4" />
                           </span>
                           <span className="min-w-0">
                             <span className="block truncate text-sm font-medium">
-                              {item?.name ?? runtimeLabel(id)}
+                              {item.name}
                             </span>
                             <span className="block truncate text-xs text-muted-foreground">
-                              {selectable
-                                ? item?.connected
-                                  ? runtimeSubtitle(id)
-                                  : "missing key"
-                                : "preview"}
+                              {runtimeSubtitle(item)}
                             </span>
                           </span>
                         </span>
@@ -206,7 +214,7 @@ export default function SessionsPage() {
                 </SelectContent>
               </Select>
               <span className="hidden rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-xs text-[#77736d] sm:inline">
-                {runtime === "claude_agents" ? "anthropic/*" : "cursor/*"}
+                {runtimeRoutePrefix(runtime)}
               </span>
               <div className="ml-auto" />
               <Button variant="ghost" size="icon-sm" disabled className="text-[#5d5a55]">

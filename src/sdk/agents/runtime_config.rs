@@ -62,14 +62,18 @@ pub(super) fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, Runtim
         );
     }
     if let Some(base_url) = config.opencode_base_url {
+        let auth = match config.opencode_api_key {
+            Some(api_key) => RuntimeAuth::Bearer(api_key),
+            None => RuntimeAuth::OpenCodeBasic {
+                username: config.opencode_username,
+                password: config.opencode_password,
+            },
+        };
         runtimes.insert(
             AgentRuntime::OpenCode,
             RuntimeConfig {
                 base_url: base_url.trim_end_matches('/').to_owned(),
-                auth: RuntimeAuth::OpenCodeBasic {
-                    username: config.opencode_username,
-                    password: config.opencode_password,
-                },
+                auth,
             },
         );
     }

@@ -434,7 +434,7 @@ export async function sendMessageWithRuntimeModel(opts: {
   runtime?: AgentRuntimeId;
 }): Promise<void> {
   const model =
-    opts.runtime === "claude_agents"
+    opts.runtime === "claude_managed_agents"
       ? "anthropic/*"
       : opts.runtime === "cursor"
         ? "cursor/*"
