@@ -18,10 +18,8 @@ pub(crate) type AdapterFuture<'a, T> =
 
 pub(crate) struct RuntimeEntry {
     pub(crate) runtime: AgentRuntime,
-    /// String ID stored in the database (e.g. "cursor", "claude_agents").
+    /// String ID stored in the database (e.g. "cursor").
     pub(crate) id: &'static str,
-    pub(crate) name: &'static str,
-    pub(crate) default_api_base: &'static str,
     pub(crate) adapter: Arc<dyn RuntimeAdapter>,
 }
 
@@ -39,15 +37,11 @@ impl RuntimeAdapterRegistry {
         &mut self,
         runtime: AgentRuntime,
         id: &'static str,
-        name: &'static str,
-        default_api_base: &'static str,
         adapter: impl RuntimeAdapter,
     ) {
         self.entries.push(RuntimeEntry {
             runtime,
             id,
-            name,
-            default_api_base,
             adapter: Arc::new(adapter),
         });
     }
@@ -65,10 +59,6 @@ impl RuntimeAdapterRegistry {
 
     pub(crate) fn validate_id(&self, id: &str) -> bool {
         self.entries.iter().any(|e| e.id == id)
-    }
-
-    pub(crate) fn all_entries(&self) -> &[RuntimeEntry] {
-        &self.entries
     }
 }
 

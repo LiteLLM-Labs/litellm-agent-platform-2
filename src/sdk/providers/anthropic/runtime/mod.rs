@@ -3,14 +3,13 @@ use serde_json::Value;
 use crate::sdk::agents::{
     response_fields::id, AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams,
     CreateEnvironmentParams, CreateSessionParams, Environment, Lap, ManagedAgent,
-    SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
+    SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION, CLAUDE_MANAGED_AGENTS,
+    MANAGED_AGENTS_BETA,
 };
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 
 /// String ID used to identify this runtime in the database and HTTP API.
-pub(crate) const RUNTIME_ID: &str = "claude_agents";
-pub(crate) const RUNTIME_NAME: &str = "Claude Agents";
-pub(crate) const DEFAULT_API_BASE: &str = "https://api.anthropic.com";
+pub(crate) const RUNTIME_ID: &str = CLAUDE_MANAGED_AGENTS;
 
 pub(crate) struct ClaudeManagedAgentsRuntime;
 

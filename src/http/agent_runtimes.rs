@@ -19,10 +19,7 @@ use crate::{
         },
         state::AppState,
     },
-    sdk::{
-        agents::{CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
-        providers,
-    },
+    sdk::agents::{AgentRuntime, CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
 };
 
 use super::agent_runtime_tools::{runtime_tools, RuntimeTool};
@@ -91,18 +88,12 @@ pub async fn save(
             "api_key is required".to_owned(),
         ));
     }
-    let registry = providers::runtime_registry();
     let api_base = input
         .api_base
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| {
-            registry
-                .entry_for_id(runtime)
-                .map(|e| e.default_api_base)
-                .unwrap_or_default()
-        });
+        .unwrap_or_else(|| runtime_default_api_base(runtime).unwrap_or_default());
     provider_credentials::save(
         pool,
         &state.config,
@@ -203,9 +194,8 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayErr
 }
 
 async fn runtime_values(state: &AppState) -> Result<Vec<RuntimeResponse>, GatewayError> {
-    let registry = providers::runtime_registry();
     let mut values = Vec::new();
-    for entry in registry.all_entries() {
+    for entry in AgentRuntime::catalog() {
         let provider = provider_credentials::catalog_entry(credential_provider_id(entry.id)?)?;
         let credential = match load_credential(state, entry.id).await {
             Ok(value) => Some(value),
@@ -237,10 +227,18 @@ fn canonical_runtime(runtime: &str) -> Result<&'static str, GatewayError> {
     if runtime == CLAUDE_AGENTS_RUNTIME_LEGACY {
         return Ok(CLAUDE_MANAGED_AGENTS);
     }
-    providers::runtime_registry()
-        .entry_for_id(runtime)
-        .map(|e| e.id)
+    AgentRuntime::catalog()
+        .iter()
+        .find(|entry| entry.id == runtime)
+        .map(|entry| entry.id)
         .ok_or_else(|| GatewayError::InvalidJsonMessage(format!("unsupported runtime: {runtime}")))
+}
+
+fn runtime_default_api_base(runtime: &str) -> Option<&'static str> {
+    AgentRuntime::catalog()
+        .iter()
+        .find(|entry| entry.id == runtime)
+        .map(|entry| entry.default_api_base)
 }
 
 /// Map a runtime ID to the provider credential ID used in the credential store.

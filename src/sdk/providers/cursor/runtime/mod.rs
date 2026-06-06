@@ -17,8 +17,6 @@ use stream::normalize_cursor_stream;
 
 /// String ID used to identify this runtime in the database and HTTP API.
 pub(crate) const RUNTIME_ID: &str = "cursor";
-pub(crate) const RUNTIME_NAME: &str = "Cursor";
-pub(crate) const DEFAULT_API_BASE: &str = "https://api.cursor.com";
 
 pub(crate) struct CursorRuntime;
 
