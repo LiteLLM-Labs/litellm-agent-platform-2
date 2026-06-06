@@ -75,7 +75,9 @@ gh pr view <PR_NUMBER> \
   --json mergeStateStatus,statusCheckRollup,headRefOid
 ```
 
-Fetch unresolved review threads:
+Fetch unresolved Bugbot review threads. A Bugbot thread is an unresolved review
+thread whose first comment is from `cursor` and includes the Bugbot marker in
+the body:
 
 ```bash
 gh api graphql -f query='
@@ -94,7 +96,12 @@ query($owner: String!, $repo: String!, $number: Int!) {
     }
   }
 }
-' -f owner='LiteLLM-Labs' -f repo='litellm-agent-platform-2' -F number=<PR_NUMBER>
+' -f owner='LiteLLM-Labs' -f repo='litellm-agent-platform-2' -F number=<PR_NUMBER> \
+  --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
+    | select(.isResolved == false)
+    | select(.comments.nodes[0].author.login == "cursor")
+    | select(.comments.nodes[0].body | contains("BUGBOT_BUG_ID"))
+    | {id, path: .comments.nodes[0].path, title: (.comments.nodes[0].body | split("\n")[0])}]'
 ```
 
 The `statusCheckRollup` is scoped to the current `headRefOid`. Do not treat
@@ -102,7 +109,7 @@ Bugbot as done until the `Cursor Bugbot` check for that current head is terminal
 If the head changes for any reason, request `@bugbot` again before evaluating the
 merge gate.
 
-For each unresolved Bugbot thread:
+For each unresolved Bugbot thread from that filtered list:
 
 1. Read the full comment and reproduce or reason through the failure.
 2. Make the smallest repo-consistent fix.
@@ -123,8 +130,8 @@ For each unresolved Bugbot thread:
    gh pr comment <PR_NUMBER> --body '@bugbot please re-review the latest fixes.'
    ```
 
-Repeat until Bugbot has completed for the latest `headRefOid` and there are zero
-unresolved Bugbot threads.
+Repeat until Bugbot has completed for the latest `headRefOid` and the filtered
+Bugbot thread list is empty.
 
 ## Merge Gate
 
@@ -133,7 +140,7 @@ The PR is mergeable only when all of these are true:
 - `mergeStateStatus` is clean enough for GitHub to merge.
 - Required CI checks are terminal and successful.
 - Cursor Bugbot is terminal in `statusCheckRollup` for the latest `headRefOid`.
-- There are zero unresolved Bugbot review threads.
+- The filtered unresolved Bugbot review-thread list is empty.
 - The working tree contains no accidental or generated files staged for commit.
 
 If the user requested merge behavior, merge only after the gate passes:
