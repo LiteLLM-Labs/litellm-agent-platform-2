@@ -3,10 +3,27 @@ export interface OpencodeSession {
   title?: string;
   agent?: string;
   agent_id?: string;
+  runtime?: AgentRuntimeId;
+  runtime_agent_ref_id?: string;
+  provider_session_id?: string;
+  provider_run_id?: string;
+  status?: string;
+  environment?: Record<string, unknown>;
   /** @deprecated use agent */
   harness?: string;
   time?: { created: number; updated?: number };
   [k: string]: unknown;
+}
+
+export type AgentRuntimeId = "cursor" | "claude_agents";
+
+export interface AgentRuntime {
+  id: AgentRuntimeId;
+  name: string;
+  default_api_base: string;
+  connected: boolean;
+  api_base?: string | null;
+  masked_api_key?: string | null;
 }
 
 export interface MessageInfo {
