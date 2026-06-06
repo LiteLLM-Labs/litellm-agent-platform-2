@@ -8,14 +8,11 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::{
-    cursor_stream::normalize_cursor_stream,
     events::{stream_events, AgentEventStream},
     resources::Beta,
     responses::{ensure_success, response_json},
-    types::{
-        AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef, ANTHROPIC_VERSION,
-        MANAGED_AGENTS_BETA,
-    },
+    runtimes::{self, RuntimeAdapter},
+    types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
 
 #[derive(Clone)]
@@ -30,10 +27,11 @@ struct Inner {
     cursor_run_ids: Mutex<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct RuntimeConfig {
     api_key: String,
     base_url: String,
+    adapter: Arc<dyn RuntimeAdapter>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,26 +52,11 @@ impl Lap {
     }
 
     pub fn register_session(&self, session: ManagedSessionRef) -> Result<(), AgentSdkError> {
-        let ManagedSessionRef {
-            session_id,
-            lap_agent_runtime,
-            provider_session_id,
-            provider_agent_id,
-            provider_run_id,
-        } = session;
-        let agent_id = match lap_agent_runtime {
-            AgentRuntime::Cursor => provider_agent_id.or_else(|| provider_session_id.clone()),
-            AgentRuntime::ClaudeManagedAgents => provider_agent_id,
-        };
-        self.remember_session_context(
-            &session_id,
-            SessionContext {
-                runtime: lap_agent_runtime,
-                provider_session_id,
-                agent_id,
-                run_id: provider_run_id,
-            },
-        )
+        let session_id = session.session_id.clone();
+        let context = self
+            .adapter(session.lap_agent_runtime)?
+            .session_context(session);
+        self.remember_session_context(&session_id, context)
     }
 
     fn with_http(http: reqwest::Client, runtimes: HashMap<AgentRuntime, RuntimeConfig>) -> Self {
@@ -91,7 +74,7 @@ impl Lap {
         Beta { client: self }
     }
 
-    pub(super) async fn post<T: Serialize>(
+    pub(crate) async fn post<T: Serialize>(
         &self,
         runtime: AgentRuntime,
         path: &str,
@@ -116,10 +99,7 @@ impl Lap {
             .send()
             .await?;
         let stream = stream_events(ensure_success(response).await?);
-        match runtime {
-            AgentRuntime::ClaudeManagedAgents => Ok(stream),
-            AgentRuntime::Cursor => Ok(normalize_cursor_stream(stream)),
-        }
+        Ok(self.adapter(runtime)?.normalize_stream(stream))
     }
 
     pub(super) fn request(
@@ -138,13 +118,18 @@ impl Lap {
             .http
             .request(method, format!("{}{}", config.base_url, path))
             .header(header::CONTENT_TYPE, "application/json");
-        Ok(match runtime {
-            AgentRuntime::ClaudeManagedAgents => request
-                .header("x-api-key", &config.api_key)
-                .header("anthropic-version", ANTHROPIC_VERSION)
-                .header("anthropic-beta", MANAGED_AGENTS_BETA),
-            AgentRuntime::Cursor => request.bearer_auth(&config.api_key),
-        })
+        Ok(config.adapter.configure_request(request, &config.api_key))
+    }
+
+    pub(super) fn adapter(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<Arc<dyn RuntimeAdapter>, AgentSdkError> {
+        self.inner
+            .runtimes
+            .get(&runtime)
+            .map(|config| config.adapter.clone())
+            .ok_or(AgentSdkError::RuntimeNotConfigured(runtime))
     }
 
     pub(super) fn default_runtime(&self) -> Result<AgentRuntime, AgentSdkError> {
@@ -265,6 +250,7 @@ fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
             RuntimeConfig {
                 api_key,
                 base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
+                adapter: runtimes::adapter(AgentRuntime::ClaudeManagedAgents),
             },
         );
     }
@@ -274,6 +260,7 @@ fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, RuntimeConfig> {
             RuntimeConfig {
                 api_key,
                 base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
+                adapter: runtimes::adapter(AgentRuntime::Cursor),
             },
         );
     }

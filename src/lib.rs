@@ -3,6 +3,7 @@ pub mod callbacks;
 pub mod db;
 pub mod errors;
 pub mod http;
+pub mod llms;
 pub mod managed_agents;
 pub mod mcp;
 pub mod model_prices;

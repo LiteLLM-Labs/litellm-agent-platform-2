@@ -1,7 +1,7 @@
 #[path = "managed_agents_support/sdk.rs"]
 mod sdk_support;
 
-use litellm_rust::sdk::agents::{parse_sse, AgentRuntime};
+use litellm_rust::sdk::agents::{parse_sse, AgentEventKind, AgentEventPayload, AgentRuntime};
 use serde_json::json;
 use wiremock::MockServer;
 
@@ -28,15 +28,28 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
 }
 
 #[tokio::test]
+async fn registered_claude_session_uses_provider_session_id() {
+    let server = MockServer::start().await;
+    sdk_support::mount_registered_claude_session_send(&server).await;
+
+    let sent = sdk_support::register_claude_session_and_send_events(&server).await;
+
+    assert_eq!(sent.raw, json!({ "data": [] }));
+}
+
+#[tokio::test]
 async fn streams_session_events() {
     let server = MockServer::start().await;
     sdk_support::mount_session_stream(&server).await;
 
     let events = sdk_support::stream_mock_session_events(&server, "sesn_123").await;
 
-    assert_eq!(events[0].event_type, "agent.message");
-    assert_eq!(events[0].data["content"][0]["text"], "hello");
-    assert_eq!(events[1].event_type, "session.status_idle");
+    assert_eq!(events[0].kind(), AgentEventKind::AgentMessage);
+    let AgentEventPayload::AgentMessage(message) = events[0].payload() else {
+        panic!("expected agent message payload");
+    };
+    assert_eq!(message.content[0]["text"], "hello");
+    assert_eq!(events[1].kind(), AgentEventKind::SessionStatusIdle);
 }
 
 #[test]

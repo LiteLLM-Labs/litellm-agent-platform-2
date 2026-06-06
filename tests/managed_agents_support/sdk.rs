@@ -1,8 +1,8 @@
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
     AgentEvent, AgentEventStream, AgentModel, AgentRuntime, CreateAgentParams,
-    CreateEnvironmentParams, CreateSessionParams, Lap, LapConfig, ManagedAgent, SendEventsParams,
-    SendEventsResponse, Session, MANAGED_AGENTS_BETA,
+    CreateEnvironmentParams, CreateSessionParams, Lap, LapConfig, ManagedAgent, ManagedSessionRef,
+    SendEventsParams, SendEventsResponse, Session, MANAGED_AGENTS_BETA,
 };
 use serde_json::json;
 use wiremock::{
@@ -69,6 +69,34 @@ pub async fn mount_session_round_trip(server: &MockServer) {
     mount_environment_create(server).await;
     mount_session_create(server).await;
     mount_session_event_send(server).await;
+}
+
+pub async fn mount_registered_claude_session_send(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/v1/sessions/sesn_provider_123/events"))
+        .and(body_json(json!({
+            "events": [{
+                "type": "user.message",
+                "content": [{ "type": "text", "text": "Create fibonacci.txt" }]
+            }]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [] })))
+        .mount(server)
+        .await;
+}
+
+pub async fn register_claude_session_and_send_events(server: &MockServer) -> SendEventsResponse {
+    let client = client(server);
+    client
+        .register_session(ManagedSessionRef {
+            session_id: "lap_ses_123".to_owned(),
+            lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
+            provider_session_id: Some("sesn_provider_123".to_owned()),
+            provider_agent_id: None,
+            provider_run_id: None,
+        })
+        .unwrap();
+    send_session_event(&client, "lap_ses_123").await
 }
 
 async fn mount_environment_create(server: &MockServer) {

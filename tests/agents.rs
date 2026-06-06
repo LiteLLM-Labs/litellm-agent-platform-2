@@ -8,13 +8,13 @@ use futures_util::StreamExt;
 use litellm_rust::{
     agents::config::{AgentDefinition, E2bSandboxParams},
     http::routes::router,
+    llms::{
+        providers::{self, transform::ProviderRegistry},
+        router::Router as ModelRouter,
+    },
     proxy::{
         config::{GatewayConfig, GeneralSettings},
         state::AppState,
-    },
-    sdk::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
     },
 };
 use serde_json::json;

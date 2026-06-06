@@ -17,6 +17,163 @@ pub struct AgentEvent {
     pub data: Map<String, Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AgentEventKind {
+    AgentMessage,
+    AgentThinking,
+    AgentToolUse,
+    AgentToolResult,
+    SessionStatusRunning,
+    SessionStatusIdle,
+    SessionError,
+    Unknown(String),
+}
+
+impl AgentEventKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::AgentMessage => "agent.message",
+            Self::AgentThinking => "agent.thinking",
+            Self::AgentToolUse => "agent.tool_use",
+            Self::AgentToolResult => "agent.tool_result",
+            Self::SessionStatusRunning => "session.status_running",
+            Self::SessionStatusIdle => "session.status_idle",
+            Self::SessionError => "session.error",
+            Self::Unknown(event_type) => event_type,
+        }
+    }
+}
+
+impl From<&str> for AgentEventKind {
+    fn from(value: &str) -> Self {
+        match value {
+            "agent.message" => Self::AgentMessage,
+            "agent.thinking" => Self::AgentThinking,
+            "agent.tool_use" => Self::AgentToolUse,
+            "agent.tool_result" => Self::AgentToolResult,
+            "session.status_running" => Self::SessionStatusRunning,
+            "session.status_idle" => Self::SessionStatusIdle,
+            "session.error" => Self::SessionError,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum AgentEventPayload {
+    AgentMessage(AgentMessageData),
+    AgentThinking,
+    AgentToolUse(AgentToolUseData),
+    AgentToolResult(AgentToolResultData),
+    SessionStatusRunning(SessionStatusData),
+    SessionStatusIdle(SessionIdleData),
+    SessionError(SessionErrorData),
+    Unknown {
+        event_type: String,
+        data: Map<String, Value>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentMessageData {
+    pub content: Vec<Value>,
+    pub raw: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentToolUseData {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub input: Option<Value>,
+    pub raw: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentToolResultData {
+    pub tool_use_id: Option<String>,
+    pub content: Option<Value>,
+    pub raw: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionStatusData {
+    pub raw: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionIdleData {
+    pub stop_reason: Option<Value>,
+    pub raw: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionErrorData {
+    pub error: Option<Value>,
+    pub raw: Map<String, Value>,
+}
+
+impl AgentEvent {
+    pub fn new(event_type: impl Into<String>, data: Map<String, Value>) -> Self {
+        Self {
+            event_type: event_type.into(),
+            data,
+        }
+    }
+
+    pub fn kind(&self) -> AgentEventKind {
+        AgentEventKind::from(self.event_type.as_str())
+    }
+
+    pub fn payload(&self) -> AgentEventPayload {
+        match self.kind() {
+            AgentEventKind::AgentMessage => AgentEventPayload::AgentMessage(AgentMessageData {
+                content: self
+                    .data
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+                raw: self.data.clone(),
+            }),
+            AgentEventKind::AgentThinking => AgentEventPayload::AgentThinking,
+            AgentEventKind::AgentToolUse => AgentEventPayload::AgentToolUse(AgentToolUseData {
+                id: string_field(&self.data, "id"),
+                name: string_field(&self.data, "name"),
+                input: self.data.get("input").cloned(),
+                raw: self.data.clone(),
+            }),
+            AgentEventKind::AgentToolResult => {
+                AgentEventPayload::AgentToolResult(AgentToolResultData {
+                    tool_use_id: string_field(&self.data, "tool_use_id"),
+                    content: self.data.get("content").cloned(),
+                    raw: self.data.clone(),
+                })
+            }
+            AgentEventKind::SessionStatusRunning => {
+                AgentEventPayload::SessionStatusRunning(SessionStatusData {
+                    raw: self.data.clone(),
+                })
+            }
+            AgentEventKind::SessionStatusIdle => {
+                AgentEventPayload::SessionStatusIdle(SessionIdleData {
+                    stop_reason: self.data.get("stop_reason").cloned(),
+                    raw: self.data.clone(),
+                })
+            }
+            AgentEventKind::SessionError => AgentEventPayload::SessionError(SessionErrorData {
+                error: self.data.get("error").cloned(),
+                raw: self.data.clone(),
+            }),
+            AgentEventKind::Unknown(event_type) => AgentEventPayload::Unknown {
+                event_type,
+                data: self.data.clone(),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SseParser {
     buffer: String,
@@ -113,4 +270,81 @@ fn parse_event(event_name: Option<String>, payload: String) -> Result<AgentEvent
         }
     }
     serde_json::from_value(value).map_err(AgentSdkError::Json)
+}
+
+fn string_field(data: &Map<String, Value>, field: &str) -> Option<String> {
+    data.get(field).and_then(Value::as_str).map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{parse_sse, AgentEventKind, AgentEventPayload};
+
+    #[test]
+    fn serde_roundtrip_keeps_flat_event_shape() {
+        let events = parse_sse(
+            "data: {\"type\":\"agent.message\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}\n\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&events[0]).unwrap(),
+            json!({
+                "type": "agent.message",
+                "content": [{ "type": "text", "text": "hello" }]
+            })
+        );
+    }
+
+    #[test]
+    fn sse_event_name_supplies_missing_type() {
+        let events = parse_sse(
+            "event: agent.message\n\
+             data: {\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}\n\n",
+        )
+        .unwrap();
+
+        assert_eq!(events[0].kind(), AgentEventKind::AgentMessage);
+    }
+
+    #[test]
+    fn payload_type_wins_over_sse_event_name() {
+        let events = parse_sse(
+            "event: interaction_update\n\
+             data: {\"type\":\"agent.message\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}\n\n",
+        )
+        .unwrap();
+
+        assert_eq!(events[0].kind(), AgentEventKind::AgentMessage);
+    }
+
+    #[test]
+    fn unknown_events_preserve_fields() {
+        let events = parse_sse("data: {\"type\":\"runtime.future\",\"x\":1}\n\n").unwrap();
+
+        assert_eq!(
+            events[0].payload(),
+            AgentEventPayload::Unknown {
+                event_type: "runtime.future".to_owned(),
+                data: [("x".to_owned(), json!(1))].into_iter().collect(),
+            }
+        );
+    }
+
+    #[test]
+    fn typed_payload_keeps_extra_fields() {
+        let events = parse_sse(
+            "data: {\"type\":\"agent.tool_use\",\"id\":\"call_1\",\"name\":\"edit\",\"input\":{\"path\":\"README.md\"},\"processed_at\":\"now\"}\n\n",
+        )
+        .unwrap();
+
+        let AgentEventPayload::AgentToolUse(payload) = events[0].payload() else {
+            panic!("expected tool use payload");
+        };
+        assert_eq!(payload.id.as_deref(), Some("call_1"));
+        assert_eq!(payload.name.as_deref(), Some("edit"));
+        assert_eq!(payload.raw["processed_at"], json!("now"));
+    }
 }

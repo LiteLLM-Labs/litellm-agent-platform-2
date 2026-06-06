@@ -1,15 +1,15 @@
-//! Wires in any src/sdk/providers/<name>/ with a mod.rs, so a new provider needs
+//! Wires in any src/llms/providers/<name>/ with a mod.rs, so a new provider needs
 //! zero edits outside its own folder.
 
 use std::{fs, path::Path};
 
 fn main() {
-    let providers_dir = Path::new("src/sdk/providers");
+    let providers_dir = Path::new("src/llms/providers");
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir).join("providers_generated.rs");
 
     let mut names: Vec<String> = fs::read_dir(providers_dir)
-        .expect("src/sdk/providers not found")
+        .expect("src/llms/providers not found")
         .flatten()
         .filter_map(|e| {
             let path = e.path();
@@ -25,7 +25,7 @@ fn main() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let mods: String = names
         .iter()
-        .map(|n| format!("#[path = \"{manifest}/src/sdk/providers/{n}/mod.rs\"]\npub mod {n};\n"))
+        .map(|n| format!("#[path = \"{manifest}/src/llms/providers/{n}/mod.rs\"]\npub mod {n};\n"))
         .collect();
     let inits: String = names
         .iter()
@@ -33,9 +33,9 @@ fn main() {
         .collect();
 
     let generated = format!(
-        "{mods}\npub fn register_all(registry: &mut crate::sdk::providers::transform::ProviderRegistry) {{\n{inits}}}\n"
+        "{mods}\npub fn register_all(registry: &mut crate::llms::providers::transform::ProviderRegistry) {{\n{inits}}}\n"
     );
     fs::write(&dest, generated).unwrap();
 
-    println!("cargo:rerun-if-changed=src/sdk/providers");
+    println!("cargo:rerun-if-changed=src/llms/providers");
 }

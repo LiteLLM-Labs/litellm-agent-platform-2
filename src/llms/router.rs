@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     errors::GatewayError,
+    llms::providers::transform::{ProviderRegistry, Transformation},
     proxy::config::GatewayConfig,
-    sdk::providers::transform::{ProviderRegistry, Transformation},
 };
 
 #[derive(Debug, Clone)]
@@ -138,8 +138,8 @@ mod tests {
     use std::collections::HashMap;
 
     use super::Router;
+    use crate::llms::providers::{self, transform::ProviderRegistry};
     use crate::proxy::config::{GatewayConfig, LiteLlmParams, ModelEntry};
-    use crate::sdk::providers::{self, transform::ProviderRegistry};
 
     #[test]
     fn resolves_model_to_upstream() {

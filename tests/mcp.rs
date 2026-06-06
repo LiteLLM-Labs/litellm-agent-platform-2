@@ -7,16 +7,16 @@ use axum::{
 };
 use litellm_rust::{
     http::routes::router,
+    llms::{
+        providers::{self, transform::ProviderRegistry},
+        router::Router as ModelRouter,
+    },
     proxy::{
         config::{
             GatewayConfig, GeneralSettings, LiteLlmParams, McpAuthType, McpServerEntry,
             McpTransport, ModelEntry,
         },
         state::AppState,
-    },
-    sdk::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
     },
 };
 use serde_json::json;

@@ -57,7 +57,7 @@ pub async fn provision(
     Ok(RuntimeProvision {
         runtime_agent_id: provider_agent.id.clone(),
         provider_session_id: Some(provider_session.id),
-        provider_run_id: nested_string(&provider_agent.raw, "run", "id"),
+        provider_run_id: cursor_run_id(&provider_agent.raw),
         provider_url: provider_url(&provider_agent.raw),
         metadata: json!({
             "runtime": CURSOR_RUNTIME,
@@ -198,10 +198,16 @@ fn provider_url(raw: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn nested_string(raw: &Value, parent: &str, field: &str) -> Option<String> {
-    raw.get(parent)
-        .and_then(|value| value.get(field))
+fn cursor_run_id(raw: &Value) -> Option<String> {
+    raw.get("run")
+        .and_then(|value| value.get("id"))
         .and_then(Value::as_str)
+        .or_else(|| {
+            raw.get("agent")
+                .and_then(|agent| agent.get("latestRunId"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| raw.get("latestRunId").and_then(Value::as_str))
         .map(str::to_owned)
 }
 

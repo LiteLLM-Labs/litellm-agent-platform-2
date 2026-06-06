@@ -1,6 +1,6 @@
 # Cursor Managed Agent Runtime
 
-The managed-agents SDK exposes Cursor through the same Anthropic-shaped beta
+The Agent Runtime SDK exposes Cursor through the same Anthropic-shaped beta
 surface used for Claude Managed Agents. Configure Cursor by setting a Cursor
 runtime key, then select `AgentRuntime::Cursor` when creating the agent.
 

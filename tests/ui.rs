@@ -6,13 +6,13 @@ use axum::{
 };
 use litellm_rust::{
     http::routes::router,
+    llms::{
+        providers::{self, transform::ProviderRegistry},
+        router::Router as ModelRouter,
+    },
     proxy::{
         config::{GatewayConfig, GeneralSettings, LiteLlmParams, ModelEntry},
         state::AppState,
-    },
-    sdk::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
     },
 };
 use tempfile::TempDir;

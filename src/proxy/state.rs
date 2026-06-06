@@ -7,10 +7,10 @@ use crate::{
     agents::runs::AgentRunStore,
     callbacks::{litellm_db::LiteLLMDBCallback, CallbackManager},
     errors::GatewayError,
+    llms::router::Router,
     mcp::registry::McpServerRegistry,
     model_prices::ModelCostMap,
     proxy::{auth::api_keys::GatewayApiKeyStore, config::GatewayConfig},
-    sdk::router::Router,
 };
 
 #[derive(Debug)]
