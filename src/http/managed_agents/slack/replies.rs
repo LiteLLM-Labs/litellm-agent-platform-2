@@ -42,12 +42,8 @@ async fn run_slack_prompt(
     session_id: String,
 ) -> Result<(), GatewayError> {
     let bot_token = load_secret(&state, &bot_token_key(&agent.id, &config)).await?;
-    let mut lock = SlackPromptLock::acquire(&pool, &session_id).await?;
-    let result = run_locked_slack_prompt(state, &pool, agent, message, session_id, bot_token).await;
-    if let Err(error) = lock.release().await {
-        warn!("slack prompt lock release failed: {error}");
-    }
-    result
+    let _lock = SlackPromptLock::acquire(&state.keyed_locks, &session_id).await;
+    run_locked_slack_prompt(state, &pool, agent, message, session_id, bot_token).await
 }
 
 async fn run_locked_slack_prompt(
