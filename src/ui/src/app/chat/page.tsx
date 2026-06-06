@@ -11,6 +11,7 @@ import {
   Clipboard,
   ClipboardCheck,
   Cpu,
+  ExternalLink,
   FileText,
   KeyRound,
   Loader2,
@@ -32,10 +33,10 @@ import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
-import { getMessages, getSession, createSession, deleteSession, subscribeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval } from "@/lib/api";
-import type { PendingApproval } from "@/lib/api";
+import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval } from "@/lib/api";
+import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
-import type { Agent, HarnessMessage, HarnessMessagePart, MessageInfo } from "@/lib/types";
+import type { Agent, AgentRuntimeId, HarnessMessage, HarnessMessagePart } from "@/lib/types";
 import type { Frame } from "@/components/inspector-panel";
 
 const FALLBACK_MODELS = [
@@ -63,6 +64,68 @@ function shortPrompt(prompt: string): string {
   return compact.length > 220 ? compact.slice(0, 220).trimEnd() + "..." : compact;
 }
 
+function runtimeLabel(runtime?: string): string {
+  if (runtime === "claude_agents") return "Claude Managed Agents";
+  if (runtime === "cursor") return "Cursor";
+  return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
+}
+
+function providerSessionUrl(runtime?: AgentRuntimeId, providerSessionId?: string, providerUrl?: string): string | null {
+  if (providerUrl) return providerUrl;
+  if (runtime === "claude_agents" && providerSessionId) {
+    return `https://platform.claude.com/workspaces/default/agent-sessions/${encodeURIComponent(providerSessionId)}`;
+  }
+  return null;
+}
+
+function runtimeEventText(ev: RuntimeAgentEvent): string {
+  const value = ev.text ?? ev.delta ?? ev.content;
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((block) => {
+        if (!block || typeof block !== "object") return "";
+        const text = (block as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      })
+      .join("");
+  }
+  return "";
+}
+
+function runtimeEventPartKind(ev: RuntimeAgentEvent): "text" | "thinking" {
+  const part = ev.part;
+  if (part && typeof part === "object") {
+    const type = (part as { type?: unknown }).type;
+    if (type === "thinking" || type === "reasoning") return "thinking";
+  }
+  const field = ev.field;
+  if (field === "thinking" || field === "reasoning") return "thinking";
+  const type = ev.type;
+  if (type === "thinking_back" || type === "agent.thinking" || type === "agent.reasoning") {
+    return "thinking";
+  }
+  return "text";
+}
+
+function runtimeErrorMessage(ev: RuntimeAgentEvent): string {
+  const error = ev.error;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return JSON.stringify(ev);
+}
+
+function isRuntimeAssistantTextEvent(type: string): boolean {
+  return type === "assistant_response" || type === "agent.message";
+}
+
+function isRuntimeThinkingEvent(type: string): boolean {
+  return type === "thinking_back" || type === "agent.thinking" || type === "agent.reasoning";
+}
+
 function ChatInner() {
   const sp = useSearchParams();
   const sid = sp.get("id");
@@ -78,20 +141,24 @@ function ChatInner() {
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
+  const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [providerSessionId, setProviderSessionId] = useState<string | undefined>();
+  const [providerUrl, setProviderUrl] = useState<string | undefined>();
   const [sessionTitle, setSessionTitle] = useState<string>("");
   const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
+  const runtimeAssistantRef = useRef<{
+    messageId: string;
+    textPartId: string;
+    thinkingPartId: string;
+  } | null>(null);
 
   const refetch = useCallback(async () => {
     if (!sid) return;
     try {
       const list = await getMessages(sid);
-      // The backend only persists an assistant message once its turn completes,
-      // so GET /message omits the in-progress (streaming) assistant turn. A blind
-      // setMessages(list) here would wipe the shell created by the message.updated
-      // event and drop every subsequent message.part.delta. Merge instead: keep any
-      // locally-known messages the server hasn't persisted yet so streaming survives.
       setMessages((prev) => {
         if (!prev) return list;
         const serverIds = new Set(list.map((m) => m.info.id));
@@ -119,7 +186,10 @@ function ChatInner() {
   const activeAgentName =
     activeAgent?.name || sessionTitle || BUILTIN_AGENTS[sessionHarness] || sessionHarness;
   const baseRuntime =
-    String(activeAgent?.harness ?? activeAgent?.base_agent ?? sessionHarness ?? "claude-code");
+    sessionRuntime
+      ? runtimeLabel(sessionRuntime)
+      : String(activeAgent?.harness ?? activeAgent?.base_agent ?? sessionHarness ?? "claude-code");
+  const providerLink = providerSessionUrl(sessionRuntime, providerSessionId, providerUrl);
   const skills = Array.isArray(activeAgent?.skills) ? activeAgent.skills : [];
   const vaultKeys = Array.isArray(activeAgent?.vault_keys) ? activeAgent.vault_keys : [];
   const hasStarted = Boolean(messages && messages.length > 0);
@@ -145,11 +215,15 @@ function ChatInner() {
   // Fetch session metadata to get the locked agent
   useEffect(() => {
     if (!sid) return;
+    setSessionLoaded(false);
     getSession(sid).then(s => {
       const a = s.agent_id ?? s.agent ?? s.harness;
       if (a) setSessionHarness(a);
+      setSessionRuntime(s.runtime);
+      setProviderSessionId(s.provider_session_id);
+      setProviderUrl(s.provider_url);
       if (s.title) setSessionTitle(s.title);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setSessionLoaded(true));
   }, [sid]);
 
   // Fetch saved agents for dropdown
@@ -165,107 +239,179 @@ function ChatInner() {
     router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
   }, [sid, sessionHarness, router]);
 
-  useEffect(() => {
-    if (!sid) return;
-    refetch();
-    const unsub = subscribeEvents({
-      sessionId: sid,
-      onEvent: (raw) => {
-        const ev = raw as { type: string; properties: Record<string, unknown> };
-        // Buffer every event so inspector can replay history on open
-        eventBufferRef.current = [
-          ...eventBufferRef.current.slice(-499),
-          { ts: Date.now(), ev: ev as Frame["ev"] },
-        ];
+  const runtimeAssistantIds = useCallback(() => {
+    if (!sid) return null;
+    if (!runtimeAssistantRef.current) {
+      const stamp = Date.now().toString(36);
+      runtimeAssistantRef.current = {
+        messageId: `${sid}_runtime_${stamp}`,
+        textPartId: `${sid}_runtime_${stamp}_text`,
+        thinkingPartId: `${sid}_runtime_${stamp}_thinking`,
+      };
+    }
+    return runtimeAssistantRef.current;
+  }, [sid]);
 
-        if (ev.type === "message.updated") {
-          const info = ev.properties.info as MessageInfo;
-          if (!info?.id) return;
-          setMessages((prev) => {
-            if (!prev) return prev;
-            const idx = prev.findIndex((m) => m.info.id === info.id);
-            if (idx === -1) return [...prev, { info, parts: [] }];
-            const next = [...prev];
-            next[idx] = { ...next[idx], info: { ...next[idx].info, ...info } };
-            return next;
-          });
-        } else if (ev.type === "message.part.updated") {
-          const part = ev.properties.part as HarnessMessagePart;
-          const msgId = part.messageID;
-          if (!msgId || !part.id || part.type === "step-start" || part.type === "step-finish") return;
-          setMessages((prev) => {
-            if (!prev) return prev;
-            const idx = prev.findIndex((m) => m.info.id === msgId);
-            if (idx === -1) return prev;
-            const msg = prev[idx];
-            const pIdx = msg.parts.findIndex((p) => p.id === part.id);
-            const newParts = [...msg.parts];
-            if (pIdx === -1) newParts.push(part);
-            else newParts[pIdx] = part;
-            const next = [...prev];
-            next[idx] = { ...msg, parts: newParts };
-            return next;
-          });
-        } else if (ev.type === "message.part.delta") {
-          const { messageID, partID, field, delta } = ev.properties as {
-            messageID: string;
-            partID: string;
-            field: string;
-            delta: string;
-          };
-          if (field !== "text" && field !== "reasoning") return;
-          setMessages((prev) => {
-            if (!prev) return prev;
-            const idx = prev.findIndex((m) => m.info.id === messageID);
-            if (idx === -1) return prev;
-            const msg = prev[idx];
-            const pIdx = msg.parts.findIndex((p) => p.id === partID);
-            if (pIdx === -1) return prev;
-            const part = msg.parts[pIdx] as HarnessMessagePart & { text: string };
-            const newParts = [...msg.parts];
-            newParts[pIdx] = { ...part, text: (part.text ?? "") + delta } as HarnessMessagePart;
-            const next = [...prev];
-            next[idx] = { ...msg, parts: newParts };
-            return next;
-          });
-        } else if (ev.type === "session.status") {
-          const st = (ev.properties?.status as { type?: string } | undefined)?.type;
-          if (st === "busy" || st === "idle") setSessionStatus(st);
-        } else if (ev.type === "session.idle") {
-          setSessionStatus("idle");
-          refetch();
-        } else if (ev.type === "session.error") {
-          const errObj = ev.properties?.error as Record<string, unknown> | undefined;
-          const errName = (errObj as {name?: string} | undefined)?.name ?? "";
-          // MessageAbortedError is raised by our own watchdog abort — not a real failure.
-          // Suppress it so the UI doesn't show a scary error card for auto-aborted turns.
-          if (errName === "MessageAbortedError") {
-            setSessionStatus("idle");
-            refetch();
-            return;
-          }
-          const msg = (errObj as {data?: {message?: string}} | undefined)?.data?.message
-            ?? (errObj as {message?: string} | undefined)?.message
-            ?? JSON.stringify(errObj ?? ev.properties);
-          setError(`Error: ${msg}`);
-          setSessionStatus("idle");
-          refetch();
-        } else if (ev.type === "tool.approval.requested") {
-          const { id, tool, arguments: args, createdAt } = ev.properties as unknown as PendingApproval;
-          if (!id) return;
-          setApprovals((prev) =>
-            prev.some((a) => a.id === id) ? prev : [...prev, { id, tool, arguments: args ?? {}, createdAt }],
-          );
-        } else if (ev.type === "tool.approval.resolved") {
-          const { id } = ev.properties as { id?: string };
-          if (id) setApprovals((prev) => prev.filter((a) => a.id !== id));
-        }
-      },
+  const ensureRuntimeAssistantMessage = useCallback(() => {
+    const ids = runtimeAssistantIds();
+    if (!ids) return null;
+    setMessages((prev) => {
+      const next = prev ?? [];
+      if (next.some((m) => m.info.id === ids.messageId)) return next;
+      return [
+        ...next,
+        {
+          info: { id: ids.messageId, role: "assistant", sessionID: sid ?? undefined },
+          parts: [],
+        },
+      ];
     });
-    // Catch up on any approvals already pending before this client connected.
+    return ids;
+  }, [runtimeAssistantIds, sid]);
+
+  const finishRuntimeAssistantMessage = useCallback(() => {
+    const ids = runtimeAssistantRef.current;
+    if (!ids) return;
+    setMessages((prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((m) => m.info.id === ids.messageId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      const msg = next[idx];
+      next[idx] = {
+        ...msg,
+        info: {
+          ...msg.info,
+          finish: "stop",
+        },
+      };
+      return next;
+    });
+    runtimeAssistantRef.current = null;
+  }, []);
+
+  const appendRuntimePartText = useCallback((partKind: "text" | "thinking", delta: string) => {
+    const ids = runtimeAssistantIds();
+    if (!ids || !delta) return;
+    const partId = partKind === "thinking" ? ids.thinkingPartId : ids.textPartId;
+    setMessages((prev) => {
+      let next = prev ?? [];
+      let idx = next.findIndex((m) => m.info.id === ids.messageId);
+      if (idx === -1) {
+        next = [
+          ...next,
+          {
+            info: { id: ids.messageId, role: "assistant", sessionID: sid ?? undefined },
+            parts: [
+              {
+                id: ids.thinkingPartId,
+                messageID: ids.messageId,
+                sessionID: sid ?? undefined,
+                type: "thinking",
+                text: "",
+              },
+              {
+                id: ids.textPartId,
+                messageID: ids.messageId,
+                sessionID: sid ?? undefined,
+                type: "text",
+                text: "",
+              },
+            ],
+          },
+        ];
+        idx = next.length - 1;
+      } else {
+        next = [...next];
+      }
+      const msg = next[idx];
+      let foundPart = false;
+      const parts = msg.parts.map((part) => {
+        if (part.id !== partId) return part;
+        foundPart = true;
+        return { ...part, text: `${"text" in part ? part.text : ""}${delta}` } as HarnessMessagePart;
+      });
+      if (!foundPart) {
+        parts.push({
+          id: partId,
+          messageID: ids.messageId,
+          sessionID: sid ?? undefined,
+          type: partKind,
+          text: delta,
+        });
+      }
+      next[idx] = { ...msg, parts };
+      return next;
+    });
+  }, [runtimeAssistantIds, sid]);
+
+  const handleRuntimeEvent = useCallback((ev: RuntimeAgentEvent) => {
+    eventBufferRef.current = [
+      ...eventBufferRef.current.slice(-499),
+      { ts: Date.now(), ev: ev as Frame["ev"] },
+    ];
+
+    if (
+      ev.type === "session.status_running" ||
+      ev.type === "session.thread_status_running"
+    ) {
+      ensureRuntimeAssistantMessage();
+      setSessionStatus("busy");
+      return;
+    }
+
+    if (ev.type === "session.status") {
+      const status = ev.status;
+      const statusType =
+        typeof status === "string"
+          ? status
+          : status && typeof status === "object"
+            ? (status as { type?: unknown }).type
+            : undefined;
+      if (statusType === "busy" || statusType === "running") {
+        ensureRuntimeAssistantMessage();
+        setSessionStatus("busy");
+      }
+      if (statusType === "idle") {
+        setSessionStatus("idle");
+        finishRuntimeAssistantMessage();
+      }
+      return;
+    }
+
+    if (ev.type === "session.status_idle" || ev.type === "session.thread_status_idle") {
+      setSessionStatus("idle");
+      finishRuntimeAssistantMessage();
+      return;
+    }
+
+    if (ev.type === "session.error") {
+      setError(`Error: ${runtimeErrorMessage(ev)}`);
+      setSessionStatus("idle");
+      runtimeAssistantRef.current = null;
+      return;
+    }
+
+    if (!isRuntimeAssistantTextEvent(ev.type) && !isRuntimeThinkingEvent(ev.type)) return;
+    ensureRuntimeAssistantMessage();
+    const delta = runtimeEventText(ev);
+    if (delta) {
+      appendRuntimePartText(isRuntimeThinkingEvent(ev.type) ? "thinking" : runtimeEventPartKind(ev), delta);
+    }
+    setSessionStatus("busy");
+  }, [appendRuntimePartText, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
+
+  useEffect(() => {
+    if (!sid || !sessionLoaded) return;
+    refetch();
+    const unsub = subscribeRuntimeEvents({
+      sessionId: sid,
+      onEvent: handleRuntimeEvent,
+      onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+    });
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, refetch]);
+  }, [sid, sessionLoaded, refetch, handleRuntimeEvent]);
 
   const onApprovalAccept = useCallback(async (id: string, args: Record<string, unknown>) => {
     setApprovalBusy(true);
@@ -384,6 +530,19 @@ function ChatInner() {
               <span className="text-[11px] text-muted-foreground">model</span>
               <ModelSelect value={model} models={models} onValueChange={setModel} />
             </div>
+            {providerLink && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                render={
+                  <a href={providerLink} target="_blank" rel="noreferrer">
+                    <ExternalLink className="size-3.5" />
+                    Open provider session
+                  </a>
+                }
+              />
+            )}
             <Button
               variant={inspectorOpen ? "default" : "outline"}
               size="sm"
@@ -453,6 +612,20 @@ function ChatInner() {
                           <span className="text-muted-foreground">session</span>
                           <span className="ml-auto truncate font-mono text-foreground">{shortSid}</span>
                         </div>
+                        {providerLink && (
+                          <a
+                            href={providerLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex min-w-0 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 py-1.5 hover:bg-muted"
+                          >
+                            <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="text-muted-foreground">provider</span>
+                            <span className="ml-auto truncate font-mono text-foreground">
+                              {providerSessionId ?? "open"}
+                            </span>
+                          </a>
+                        )}
                       </div>
                       {(skills.length > 0 || vaultKeys.length > 0) && (
                         <div className="mt-3 flex flex-wrap gap-1.5">

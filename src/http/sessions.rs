@@ -1,8 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 use axum::{
-    extract::{Path, State},
+    body::{Body, Bytes},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
+    response::Response,
     Json,
 };
 use futures_util::StreamExt;
@@ -26,10 +28,11 @@ use crate::{
     },
     errors::GatewayError,
     managed_agents::providers::{
-        base::{validate_runtime, RuntimeSessionInput},
+        base::{validate_runtime, RuntimeSessionInput, CLAUDE_AGENTS_RUNTIME, CURSOR_RUNTIME},
         provision_runtime,
     },
     proxy::{auth::master_key::require_master_key, state::AppState},
+    sdk::agents::{AgentSdkError, Lap, LapConfig, SendEventsParams},
 };
 
 pub async fn list(
@@ -231,6 +234,62 @@ pub async fn send_message(
         .map(Json)
 }
 
+pub async fn runtime_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<Response, GatewayError> {
+    require_events_master_key(
+        &headers,
+        &query,
+        state.config.general_settings.master_key.as_deref(),
+    )?;
+    let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
+    let row = session(pool, &session_id).await?;
+    if row.runtime.as_deref() != Some(CLAUDE_AGENTS_RUNTIME) {
+        return Err(GatewayError::InvalidConfig(
+            "runtime event streaming is only available for Claude Managed Agents sessions"
+                .to_owned(),
+        ));
+    }
+    let provider_session_id = row.provider_session_id.clone().ok_or_else(|| {
+        GatewayError::InvalidConfig(
+            "Claude Agents session is missing provider_session_id".to_owned(),
+        )
+    })?;
+    let client = claude_agents_sdk_client(&state).await?;
+    let provider_stream = client
+        .beta()
+        .sessions()
+        .events()
+        .stream(&provider_session_id)
+        .await
+        .map_err(agent_sdk_error)?;
+    let body_stream = provider_stream.map(|event| {
+        let line = match event {
+            Ok(event) => match serde_json::to_string(&event) {
+                Ok(payload) => format!("data: {payload}\n\n"),
+                Err(error) => format!(
+                    "data: {}\n\n",
+                    json!({ "type": "session.error", "error": { "message": error.to_string() } })
+                ),
+            },
+            Err(error) => format!(
+                "data: {}\n\n",
+                json!({ "type": "session.error", "error": { "message": error.to_string() } })
+            ),
+        };
+        Ok::<Bytes, Infallible>(Bytes::from(line))
+    });
+
+    Response::builder()
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .body(Body::from_stream(body_stream))
+        .map_err(|error| GatewayError::SandboxError(error.to_string()))
+}
+
 pub async fn abort(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -251,6 +310,17 @@ pub async fn abort(
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn require_events_master_key(
+    headers: &HeaderMap,
+    query: &HashMap<String, String>,
+    configured: Option<&str>,
+) -> Result<(), GatewayError> {
+    if query.get("key").map(String::as_str) == configured {
+        return Ok(());
+    }
+    require_master_key(headers, configured)
+}
+
 async fn execute_prompt(
     state: Arc<AppState>,
     pool: PgPool,
@@ -258,6 +328,10 @@ async fn execute_prompt(
     prompt: String,
     model: String,
 ) -> Result<(), GatewayError> {
+    if row.runtime.is_some() {
+        return execute_runtime_prompt(state, row, prompt).await;
+    }
+
     let agent = agent_definition(&pool, &state, &row, &model).await?;
     let mut harness_run = build_harness_run(&agent, &prompt)?;
     let context = HarnessRunContext::new(&row.id);
@@ -321,6 +395,76 @@ async fn execute_prompt(
         .update_status(&row.id, AgentRunStatus::Completed);
     push_events(&state, &row.id, harness_run.events.complete(&context));
     Ok(())
+}
+
+async fn execute_runtime_prompt(
+    state: Arc<AppState>,
+    row: SessionRow,
+    prompt: String,
+) -> Result<(), GatewayError> {
+    match row.runtime.as_deref() {
+        Some(CLAUDE_AGENTS_RUNTIME) => execute_claude_agents_prompt(state, row, prompt).await,
+        Some(CURSOR_RUNTIME) => Err(GatewayError::InvalidConfig(
+            "Cursor runtime sessions are provisioned, but the managed agents SDK does not yet expose Cursor event send/stream".to_owned(),
+        )),
+        Some(runtime) => Err(GatewayError::InvalidConfig(format!(
+            "unsupported runtime session: {runtime}"
+        ))),
+        None => Err(GatewayError::InvalidConfig(
+            "runtime session is missing runtime".to_owned(),
+        )),
+    }
+}
+
+async fn execute_claude_agents_prompt(
+    state: Arc<AppState>,
+    row: SessionRow,
+    prompt: String,
+) -> Result<(), GatewayError> {
+    let provider_session_id = row.provider_session_id.clone().ok_or_else(|| {
+        GatewayError::InvalidConfig(
+            "Claude Agents session is missing provider_session_id".to_owned(),
+        )
+    })?;
+    let client = claude_agents_sdk_client(&state).await?;
+
+    state
+        .agent_runs
+        .update_status(&row.id, AgentRunStatus::Running);
+    client
+        .beta()
+        .sessions()
+        .events()
+        .send(
+            &provider_session_id,
+            SendEventsParams {
+                events: vec![json!({
+                    "type": "user.message",
+                    "content": [{ "type": "text", "text": prompt }]
+                })],
+            },
+        )
+        .await
+        .map_err(agent_sdk_error)?;
+    Ok(())
+}
+
+async fn claude_agents_sdk_client(state: &AppState) -> Result<Lap, GatewayError> {
+    let credential =
+        crate::http::agent_runtimes::load_credential(state, CLAUDE_AGENTS_RUNTIME).await?;
+    Ok(Lap::new(LapConfig {
+        anthropic_api_key: Some(credential.api_key),
+        anthropic_base_url: credential.api_base,
+    }))
+}
+
+fn agent_sdk_error(error: AgentSdkError) -> GatewayError {
+    match error {
+        AgentSdkError::Provider { status, body } => GatewayError::SandboxError(format!(
+            "managed agent provider request failed with status {status}: {body}"
+        )),
+        other => GatewayError::SandboxError(other.to_string()),
+    }
 }
 
 fn push_events(state: &AppState, session_id: &str, events: Vec<HarnessEvent>) {
