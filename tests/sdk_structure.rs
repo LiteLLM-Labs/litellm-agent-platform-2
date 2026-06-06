@@ -46,6 +46,11 @@ fn sdk_tree_matches_provider_endpoint_contract() {
             path.display()
         );
     }
+
+    assert!(
+        !root.join("src/managed_agents/providers").exists(),
+        "src/managed_agents/providers/ must not exist — runtime provisioning belongs in sdk/providers/<provider>/runtime/"
+    );
 }
 
 fn assert_provider<const N: usize>(providers: &Path, provider: &str, expected_modules: [&str; N]) {

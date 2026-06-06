@@ -60,6 +60,9 @@ pub async fn create_claude_agent(server: &MockServer) -> ManagedAgent {
             description: None,
             tools: vec![json!({ "type": "agent_toolset_20260401" })],
             mcp_servers: Vec::new(),
+            env_vars: None,
+            workspace: None,
+            metadata: None,
         })
         .await
         .unwrap()

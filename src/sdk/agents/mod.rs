@@ -14,7 +14,7 @@ pub use events::{
 };
 pub use resources::{Agents, Beta, Environments, SessionEvents, Sessions};
 pub use types::{
-    AgentModel, AgentModelConfig, AgentRuntime, AgentSdkError, CreateAgentParams,
+    AgentModel, AgentModelConfig, AgentRuntime, AgentSdkError, AgentWorkspace, CreateAgentParams,
     CreateEnvironmentParams, CreateSessionParams, Environment, LapConfig, ManagedAgent,
     ManagedSessionRef, SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION,
     CLAUDE_MANAGED_AGENTS, CURSOR, DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_CURSOR_BASE_URL,

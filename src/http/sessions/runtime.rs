@@ -17,11 +17,12 @@ use crate::{
         sessions::{self, schema::SessionRow},
     },
     errors::GatewayError,
-    managed_agents::providers::{
-        base::{validate_runtime, RuntimeCredential, RuntimeSessionInput},
-        provision_runtime,
-    },
+    http::agent_runtimes::{validate_runtime, RuntimeCredential, CLAUDE_AGENTS_RUNTIME, CURSOR_RUNTIME},
     proxy::{auth::master_key::require_master_key, state::AppState},
+    sdk::agents::{
+        AgentModel, AgentModelConfig, AgentRuntime, CreateAgentParams,
+        CreateEnvironmentParams, CreateSessionParams, AgentWorkspace, Lap, LapConfig,
+    },
 };
 
 use super::{
@@ -40,6 +41,14 @@ struct CreatedRuntimeSession {
     environment: Value,
     prompt: String,
     row: SessionRow,
+}
+
+struct RuntimeProvision {
+    runtime_agent_id: String,
+    provider_session_id: Option<String>,
+    provider_run_id: Option<String>,
+    provider_url: Option<String>,
+    metadata: Value,
 }
 
 pub(super) async fn create_runtime_session(
@@ -99,18 +108,74 @@ async fn provision_runtime_session(
     pool: &PgPool,
     created: &CreatedRuntimeSession,
 ) -> Result<SessionRow, GatewayError> {
-    let provision = provision_runtime(
-        &state.http,
-        &created.runtime,
-        &created.agent,
-        created.credential.clone(),
-        RuntimeSessionInput {
-            session_id: created.row.id.clone(),
-            prompt: created.prompt.clone(),
-            environment: created.environment.clone(),
-        },
-    )
-    .await?;
+    let sdk_rt = sdk_runtime(&created.runtime)?;
+    let client = build_lap_client(sdk_rt, &created.credential, state);
+
+    let provider_agent = client
+        .beta()
+        .agents()
+        .create(CreateAgentParams {
+            lap_agent_runtime: sdk_rt,
+            lap_provider_options: None,
+            name: created.agent.name.clone(),
+            model: AgentModel::Config(AgentModelConfig {
+                id: agent_model(&created.agent, &created.environment),
+                speed: None,
+            }),
+            system: created.agent.system.clone(),
+            description: created.agent.description.clone(),
+            tools: vec![serde_json::json!({ "type": "agent_toolset_20260401" })],
+            mcp_servers: mcp_servers(&created.agent),
+            workspace: workspace_from_env(&created.environment)?,
+            env_vars: None,
+            metadata: Some(agent_metadata(&created.agent)),
+        })
+        .await
+        .map_err(agent_sdk_error)?;
+
+    let provider_env = client
+        .beta()
+        .environments()
+        .create(CreateEnvironmentParams {
+            lap_agent_runtime: sdk_rt,
+            name: format!("{} environment", created.agent.name),
+            config: serde_json::json!({
+                "type": "cloud",
+                "networking": { "type": "unrestricted" }
+            }),
+            description: None,
+            scope: None,
+        })
+        .await
+        .map_err(agent_sdk_error)?;
+
+    let provider_session = client
+        .beta()
+        .sessions()
+        .create(CreateSessionParams {
+            agent: provider_agent.id.clone(),
+            environment_id: provider_env.id.clone(),
+            title: format!("{} session", created.agent.name),
+            lap_agent_runtime: Some(sdk_rt),
+            metadata: Some(session_metadata(&created.agent, &created.row.id, &created.prompt)),
+            resources: None,
+        })
+        .await
+        .map_err(agent_sdk_error)?;
+
+    let provision = RuntimeProvision {
+        runtime_agent_id: provider_agent.id.clone(),
+        provider_session_id: Some(provider_session.id.clone()),
+        provider_run_id: cursor_run_id(&provider_agent.raw, sdk_rt),
+        provider_url: provider_url(&provider_agent.raw),
+        metadata: serde_json::json!({
+            "runtime": created.runtime,
+            "agent": provider_agent.raw,
+            "environment": provider_env.raw,
+            "session": provider_session.raw,
+        }),
+    };
+
     let runtime_ref = runtime_refs::repository::upsert(
         pool,
         &created.agent.id,
@@ -236,4 +301,144 @@ fn runtime_prompt(prompt: Option<String>, agent: &ManagedAgentRow) -> String {
         .or_else(|| agent.prompt.clone())
         .filter(|prompt| !prompt.trim().is_empty())
         .unwrap_or_else(|| format!("Start a session for {}.", agent.name))
+}
+
+fn build_lap_client(runtime: AgentRuntime, credential: &RuntimeCredential, state: &AppState) -> Lap {
+    let mut config = LapConfig::default();
+    match runtime {
+        AgentRuntime::ClaudeManagedAgents => {
+            config.anthropic_api_key = Some(credential.api_key.clone());
+            config.anthropic_base_url = credential.api_base.clone();
+        }
+        AgentRuntime::Cursor => {
+            config.cursor_api_key = Some(credential.api_key.clone());
+            config.cursor_base_url = credential.api_base.clone();
+        }
+    }
+    Lap::with_http_client(config, state.http.clone())
+}
+
+fn sdk_runtime(runtime: &str) -> Result<AgentRuntime, GatewayError> {
+    match runtime {
+        CLAUDE_AGENTS_RUNTIME => Ok(AgentRuntime::ClaudeManagedAgents),
+        CURSOR_RUNTIME => Ok(AgentRuntime::Cursor),
+        other => Err(GatewayError::InvalidConfig(format!(
+            "unsupported runtime: {other}"
+        ))),
+    }
+}
+
+fn agent_model(agent: &ManagedAgentRow, environment: &Value) -> String {
+    environment
+        .get("model")
+        .and_then(Value::as_str)
+        .or_else(|| agent.config.get("model").and_then(Value::as_str))
+        .unwrap_or(&agent.model)
+        .to_owned()
+}
+
+fn mcp_servers(agent: &ManagedAgentRow) -> Vec<Value> {
+    let Some(value) = agent
+        .config
+        .get("mcp_servers")
+        .or_else(|| agent.config.get("mcpServers"))
+    else {
+        return Vec::new();
+    };
+    if let Some(servers) = value.as_array() {
+        return servers.clone();
+    }
+    value
+        .as_object()
+        .map(|servers| {
+            servers
+                .iter()
+                .filter_map(|(name, server)| {
+                    let mut server = server.as_object()?.clone();
+                    server
+                        .entry("name".to_owned())
+                        .or_insert_with(|| Value::String(name.clone()));
+                    Some(Value::Object(server))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn workspace_from_env(environment: &Value) -> Result<Option<AgentWorkspace>, GatewayError> {
+    let repository = environment
+        .get("repository")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            environment
+                .get("source")
+                .and_then(|s| s.get("repository"))
+                .and_then(Value::as_str)
+        });
+    let Some(repository) = repository else {
+        return Ok(None);
+    };
+    if repository.trim().is_empty() {
+        return Err(GatewayError::InvalidJsonMessage(
+            "repository cannot be empty".to_owned(),
+        ));
+    }
+    let ref_name = environment
+        .get("ref")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let auto_create_pr = environment
+        .get("auto_create_pr")
+        .or_else(|| environment.get("autoCreatePr"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Ok(Some(AgentWorkspace {
+        repository: repository.to_owned(),
+        ref_name,
+        auto_create_pr,
+    }))
+}
+
+fn agent_metadata(agent: &ManagedAgentRow) -> std::collections::HashMap<String, String> {
+    std::collections::HashMap::from([
+        ("local_agent_id".to_owned(), agent.id.clone()),
+        ("source".to_owned(), "litellm-agent-platform".to_owned()),
+    ])
+}
+
+fn session_metadata(
+    agent: &ManagedAgentRow,
+    session_id: &str,
+    prompt: &str,
+) -> std::collections::HashMap<String, String> {
+    std::collections::HashMap::from([
+        ("local_agent_id".to_owned(), agent.id.clone()),
+        ("local_session_id".to_owned(), session_id.to_owned()),
+        ("initial_prompt".to_owned(), prompt.to_owned()),
+    ])
+}
+
+fn cursor_run_id(raw: &Value, runtime: AgentRuntime) -> Option<String> {
+    if runtime != AgentRuntime::Cursor {
+        return None;
+    }
+    raw.get("run")
+        .and_then(|v| v.get("id"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            raw.get("agent")
+                .and_then(|a| a.get("latestRunId"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| raw.get("latestRunId").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
+fn provider_url(raw: &Value) -> Option<String> {
+    raw.get("url")
+        .and_then(Value::as_str)
+        .or_else(|| raw.get("webUrl").and_then(Value::as_str))
+        .or_else(|| raw.get("agent").and_then(|a| a.get("url")).and_then(Value::as_str))
+        .or_else(|| raw.get("agent").and_then(|a| a.get("webUrl")).and_then(Value::as_str))
+        .map(str::to_owned)
 }

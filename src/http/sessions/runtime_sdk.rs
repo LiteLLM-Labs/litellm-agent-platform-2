@@ -7,10 +7,10 @@ use serde_json::{json, Value};
 use crate::{
     db::managed_agents::sessions::schema::SessionRow,
     errors::GatewayError,
-    managed_agents::providers::base::{CLAUDE_AGENTS_RUNTIME, CURSOR_RUNTIME},
+    http::agent_runtimes::{CLAUDE_AGENTS_RUNTIME, CURSOR_RUNTIME},
     proxy::state::AppState,
     sdk::agents::{
-        AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams,
+        AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams, CURSOR,
     },
 };
 
@@ -73,7 +73,7 @@ pub(super) fn provider_event_line<T: Serialize>(
 }
 
 pub(super) fn provider_run_id(runtime: &str, raw: &Value) -> Option<String> {
-    if runtime != CURSOR_RUNTIME {
+    if runtime != CURSOR {
         return None;
     }
     raw.get("run")

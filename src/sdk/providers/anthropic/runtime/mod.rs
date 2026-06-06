@@ -37,6 +37,17 @@ impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
             Ok(ManagedAgent {
                 id: id(&raw)?,
                 version: raw.get("version").and_then(Value::as_u64),
+                name: raw.get("name").and_then(Value::as_str).map(str::to_owned),
+                description: raw.get("description").and_then(Value::as_str).map(str::to_owned),
+                model: raw.get("model").and_then(|m| m.get("id")).and_then(Value::as_str)
+                    .or_else(|| raw.get("model").and_then(Value::as_str))
+                    .map(str::to_owned),
+                system: raw.get("system").and_then(Value::as_str).map(str::to_owned),
+                tools: raw.get("tools").and_then(Value::as_array).cloned().unwrap_or_default(),
+                mcp_servers: raw.get("mcp_servers").and_then(Value::as_array).cloned().unwrap_or_default(),
+                metadata: raw.get("metadata").cloned(),
+                created_at: raw.get("created_at").and_then(Value::as_i64),
+                updated_at: raw.get("updated_at").and_then(Value::as_i64),
                 raw,
             })
         })
@@ -68,7 +79,16 @@ impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
             let raw = client
                 .post(AgentRuntime::ClaudeManagedAgents, "/v1/sessions", &params)
                 .await?;
-            let session = Session { id: id(&raw)?, raw };
+            let session = Session {
+                id: id(&raw)?,
+                agent: raw.get("agent").and_then(Value::as_str).map(str::to_owned),
+                environment_id: raw.get("environment_id").and_then(Value::as_str).map(str::to_owned),
+                status: raw.get("status").and_then(Value::as_str).map(str::to_owned),
+                metadata: raw.get("metadata").cloned(),
+                created_at: raw.get("created_at").and_then(Value::as_i64),
+                updated_at: raw.get("updated_at").and_then(Value::as_i64),
+                raw,
+            };
             client.remember_session(&session.id, AgentRuntime::ClaudeManagedAgents)?;
             Ok(session)
         })
@@ -112,7 +132,13 @@ impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
 
 fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> {
     let options = params.lap_provider_options.clone();
+    let metadata = params.metadata.clone();
     let mut body = serde_json::to_value(params)?;
+    if let Some(metadata) = metadata {
+        if let Some(body) = body.as_object_mut() {
+            body.insert("metadata".to_owned(), serde_json::to_value(metadata)?);
+        }
+    }
     if let Some(Value::Object(options)) = options {
         let Some(body) = body.as_object_mut() else {
             return Ok(body);

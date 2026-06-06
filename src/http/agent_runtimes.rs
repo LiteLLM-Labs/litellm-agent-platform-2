@@ -11,12 +11,29 @@ use serde_json::json;
 use crate::{
     db::credentials,
     errors::GatewayError,
-    managed_agents::providers::base::{
-        default_api_base, validate_runtime, RuntimeCredential, CLAUDE_AGENTS_RUNTIME,
-        CURSOR_RUNTIME,
-    },
     proxy::{auth::master_key::require_master_key, credential_crypto, state::AppState},
 };
+
+pub(crate) const CURSOR_RUNTIME: &str = "cursor";
+pub(crate) const CLAUDE_AGENTS_RUNTIME: &str = "claude_agents";
+
+#[derive(Debug, Clone)]
+pub struct RuntimeCredential {
+    pub(crate) api_key: String,
+    pub(crate) api_base: String,
+}
+
+pub(crate) fn validate_runtime(runtime: &str) -> bool {
+    matches!(runtime, CURSOR_RUNTIME | CLAUDE_AGENTS_RUNTIME)
+}
+
+pub(crate) fn default_api_base(runtime: &str) -> Option<&'static str> {
+    match runtime {
+        CURSOR_RUNTIME => Some("https://api.cursor.com"),
+        CLAUDE_AGENTS_RUNTIME => Some("https://api.anthropic.com"),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct AgentRuntimesResponse {

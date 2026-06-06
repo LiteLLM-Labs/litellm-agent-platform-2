@@ -157,6 +157,9 @@ async fn create_cursor_agent(client: &Lap) -> ManagedAgent {
                 "type": "url",
                 "url": "https://mcp.linear.app/sse"
             })],
+            env_vars: None,
+            workspace: None,
+            metadata: None,
         })
         .await
         .unwrap()

@@ -57,6 +57,17 @@ impl RuntimeAdapter for CursorRuntime {
             Ok(ManagedAgent {
                 id: agent_id,
                 version: None,
+                name: raw.get("agent").and_then(|a| a.get("name")).and_then(Value::as_str)
+                    .or_else(|| raw.get("name").and_then(Value::as_str))
+                    .map(str::to_owned),
+                description: None,
+                model: None,
+                system: None,
+                tools: Vec::new(),
+                mcp_servers: Vec::new(),
+                metadata: None,
+                created_at: None,
+                updated_at: None,
                 raw,
             })
         })
@@ -85,7 +96,16 @@ impl RuntimeAdapter for CursorRuntime {
                 ));
             }
             let raw = json!({ "id": params.agent });
-            let session = Session { id: id(&raw)?, raw };
+            let session = Session {
+                id: id(&raw)?,
+                agent: None,
+                environment_id: None,
+                status: None,
+                metadata: None,
+                created_at: None,
+                updated_at: None,
+                raw,
+            };
             let run_id = client.cursor_run_for_agent(&session.id)?;
             client.remember_session_context(
                 &session.id,
@@ -160,10 +180,15 @@ fn create_agent_body(params: CreateAgentParams) -> Value {
     body.insert("prompt".to_owned(), json!({ "text": params.system }));
     body.insert("name".to_owned(), Value::String(params.name));
     body.insert("model".to_owned(), model(params.model));
-    if let Some(Value::Object(options)) = params.lap_provider_options {
-        for (key, value) in options {
-            body.insert(key, value);
+    if let Some(workspace) = params.workspace {
+        if !workspace.repository.is_empty() {
+            let ref_name = workspace.ref_name.as_deref().unwrap_or("main");
+            body.insert(
+                "repos".to_owned(),
+                json!([{ "url": workspace.repository, "startingRef": ref_name }]),
+            );
         }
+        body.insert("autoCreatePR".to_owned(), Value::Bool(workspace.auto_create_pr));
     }
     if !params.mcp_servers.is_empty() {
         body.insert(
