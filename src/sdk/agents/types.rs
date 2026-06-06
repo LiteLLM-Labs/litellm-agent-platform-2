@@ -88,9 +88,11 @@ pub struct CreateAgentParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<Value>,
+    pub tools: Vec<ManagedAgentTool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mcp_servers: Vec<Value>,
+    pub mcp_servers: Vec<ManagedAgentMcpServer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -120,33 +122,171 @@ pub struct AgentModelConfig {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum ManagedAgentTool {
+    #[serde(rename = "agent_toolset_20260401")]
+    AgentToolset20260401,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ManagedAgentMcpServer {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub server_type: ManagedAgentMcpServerType,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum ManagedAgentMcpServerType {
+    #[serde(rename = "url")]
+    Url,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CreateEnvironmentParams {
     #[serde(skip)]
     pub lap_agent_runtime: AgentRuntime,
     pub name: String,
-    pub config: Value,
+    pub config: EnvironmentConfig,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum EnvironmentConfig {
+    #[serde(rename = "cloud")]
+    Cloud { networking: EnvironmentNetworking },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum EnvironmentNetworking {
+    #[serde(rename = "unrestricted")]
+    Unrestricted,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateSessionParams {
-    pub agent: String,
+    pub agent: SessionAgentReference,
     pub environment_id: String,
     pub title: String,
     #[serde(skip)]
     pub lap_agent_runtime: Option<AgentRuntime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum SessionAgentReference {
+    Id(String),
+    Versioned(VersionedAgentReference),
+}
+
+impl SessionAgentReference {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Id(id) => id,
+            Self::Versioned(reference) => &reference.id,
+        }
+    }
+}
+
+impl From<&str> for SessionAgentReference {
+    fn from(value: &str) -> Self {
+        Self::Id(value.to_owned())
+    }
+}
+
+impl From<String> for SessionAgentReference {
+    fn from(value: String) -> Self {
+        Self::Id(value)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VersionedAgentReference {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub reference_type: AgentReferenceType,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resources: Option<Value>,
+    pub version: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub enum AgentReferenceType {
+    #[serde(rename = "agent")]
+    Agent,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SendEventsParams {
-    pub events: Vec<Value>,
+    pub events: Vec<UserEvent>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum UserEvent {
+    #[serde(rename = "user.message")]
+    Message { content: Vec<UserContentBlock> },
+    #[serde(rename = "user.interrupt")]
+    Interrupt,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum UserContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<ImageSource>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImageSource {
+    pub data: String,
+    pub mime_type: String,
+}
+
+impl UserEvent {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Message {
+            content: vec![UserContentBlock::Text { text: text.into() }],
+        }
+    }
+}
+
+impl UserContentBlock {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text { text: text.into() }
+    }
+
+    pub fn image_url(url: impl Into<String>) -> Self {
+        Self::Image {
+            url: Some(url.into()),
+            source: None,
+        }
+    }
+
+    pub fn image_base64(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
+        Self::Image {
+            url: None,
+            source: Some(ImageSource {
+                data: data.into(),
+                mime_type: mime_type.into(),
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

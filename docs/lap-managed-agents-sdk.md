@@ -10,9 +10,9 @@ idempotency, vaults, and remote-ID storage.
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
     AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
-    CreateSessionParams, Lap, LapConfig, SendEventsParams,
+    CreateSessionParams, EnvironmentConfig, EnvironmentNetworking, Lap, LapConfig,
+    ManagedAgentTool, SendEventsParams, UserEvent,
 };
-use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,8 +28,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             system: "You are a helpful coding assistant. Write clean, well-documented code."
                 .to_owned(),
             description: None,
-            tools: vec![json!({ "type": "agent_toolset_20260401" })],
+            tools: vec![ManagedAgentTool::AgentToolset20260401],
             mcp_servers: Vec::new(),
+            metadata: None,
         })
         .await?;
 
@@ -41,12 +42,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .create(CreateEnvironmentParams {
             lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
             name: "quickstart-env".to_owned(),
-            config: json!({
-                "type": "cloud",
-                "networking": { "type": "unrestricted" },
-            }),
+            config: EnvironmentConfig::Cloud {
+                networking: EnvironmentNetworking::Unrestricted,
+            },
             description: None,
             scope: None,
+            metadata: None,
         })
         .await?;
 
@@ -56,12 +57,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .beta()
         .sessions()
         .create(CreateSessionParams {
-            agent: agent.id,
+            agent: agent.id.into(),
             environment_id: environment.id,
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: None,
             metadata: None,
-            resources: None,
         })
         .await?;
 
@@ -81,13 +81,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .send(
             &session.id,
             SendEventsParams {
-                events: vec![json!({
-                    "type": "user.message",
-                    "content": [{
-                        "type": "text",
-                        "text": "Create a Python script that generates the first 20 Fibonacci numbers and saves them to fibonacci.txt"
-                    }]
-                })],
+                events: vec![UserEvent::text(
+                    "Create a Python script that generates the first 20 Fibonacci numbers and saves them to fibonacci.txt",
+                )],
             },
         )
         .await?;
@@ -128,9 +124,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `LapConfig::cursor(...)` configures the `cursor` runtime.
 - `lap_agent_runtime` is the only LAP-specific create parameter.
 - `agent.id`, `environment.id`, and `session.id` are provider/runtime IDs.
-- The SDK forwards Anthropic-shaped payloads to the runtime provider.
+- Request params are strict Rust structs based on the Anthropic Managed Agents
+  surface, not provider-specific JSON bags.
 - The SDK sets the Managed Agents beta header and parses SSE session events.
 - The SDK does not perform DB calls, idempotency checks, or vault operations.
+- The SDK does not accept Cursor `envVars`, `repos`, or session `resources`.
+  Those are not part of the strict Anthropic-shaped contract.
 
 ## Supported Surface
 
@@ -145,10 +144,42 @@ client.beta().sessions().events().stream(...)
 `claude_managed_agents` and `cursor` are implemented in this slice.
 `cursor` uses Cursor Cloud Agents API v1. Cursor does not have
 the same pre-created agent/environment/session split as Anthropic: creating a
-Cursor cloud agent enqueues a run. For Cursor sessions, pass the Cursor create
-body under `CreateSessionParams.resources`; the returned `session.id` is the
-Cursor durable agent ID, and the SDK remembers the latest run ID for streaming
-inside the current client instance.
+Cursor cloud agent enqueues a run. The SDK keeps the public contract strict:
+Cursor `sessions.create` requires a Cursor runtime agent ID returned by
+`agents.create`, records local routing context, and does not accept provider
+escape hatches.
+
+## Contract Inspection
+
+Providers expose explicit contract helpers:
+
+```rust
+client.supported_managed_agents_create_agent_params(AgentRuntime::Cursor)?;
+client.transform_managed_agents_create_agent_params(params)?;
+
+client.supported_managed_agents_create_environment_params(AgentRuntime::Cursor)?;
+client.transform_managed_agents_create_environment_params(params)?;
+
+client.supported_managed_agents_create_session_params(AgentRuntime::Cursor)?;
+client.transform_managed_agents_create_session_params(params)?;
+
+client.supported_managed_agents_send_events_params(AgentRuntime::Cursor)?;
+client.transform_managed_agents_send_events_params(AgentRuntime::Cursor, params)?;
+```
+
+Current supported param sets:
+
+```text
+Claude create agent:        name, model, system, description, tools, mcp_servers, metadata
+Claude create environment:  name, config, description, scope, metadata
+Claude create session:      agent, environment_id, title, metadata
+Claude send events:         events
+
+Cursor create agent:        name, model, system, mcp_servers
+Cursor create environment:  none
+Cursor create session:      agent
+Cursor send events:         events
+```
 
 ## Provider Layout
 
@@ -181,33 +212,38 @@ mapping and event normalization.
 ```rust
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
-    AgentRuntime, CreateSessionParams, Lap, LapConfig, SendEventsParams,
+    AgentModel, AgentRuntime, CreateAgentParams, CreateSessionParams, Lap, LapConfig,
+    SendEventsParams, UserEvent,
 };
-use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Lap::new(LapConfig::cursor("cursor-api-key"));
 
+    let agent = client
+        .beta()
+        .agents()
+        .create(CreateAgentParams {
+            lap_agent_runtime: AgentRuntime::Cursor,
+            name: "Coding Assistant".to_owned(),
+            model: AgentModel::from("composer-2"),
+            system: "You are a helpful coding assistant.".to_owned(),
+            description: None,
+            tools: Vec::new(),
+            mcp_servers: Vec::new(),
+            metadata: None,
+        })
+        .await?;
+
     let session = client
         .beta()
         .sessions()
         .create(CreateSessionParams {
-            agent: "lap-agent-definition-id".to_owned(),
+            agent: agent.id.into(),
             environment_id: "quickstart-env".to_owned(),
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: Some(AgentRuntime::Cursor),
             metadata: None,
-            resources: Some(json!({
-                "prompt": {
-                    "text": "Create a Python script that writes the first 20 Fibonacci numbers to fibonacci.txt"
-                },
-                "model": { "id": "composer-2" },
-                "repos": [{
-                    "url": "https://github.com/your-org/your-repo",
-                    "startingRef": "main"
-                }]
-            })),
         })
         .await?;
 
@@ -218,10 +254,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .send(
             &session.id,
             SendEventsParams {
-                events: vec![json!({
-                    "type": "user.message",
-                    "content": [{ "type": "text", "text": "Also add a troubleshooting note" }]
-                })],
+                events: vec![UserEvent::text("Also add a troubleshooting note")],
             },
         )
         .await?;

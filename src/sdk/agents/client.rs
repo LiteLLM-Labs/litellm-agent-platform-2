@@ -3,6 +3,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use serde_json::Value;
+
 use super::{
     events::AgentEventStream,
     providers::{
@@ -44,6 +46,84 @@ impl Lap {
 
     pub fn beta(&self) -> Beta<'_> {
         Beta { client: self }
+    }
+
+    pub fn supported_managed_agents_create_agent_params(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<&'static [&'static str], AgentSdkError> {
+        Ok(self
+            .provider(runtime)?
+            .handler
+            .supported_managed_agents_create_agent_params())
+    }
+
+    pub fn transform_managed_agents_create_agent_params(
+        &self,
+        params: CreateAgentParams,
+    ) -> Result<Value, AgentSdkError> {
+        self.provider(params.lap_agent_runtime)?
+            .handler
+            .transform_managed_agents_create_agent_params(params)
+    }
+
+    pub fn supported_managed_agents_create_environment_params(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<&'static [&'static str], AgentSdkError> {
+        Ok(self
+            .provider(runtime)?
+            .handler
+            .supported_managed_agents_create_environment_params())
+    }
+
+    pub fn transform_managed_agents_create_environment_params(
+        &self,
+        params: CreateEnvironmentParams,
+    ) -> Result<Value, AgentSdkError> {
+        self.provider(params.lap_agent_runtime)?
+            .handler
+            .transform_managed_agents_create_environment_params(params)
+    }
+
+    pub fn supported_managed_agents_create_session_params(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<&'static [&'static str], AgentSdkError> {
+        Ok(self
+            .provider(runtime)?
+            .handler
+            .supported_managed_agents_create_session_params())
+    }
+
+    pub fn transform_managed_agents_create_session_params(
+        &self,
+        params: CreateSessionParams,
+    ) -> Result<Value, AgentSdkError> {
+        let runtime = params.lap_agent_runtime.unwrap_or(self.default_runtime()?);
+        self.provider(runtime)?
+            .handler
+            .transform_managed_agents_create_session_params(params)
+    }
+
+    pub fn supported_managed_agents_send_events_params(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<&'static [&'static str], AgentSdkError> {
+        Ok(self
+            .provider(runtime)?
+            .handler
+            .supported_managed_agents_send_events_params())
+    }
+
+    pub fn transform_managed_agents_send_events_params(
+        &self,
+        runtime: AgentRuntime,
+        params: SendEventsParams,
+    ) -> Result<Value, AgentSdkError> {
+        self.provider(runtime)?
+            .handler
+            .transform_managed_agents_send_events_params(params)
     }
 
     fn default_runtime(&self) -> Result<AgentRuntime, AgentSdkError> {

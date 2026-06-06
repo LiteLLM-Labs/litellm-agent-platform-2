@@ -10,7 +10,8 @@ use crate::sdk::agents::{
     events::{stream_events, AgentEvent, AgentEventStream},
     types::{
         AgentModel, AgentSdkError, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
-        Environment, ManagedAgent, SendEventsParams, SendEventsResponse, Session,
+        Environment, ImageSource, ManagedAgent, ManagedAgentMcpServer, ManagedAgentMcpServerType,
+        SendEventsParams, SendEventsResponse, Session, UserContentBlock, UserEvent,
     },
 };
 
@@ -18,6 +19,11 @@ use crate::sdk::agents::{
 pub struct CursorProvider {
     config: ProviderConfig,
 }
+
+pub const CREATE_AGENT_PARAMS: &[&str] = &["name", "model", "system", "mcp_servers"];
+pub const CREATE_ENVIRONMENT_PARAMS: &[&str] = &[];
+pub const CREATE_SESSION_PARAMS: &[&str] = &["agent"];
+pub const SEND_EVENTS_PARAMS: &[&str] = &["events"];
 
 impl CursorProvider {
     pub fn new(config: ProviderConfig) -> Self {
@@ -60,13 +66,27 @@ impl CursorProvider {
 }
 
 impl AgentRuntimeProvider for CursorProvider {
+    fn supported_managed_agents_create_agent_params(&self) -> &'static [&'static str] {
+        CREATE_AGENT_PARAMS
+    }
+
+    fn transform_managed_agents_create_agent_params(
+        &self,
+        params: CreateAgentParams,
+    ) -> Result<Value, AgentSdkError> {
+        cursor_create_agent_body(params)
+    }
+
     fn create_agent<'a>(
         &'a self,
         params: CreateAgentParams,
     ) -> BoxFuture<'a, Result<ManagedAgent, AgentSdkError>> {
         Box::pin(async move {
             let raw = self
-                .post("/v1/agents", &cursor_create_agent_body(params)?)
+                .post(
+                    "/v1/agents",
+                    &self.transform_managed_agents_create_agent_params(params)?,
+                )
                 .await?;
             Ok(ManagedAgent {
                 id: nested_string_field(&raw, "agent", "id")?,
@@ -76,21 +96,44 @@ impl AgentRuntimeProvider for CursorProvider {
         })
     }
 
+    fn supported_managed_agents_create_environment_params(&self) -> &'static [&'static str] {
+        CREATE_ENVIRONMENT_PARAMS
+    }
+
+    fn transform_managed_agents_create_environment_params(
+        &self,
+        params: CreateEnvironmentParams,
+    ) -> Result<Value, AgentSdkError> {
+        Ok(json!({ "id": params.name }))
+    }
+
     fn create_environment<'a>(
         &'a self,
         params: CreateEnvironmentParams,
     ) -> BoxFuture<'a, Result<Environment, AgentSdkError>> {
         Box::pin(async move {
-            let id = cursor_environment_id(&params);
-            Ok(Environment {
-                id: id.clone(),
-                raw: json!({
-                    "id": id,
-                    "name": params.name,
-                    "config": params.config,
-                }),
-            })
+            let raw = self.transform_managed_agents_create_environment_params(params)?;
+            let id = string_field(&raw, "id")?;
+            Ok(Environment { id, raw })
         })
+    }
+
+    fn supported_managed_agents_create_session_params(&self) -> &'static [&'static str] {
+        CREATE_SESSION_PARAMS
+    }
+
+    fn transform_managed_agents_create_session_params(
+        &self,
+        params: CreateSessionParams,
+    ) -> Result<Value, AgentSdkError> {
+        let agent_id = params.agent.id().to_owned();
+        if !is_cursor_agent_id(&agent_id) {
+            return Err(AgentSdkError::InvalidRequest(
+                "cursor sessions.create requires a Cursor runtime agent id returned by agents.create"
+                    .to_owned(),
+            ));
+        }
+        Ok(json!({ "id": agent_id }))
     }
 
     fn create_session<'a>(
@@ -98,29 +141,8 @@ impl AgentRuntimeProvider for CursorProvider {
         params: CreateSessionParams,
     ) -> BoxFuture<'a, Result<ProviderSession, AgentSdkError>> {
         Box::pin(async move {
-            if is_cursor_agent_id(&params.agent) {
-                let body = cursor_followup_body(params.resources)?;
-                let raw = self
-                    .post(&format!("/v1/agents/{}/runs", params.agent), &body)
-                    .await?;
-                let run_id = nested_string_field(&raw, "run", "id")?;
-                return Ok(ProviderSession {
-                    session: Session {
-                        id: params.agent.clone(),
-                        raw,
-                    },
-                    context: ProviderSessionContext {
-                        runtime: self.config.runtime,
-                        agent_id: Some(params.agent),
-                        run_id: Some(run_id),
-                    },
-                });
-            }
-
-            let body = cursor_create_session_body(params)?;
-            let raw = self.post("/v1/agents", &body).await?;
-            let agent_id = nested_string_field(&raw, "agent", "id")?;
-            let run_id = nested_string_field(&raw, "run", "id")?;
+            let raw = self.transform_managed_agents_create_session_params(params)?;
+            let agent_id = string_field(&raw, "id")?;
             Ok(ProviderSession {
                 session: Session {
                     id: agent_id.clone(),
@@ -129,10 +151,21 @@ impl AgentRuntimeProvider for CursorProvider {
                 context: ProviderSessionContext {
                     runtime: self.config.runtime,
                     agent_id: Some(agent_id),
-                    run_id: Some(run_id),
+                    run_id: None,
                 },
             })
         })
+    }
+
+    fn supported_managed_agents_send_events_params(&self) -> &'static [&'static str] {
+        SEND_EVENTS_PARAMS
+    }
+
+    fn transform_managed_agents_send_events_params(
+        &self,
+        params: SendEventsParams,
+    ) -> Result<Value, AgentSdkError> {
+        Ok(json!({ "prompt": prompt_from_events(&params.events)? }))
     }
 
     fn send_events<'a>(
@@ -146,7 +179,7 @@ impl AgentRuntimeProvider for CursorProvider {
                 .as_ref()
                 .and_then(|context| context.agent_id.as_deref())
                 .unwrap_or(session_id);
-            let body = json!({ "prompt": prompt_from_events(&params.events)? });
+            let body = self.transform_managed_agents_send_events_params(params)?;
             let raw = self
                 .post(&format!("/v1/agents/{agent_id}/runs"), &body)
                 .await?;
@@ -189,75 +222,12 @@ fn cursor_create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdk
     body.insert("name".to_owned(), Value::String(params.name));
     body.insert("model".to_owned(), cursor_model(params.model));
     if !params.mcp_servers.is_empty() {
-        body.insert("mcpServers".to_owned(), Value::Array(params.mcp_servers));
-    }
-    Ok(Value::Object(body))
-}
-
-fn cursor_create_session_body(params: CreateSessionParams) -> Result<Value, AgentSdkError> {
-    let mut body = object_from_resources(params.resources)?;
-    require_prompt(&body)?;
-    body.entry("name".to_owned())
-        .or_insert_with(|| Value::String(params.title));
-    if !params.environment_id.trim().is_empty() && !body.contains_key("env") {
         body.insert(
-            "env".to_owned(),
-            json!({
-                "type": "cloud",
-                "name": params.environment_id,
-            }),
+            "mcpServers".to_owned(),
+            Value::Array(cursor_mcp_servers(params.mcp_servers)),
         );
     }
     Ok(Value::Object(body))
-}
-
-fn cursor_followup_body(resources: Option<Value>) -> Result<Value, AgentSdkError> {
-    let body = object_from_resources(resources)?;
-    require_prompt(&body)?;
-    let mut followup = Map::new();
-    if let Some(prompt) = body.get("prompt") {
-        followup.insert("prompt".to_owned(), prompt.clone());
-    }
-    if let Some(mcp_servers) = body.get("mcpServers") {
-        followup.insert("mcpServers".to_owned(), mcp_servers.clone());
-    }
-    if let Some(mode) = body.get("mode") {
-        followup.insert("mode".to_owned(), mode.clone());
-    }
-    Ok(Value::Object(followup))
-}
-
-fn object_from_resources(resources: Option<Value>) -> Result<Map<String, Value>, AgentSdkError> {
-    match resources {
-        Some(Value::Object(object)) => Ok(object),
-        Some(_) => Err(AgentSdkError::InvalidRequest(
-            "resources must be a JSON object for cursor runtime".to_owned(),
-        )),
-        None => Ok(Map::new()),
-    }
-}
-
-fn require_prompt(body: &Map<String, Value>) -> Result<(), AgentSdkError> {
-    if body
-        .get("prompt")
-        .and_then(|prompt| prompt.get("text"))
-        .and_then(Value::as_str)
-        .is_some_and(|text| !text.trim().is_empty())
-    {
-        return Ok(());
-    }
-    Err(AgentSdkError::InvalidRequest(
-        "cursor runtime requires resources.prompt.text".to_owned(),
-    ))
-}
-
-fn cursor_environment_id(params: &CreateEnvironmentParams) -> String {
-    params
-        .config
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or(&params.name)
-        .to_owned()
 }
 
 fn cursor_model(model: AgentModel) -> Value {
@@ -281,25 +251,38 @@ fn is_cursor_agent_id(value: &str) -> bool {
     value.starts_with("bc-")
 }
 
-fn prompt_from_events(events: &[Value]) -> Result<Value, AgentSdkError> {
+fn cursor_mcp_servers(servers: Vec<ManagedAgentMcpServer>) -> Vec<Value> {
+    servers
+        .into_iter()
+        .map(|server| {
+            json!({
+                "name": server.name,
+                "type": cursor_mcp_server_type(server.server_type),
+                "url": server.url,
+            })
+        })
+        .collect()
+}
+
+fn cursor_mcp_server_type(server_type: ManagedAgentMcpServerType) -> &'static str {
+    match server_type {
+        ManagedAgentMcpServerType::Url => "http",
+    }
+}
+
+fn prompt_from_events(events: &[UserEvent]) -> Result<Value, AgentSdkError> {
     let mut text = Vec::new();
     let mut images = Vec::new();
     for event in events {
-        if event.get("type").and_then(Value::as_str) != Some("user.message") {
-            continue;
-        }
-        let Some(content) = event.get("content").and_then(Value::as_array) else {
+        let UserEvent::Message { content } = event else {
             continue;
         };
         for block in content {
-            match block.get("type").and_then(Value::as_str) {
-                Some("text") => {
-                    if let Some(value) = block.get("text").and_then(Value::as_str) {
-                        text.push(value.to_owned());
-                    }
+            match block {
+                UserContentBlock::Text { text: value } => text.push(value.to_owned()),
+                UserContentBlock::Image { url, source } => {
+                    images.push(cursor_image_block(url.as_deref(), source.as_ref())?)
                 }
-                Some("image") => images.push(cursor_image_block(block)?),
-                _ => {}
             }
         }
     }
@@ -316,17 +299,18 @@ fn prompt_from_events(events: &[Value]) -> Result<Value, AgentSdkError> {
     Ok(Value::Object(prompt))
 }
 
-fn cursor_image_block(block: &Value) -> Result<Value, AgentSdkError> {
-    if let Some(url) = block.get("url").and_then(Value::as_str) {
+fn cursor_image_block(
+    url: Option<&str>,
+    source: Option<&ImageSource>,
+) -> Result<Value, AgentSdkError> {
+    if let Some(url) = url {
         return Ok(json!({ "url": url }));
     }
-    if let Some(source) = block.get("source").and_then(Value::as_object) {
-        if let (Some(data), Some(mime_type)) = (
-            source.get("data").and_then(Value::as_str),
-            source.get("mime_type").and_then(Value::as_str),
-        ) {
-            return Ok(json!({ "data": data, "mimeType": mime_type }));
-        }
+    if let Some(source) = source {
+        return Ok(json!({
+            "data": source.data,
+            "mimeType": source.mime_type,
+        }));
     }
     Err(AgentSdkError::InvalidRequest(
         "cursor image blocks require url or source.data/source.mime_type".to_owned(),
@@ -388,5 +372,174 @@ fn simple_event(event_type: &str, data: Map<String, Value>) -> AgentEvent {
     AgentEvent {
         event_type: event_type.to_owned(),
         data,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::sdk::agents::{
+        types::{
+            AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
+            CreateSessionParams, EnvironmentConfig, EnvironmentNetworking, ManagedAgentMcpServer,
+            ManagedAgentMcpServerType, ManagedAgentTool, SendEventsParams, UserContentBlock,
+            UserEvent,
+        },
+        DEFAULT_CURSOR_BASE_URL,
+    };
+
+    fn provider() -> CursorProvider {
+        CursorProvider::new(ProviderConfig::new(
+            AgentRuntime::Cursor,
+            reqwest::Client::new(),
+            "cursor-test".to_owned(),
+            DEFAULT_CURSOR_BASE_URL.to_owned(),
+        ))
+    }
+
+    #[test]
+    fn exposes_supported_cursor_params() {
+        let provider = provider();
+
+        assert_eq!(
+            provider.supported_managed_agents_create_agent_params(),
+            CREATE_AGENT_PARAMS
+        );
+        assert_eq!(
+            provider.supported_managed_agents_create_environment_params(),
+            CREATE_ENVIRONMENT_PARAMS
+        );
+        assert_eq!(
+            provider.supported_managed_agents_create_session_params(),
+            CREATE_SESSION_PARAMS
+        );
+        assert_eq!(
+            provider.supported_managed_agents_send_events_params(),
+            SEND_EVENTS_PARAMS
+        );
+    }
+
+    #[test]
+    fn transforms_agent_params_to_cursor_shape_only_for_supported_fields() {
+        let mut metadata = HashMap::new();
+        metadata.insert("ignored".to_owned(), "true".to_owned());
+
+        let body = provider()
+            .transform_managed_agents_create_agent_params(CreateAgentParams {
+                lap_agent_runtime: AgentRuntime::Cursor,
+                name: "Coding Assistant".to_owned(),
+                model: AgentModel::from("composer-2"),
+                system: "You are a coding assistant.".to_owned(),
+                description: Some("Ignored by Cursor".to_owned()),
+                tools: vec![ManagedAgentTool::AgentToolset20260401],
+                mcp_servers: vec![ManagedAgentMcpServer {
+                    name: "linear".to_owned(),
+                    server_type: ManagedAgentMcpServerType::Url,
+                    url: "https://mcp.linear.app/sse".to_owned(),
+                }],
+                metadata: Some(metadata),
+            })
+            .unwrap();
+
+        assert_eq!(
+            body,
+            json!({
+                "prompt": { "text": "You are a coding assistant." },
+                "name": "Coding Assistant",
+                "model": { "id": "composer-2" },
+                "mcpServers": [{
+                    "name": "linear",
+                    "type": "http",
+                    "url": "https://mcp.linear.app/sse"
+                }]
+            })
+        );
+        assert!(body.get("description").is_none());
+        assert!(body.get("tools").is_none());
+        assert!(body.get("metadata").is_none());
+        assert!(body.get("envVars").is_none());
+        assert!(body.get("resources").is_none());
+    }
+
+    #[test]
+    fn transforms_cursor_environment_and_session_params_without_provider_escape_hatches() {
+        let provider = provider();
+
+        let environment = provider
+            .transform_managed_agents_create_environment_params(CreateEnvironmentParams {
+                lap_agent_runtime: AgentRuntime::Cursor,
+                name: "quickstart-env".to_owned(),
+                config: EnvironmentConfig::Cloud {
+                    networking: EnvironmentNetworking::Unrestricted,
+                },
+                description: Some("Ignored by Cursor".to_owned()),
+                scope: Some("workspace".to_owned()),
+                metadata: None,
+            })
+            .unwrap();
+        let session = provider
+            .transform_managed_agents_create_session_params(CreateSessionParams {
+                agent: "bc-00000000-0000-0000-0000-000000000001".into(),
+                environment_id: "env_ignored".to_owned(),
+                title: "Ignored by Cursor".to_owned(),
+                lap_agent_runtime: Some(AgentRuntime::Cursor),
+                metadata: None,
+            })
+            .unwrap();
+
+        assert_eq!(environment, json!({ "id": "quickstart-env" }));
+        assert_eq!(
+            session,
+            json!({ "id": "bc-00000000-0000-0000-0000-000000000001" })
+        );
+        assert!(session.get("environment_id").is_none());
+        assert!(session.get("title").is_none());
+        assert!(session.get("resources").is_none());
+    }
+
+    #[test]
+    fn cursor_session_requires_runtime_agent_id() {
+        let err = provider()
+            .transform_managed_agents_create_session_params(CreateSessionParams {
+                agent: "lap-agent-definition".into(),
+                environment_id: "env_123".to_owned(),
+                title: "Quickstart session".to_owned(),
+                lap_agent_runtime: Some(AgentRuntime::Cursor),
+                metadata: None,
+            })
+            .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("requires a Cursor runtime agent id"));
+    }
+
+    #[test]
+    fn transforms_user_message_events_to_cursor_prompt() {
+        let body = provider()
+            .transform_managed_agents_send_events_params(SendEventsParams {
+                events: vec![UserEvent::Message {
+                    content: vec![
+                        UserContentBlock::text("First"),
+                        UserContentBlock::text("Second"),
+                        UserContentBlock::image_url("https://example.com/screenshot.png"),
+                    ],
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(
+            body,
+            json!({
+                "prompt": {
+                    "text": "First\n\nSecond",
+                    "images": [{ "url": "https://example.com/screenshot.png" }]
+                }
+            })
+        );
     }
 }

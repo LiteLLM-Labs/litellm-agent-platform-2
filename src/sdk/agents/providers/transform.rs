@@ -60,20 +60,48 @@ pub(crate) struct ProviderSendEventsResponse {
 }
 
 pub(crate) trait AgentRuntimeProvider: Send + Sync + 'static {
+    fn supported_managed_agents_create_agent_params(&self) -> &'static [&'static str];
+
+    fn transform_managed_agents_create_agent_params(
+        &self,
+        params: CreateAgentParams,
+    ) -> Result<Value, AgentSdkError>;
+
     fn create_agent<'a>(
         &'a self,
         params: CreateAgentParams,
     ) -> BoxFuture<'a, Result<ManagedAgent, AgentSdkError>>;
+
+    fn supported_managed_agents_create_environment_params(&self) -> &'static [&'static str];
+
+    fn transform_managed_agents_create_environment_params(
+        &self,
+        params: CreateEnvironmentParams,
+    ) -> Result<Value, AgentSdkError>;
 
     fn create_environment<'a>(
         &'a self,
         params: CreateEnvironmentParams,
     ) -> BoxFuture<'a, Result<Environment, AgentSdkError>>;
 
+    fn supported_managed_agents_create_session_params(&self) -> &'static [&'static str];
+
+    fn transform_managed_agents_create_session_params(
+        &self,
+        params: CreateSessionParams,
+    ) -> Result<Value, AgentSdkError>;
+
     fn create_session<'a>(
         &'a self,
         params: CreateSessionParams,
     ) -> BoxFuture<'a, Result<ProviderSession, AgentSdkError>>;
+
+    fn supported_managed_agents_send_events_params(&self) -> &'static [&'static str];
+
+    fn transform_managed_agents_send_events_params(
+        &self,
+        params: SendEventsParams,
+    ) -> Result<Value, AgentSdkError>;
 
     fn send_events<'a>(
         &'a self,

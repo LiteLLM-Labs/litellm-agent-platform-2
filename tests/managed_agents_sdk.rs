@@ -1,7 +1,9 @@
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
     parse_sse, AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
-    CreateSessionParams, Lap, LapConfig, SendEventsParams, MANAGED_AGENTS_BETA,
+    CreateSessionParams, EnvironmentConfig, EnvironmentNetworking, Lap, LapConfig,
+    ManagedAgentMcpServer, ManagedAgentMcpServerType, ManagedAgentTool, SendEventsParams,
+    UserEvent, MANAGED_AGENTS_BETA,
 };
 use serde_json::json;
 use wiremock::{
@@ -56,8 +58,9 @@ async fn creates_claude_managed_agent_with_anthropic_shape() {
             model: AgentModel::from("claude-opus-4-8"),
             system: "Write clean code.".to_owned(),
             description: None,
-            tools: vec![json!({ "type": "agent_toolset_20260401" })],
+            tools: vec![ManagedAgentTool::AgentToolset20260401],
             mcp_servers: Vec::new(),
+            metadata: None,
         })
         .await
         .unwrap();
@@ -110,9 +113,12 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
         .create(CreateEnvironmentParams {
             lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
             name: "quickstart-env".to_owned(),
-            config: json!({ "type": "cloud", "networking": { "type": "unrestricted" } }),
+            config: EnvironmentConfig::Cloud {
+                networking: EnvironmentNetworking::Unrestricted,
+            },
             description: None,
             scope: None,
+            metadata: None,
         })
         .await
         .unwrap();
@@ -120,12 +126,11 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
         .beta()
         .sessions()
         .create(CreateSessionParams {
-            agent: "agent_123".to_owned(),
+            agent: "agent_123".into(),
             environment_id: environment.id,
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: None,
             metadata: None,
-            resources: None,
         })
         .await
         .unwrap();
@@ -136,10 +141,7 @@ async fn creates_session_and_sends_events_with_runtime_ids() {
         .send(
             &session.id,
             SendEventsParams {
-                events: vec![json!({
-                    "type": "user.message",
-                    "content": [{ "type": "text", "text": "Create fibonacci.txt" }]
-                })],
+                events: vec![UserEvent::text("Create fibonacci.txt")],
             },
         )
         .await
@@ -195,23 +197,47 @@ fn parses_sse_and_resolves_supported_runtimes() {
 }
 
 #[tokio::test]
+async fn exposes_provider_supported_params_and_transforms() {
+    let server = MockServer::start().await;
+    let client = cursor_client(&server);
+
+    assert_eq!(
+        client
+            .supported_managed_agents_create_agent_params(AgentRuntime::Cursor)
+            .unwrap(),
+        &["name", "model", "system", "mcp_servers"]
+    );
+
+    let body = client
+        .transform_managed_agents_send_events_params(
+            AgentRuntime::Cursor,
+            SendEventsParams {
+                events: vec![UserEvent::text("Create fibonacci.txt")],
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        body,
+        json!({ "prompt": { "text": "Create fibonacci.txt" } })
+    );
+}
+
+#[tokio::test]
 async fn cursor_provider_creates_runs_and_normalizes_stream_events() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/agents"))
         .and(header("authorization", "Bearer cursor-test"))
         .and(body_json(json!({
-            "prompt": { "text": "Create fibonacci.txt" },
+            "prompt": { "text": "You are a coding assistant." },
             "model": { "id": "composer-2" },
-            "repos": [{
-                "url": "https://github.com/acme/app",
-                "startingRef": "main"
-            }],
-            "name": "Quickstart session",
-            "env": {
-                "type": "cloud",
-                "name": "quickstart-env"
-            }
+            "name": "Coding Assistant",
+            "mcpServers": [{
+                "name": "linear",
+                "type": "http",
+                "url": "https://mcp.linear.app/sse"
+            }]
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "agent": {
@@ -262,23 +288,34 @@ async fn cursor_provider_creates_runs_and_normalizes_stream_events() {
         .await;
 
     let client = cursor_client(&server);
+    let agent = client
+        .beta()
+        .agents()
+        .create(CreateAgentParams {
+            lap_agent_runtime: AgentRuntime::Cursor,
+            name: "Coding Assistant".to_owned(),
+            model: AgentModel::from("composer-2"),
+            system: "You are a coding assistant.".to_owned(),
+            description: None,
+            tools: Vec::new(),
+            mcp_servers: vec![ManagedAgentMcpServer {
+                name: "linear".to_owned(),
+                server_type: ManagedAgentMcpServerType::Url,
+                url: "https://mcp.linear.app/sse".to_owned(),
+            }],
+            metadata: None,
+        })
+        .await
+        .unwrap();
     let session = client
         .beta()
         .sessions()
         .create(CreateSessionParams {
-            agent: "lap-agent-definition".to_owned(),
+            agent: agent.id.into(),
             environment_id: "quickstart-env".to_owned(),
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: Some(AgentRuntime::Cursor),
             metadata: None,
-            resources: Some(json!({
-                "prompt": { "text": "Create fibonacci.txt" },
-                "model": { "id": "composer-2" },
-                "repos": [{
-                    "url": "https://github.com/acme/app",
-                    "startingRef": "main"
-                }]
-            })),
         })
         .await
         .unwrap();
@@ -292,10 +329,7 @@ async fn cursor_provider_creates_runs_and_normalizes_stream_events() {
         .send(
             &session.id,
             SendEventsParams {
-                events: vec![json!({
-                    "type": "user.message",
-                    "content": [{ "type": "text", "text": "Add a troubleshooting note" }]
-                })],
+                events: vec![UserEvent::text("Add a troubleshooting note")],
             },
         )
         .await

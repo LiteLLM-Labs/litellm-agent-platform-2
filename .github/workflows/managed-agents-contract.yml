@@ -1,0 +1,27 @@
+name: Managed agents SDK contract
+
+on:
+  pull_request:
+
+jobs:
+  managed-agents-contract:
+    name: Managed agents contract tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run managed agents contract tests
+        run: cargo test --test managed_agents_sdk --locked
+
+      - name: Run provider transformation unit tests
+        run: cargo test sdk::agents::providers --locked
