@@ -50,7 +50,7 @@ impl RuntimeAdapter for CursorRuntime {
                     &create_agent_body(params),
                 )
                 .await?;
-            let agent_id = nested_id(&raw, "agent")?;
+            let agent_id = nested_id(&raw, "agent").or_else(|_| id(&raw))?;
             if let Some(run_id) = run_id(&raw) {
                 client.remember_cursor_run(&agent_id, &run_id)?;
             }

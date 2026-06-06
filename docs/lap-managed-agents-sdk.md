@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   remains `claude_managed_agents`.
 - `lap_agent_runtime` selects the runtime.
 - `lap_provider_options` is reserved for LAP gateway adapters that must carry
-  provider-specific fields such as Cursor `source` and `target`.
+  provider-specific fields such as Cursor `repos` and `autoCreatePR`.
 - `agent.id`, `environment.id`, and `session.id` are provider/runtime IDs.
 - The SDK forwards Anthropic-shaped payloads to the runtime provider.
 - Cursor requests are translated to Cursor's v1 Cloud Agent APIs.

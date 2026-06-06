@@ -30,7 +30,7 @@ pub async fn provision(
         .agents()
         .create(CreateAgentParams {
             lap_agent_runtime: AgentRuntime::Cursor,
-            lap_provider_options: Some(cursor_provider_options(agent, &input)?),
+            lap_provider_options: Some(cursor_provider_options(&input)?),
             name: agent.name.clone(),
             model: AgentModel::from(cursor_model(agent, &input.environment)),
             system: cursor_prompt(agent, &input.prompt),
@@ -112,19 +112,19 @@ fn mcp_servers(agent: &ManagedAgentRow) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn cursor_provider_options(
-    agent: &ManagedAgentRow,
-    input: &RuntimeSessionInput,
-) -> Result<Value, GatewayError> {
+fn cursor_provider_options(input: &RuntimeSessionInput) -> Result<Value, GatewayError> {
     let mut options = Map::new();
-    if let Some(source) = source(&input.environment)? {
-        options.insert("source".to_owned(), source);
+    if let Some(repo) = repo(&input.environment)? {
+        options.insert("repos".to_owned(), Value::Array(vec![repo]));
     }
-    options.insert("target".to_owned(), target(agent, input)?);
+    options.insert(
+        "autoCreatePR".to_owned(),
+        Value::Bool(auto_create_pr(&input.environment)),
+    );
     Ok(Value::Object(options))
 }
 
-fn source(environment: &Value) -> Result<Option<Value>, GatewayError> {
+fn repo(environment: &Value) -> Result<Option<Value>, GatewayError> {
     let repository = environment
         .get("repository")
         .and_then(Value::as_str)
@@ -152,33 +152,15 @@ fn source(environment: &Value) -> Result<Option<Value>, GatewayError> {
                 .and_then(Value::as_str)
         })
         .unwrap_or("main");
-    Ok(Some(json!({ "repository": repository, "ref": ref_name })))
+    Ok(Some(json!({ "url": repository, "startingRef": ref_name })))
 }
 
-fn target(agent: &ManagedAgentRow, input: &RuntimeSessionInput) -> Result<Value, GatewayError> {
-    let auto_create_pr = input
-        .environment
+fn auto_create_pr(environment: &Value) -> bool {
+    environment
         .get("auto_create_pr")
-        .or_else(|| input.environment.get("autoCreatePr"))
+        .or_else(|| environment.get("autoCreatePr"))
         .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let branch = input
-        .environment
-        .get("target_branch")
-        .or_else(|| input.environment.get("branchName"))
-        .and_then(Value::as_str)
-        .unwrap_or("agent/{agent_id}/{session_id}")
-        .replace("{agent_id}", &agent.id)
-        .replace("{session_id}", &input.session_id);
-    if branch.trim().is_empty() {
-        return Err(GatewayError::InvalidJsonMessage(
-            "target branch cannot be empty".to_owned(),
-        ));
-    }
-    Ok(json!({
-        "autoCreatePr": auto_create_pr,
-        "branchName": branch,
-    }))
+        .unwrap_or(false)
 }
 
 fn provider_url(raw: &Value) -> Option<String> {
