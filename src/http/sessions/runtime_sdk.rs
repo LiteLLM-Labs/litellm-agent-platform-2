@@ -31,7 +31,8 @@ pub(super) async fn runtime_sdk_client(
         }
         AgentRuntime::OpenCode => {
             config.opencode_base_url = Some(credential.api_base);
-            config.opencode_api_key = Some(credential.api_key);
+            config.opencode_api_key = Some(credential.api_key.clone());
+            config.opencode_password = Some(credential.api_key);
         }
     }
     Ok(Lap::with_http_client(config, state.http.clone()))

@@ -16,8 +16,9 @@ pub async fn provision(
 ) -> Result<RuntimeProvision, GatewayError> {
     let client = Lap::with_http_client(
         LapConfig {
-            opencode_api_key: Some(credential.api_key),
+            opencode_api_key: Some(credential.api_key.clone()),
             opencode_base_url: Some(credential.api_base),
+            opencode_password: Some(credential.api_key),
             ..LapConfig::default()
         },
         http.clone(),

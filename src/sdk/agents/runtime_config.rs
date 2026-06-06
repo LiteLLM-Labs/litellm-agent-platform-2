@@ -15,9 +15,10 @@ pub(super) struct RuntimeConfig {
 enum RuntimeAuth {
     AnthropicApiKey(String),
     Bearer(String),
-    OpenCodeBasic {
+    OpenCode {
         username: String,
         password: Option<String>,
+        bearer_token: Option<String>,
     },
 }
 
@@ -29,14 +30,34 @@ impl RuntimeConfig {
                 .header("anthropic-version", ANTHROPIC_VERSION)
                 .header("anthropic-beta", MANAGED_AGENTS_BETA),
             RuntimeAuth::Bearer(api_key) => request.bearer_auth(api_key),
-            RuntimeAuth::OpenCodeBasic { username, password } => match password {
+            RuntimeAuth::OpenCode {
+                username,
+                password,
+                bearer_token,
+            } => match password {
                 Some(password) => {
                     let encoded =
                         general_purpose::STANDARD.encode(format!("{username}:{password}"));
                     request.header(header::AUTHORIZATION, format!("Basic {encoded}"))
                 }
-                None => request,
+                None => match bearer_token {
+                    Some(api_key) => request.bearer_auth(api_key),
+                    None => request,
+                },
             },
+        }
+    }
+
+    pub(super) fn authorize_opencode_bearer(
+        &self,
+        request: RequestBuilder,
+    ) -> Option<RequestBuilder> {
+        match &self.auth {
+            RuntimeAuth::OpenCode {
+                bearer_token: Some(api_key),
+                ..
+            } => Some(request.bearer_auth(api_key)),
+            _ => None,
         }
     }
 }
@@ -62,18 +83,15 @@ pub(super) fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, Runtim
         );
     }
     if let Some(base_url) = config.opencode_base_url {
-        let auth = match config.opencode_api_key {
-            Some(api_key) => RuntimeAuth::Bearer(api_key),
-            None => RuntimeAuth::OpenCodeBasic {
-                username: config.opencode_username,
-                password: config.opencode_password,
-            },
-        };
         runtimes.insert(
             AgentRuntime::OpenCode,
             RuntimeConfig {
                 base_url: base_url.trim_end_matches('/').to_owned(),
-                auth,
+                auth: RuntimeAuth::OpenCode {
+                    username: config.opencode_username,
+                    password: config.opencode_password,
+                    bearer_token: config.opencode_api_key,
+                },
             },
         );
     }

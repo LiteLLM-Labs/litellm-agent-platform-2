@@ -3,6 +3,7 @@ mod cursor;
 mod cursor_stream;
 mod events;
 mod opencode;
+mod opencode_stream;
 mod resources;
 mod response_fields;
 mod responses;

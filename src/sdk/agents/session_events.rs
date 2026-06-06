@@ -6,6 +6,7 @@ use super::{
     cursor,
     events::AgentEventStream,
     opencode,
+    opencode_stream::normalize_opencode_stream,
     response_fields::nested_string_field,
     responses::response_json,
     types::{AgentRuntime, AgentSdkError, SendEventsParams, SendEventsResponse},
@@ -34,7 +35,7 @@ impl SessionEvents<'_> {
         match runtime {
             AgentRuntime::ClaudeManagedAgents => self.stream_claude_events(session_id).await,
             AgentRuntime::Cursor => self.stream_cursor_events(session_id).await,
-            AgentRuntime::OpenCode => self.client.stream(AgentRuntime::OpenCode, "/event").await,
+            AgentRuntime::OpenCode => self.stream_opencode_events(session_id).await,
         }
     }
 
@@ -122,6 +123,15 @@ impl SessionEvents<'_> {
                 &format!("/v1/agents/{agent_id}/runs/{run_id}/stream"),
             )
             .await
+    }
+
+    async fn stream_opencode_events(
+        &self,
+        session_id: &str,
+    ) -> Result<AgentEventStream, AgentSdkError> {
+        let provider_session_id = self.provider_session_id(session_id)?;
+        let stream = self.client.stream(AgentRuntime::OpenCode, "/event").await?;
+        Ok(normalize_opencode_stream(provider_session_id, stream))
     }
 
     fn provider_session_id(&self, session_id: &str) -> Result<String, AgentSdkError> {

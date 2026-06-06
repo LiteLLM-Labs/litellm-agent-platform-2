@@ -58,7 +58,7 @@ async fn creates_opencode_session_and_sends_message_parts() {
 }
 
 #[tokio::test]
-async fn streams_opencode_global_events() {
+async fn streams_opencode_session_events() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/event"))
@@ -66,6 +66,7 @@ async fn streams_opencode_global_events() {
         .respond_with(ResponseTemplate::new(200).set_body_string(
             "event: server.connected\n\
              data: {\"version\":\"1.0.0\"}\n\n\
+             data: {\"type\":\"session.idle\",\"sessionID\":\"other_session\"}\n\n\
              data: {\"type\":\"session.idle\",\"sessionID\":\"sesn_open\"}\n\n",
         ))
         .mount(&server)
@@ -79,12 +80,11 @@ async fn streams_opencode_global_events() {
         .await
         .unwrap();
     let first = stream.next().await.unwrap().unwrap();
-    let second = stream.next().await.unwrap().unwrap();
 
-    assert_eq!(first.event_type, "server.connected");
-    assert_eq!(first.data["version"], "1.0.0");
-    assert_eq!(second.event_type, "session.idle");
-    assert_eq!(second.data["sessionID"], "sesn_open");
+    assert_eq!(first.event_type, "session.status_idle");
+    assert_eq!(first.data["sessionID"], "sesn_open");
+    assert_eq!(first.data["stop_reason"]["type"], "end_turn");
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test]
@@ -113,6 +113,43 @@ async fn creates_opencode_session_with_bearer_auth() {
         .unwrap();
 
     assert_eq!(session.id, "sesn_bearer");
+}
+
+#[tokio::test]
+async fn retries_opencode_bearer_after_basic_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/session"))
+        .and(header("authorization", "Basic b3BlbmNvZGU6cHc="))
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+            "error": "unauthorized"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/session"))
+        .and(header("authorization", "Bearer sk-master"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "sesn_fallback",
+            "title": "Fallback session"
+        })))
+        .mount(&server)
+        .await;
+
+    let client = Lap::new(LapConfig {
+        opencode_api_key: Some("sk-master".to_owned()),
+        opencode_base_url: Some(server.uri()),
+        opencode_password: Some("pw".to_owned()),
+        ..LapConfig::default()
+    });
+    let session = client
+        .beta()
+        .sessions()
+        .create(CreateSessionParams::opencode("Fallback session"))
+        .await
+        .unwrap();
+
+    assert_eq!(session.id, "sesn_fallback");
 }
 
 #[tokio::test]
