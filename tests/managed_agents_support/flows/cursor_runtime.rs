@@ -1,0 +1,223 @@
+use axum::http::StatusCode;
+use serde_json::{json, Value};
+use wiremock::{
+    matchers::{body_json, header, method, path},
+    Mock, MockServer, ResponseTemplate,
+};
+
+use super::super::{request_json, request_raw, AppFixture};
+
+const CURSOR_AGENT_ID: &str = "bc-11111111-1111-1111-1111-111111111111";
+const FIRST_RUN_ID: &str = "run-11111111-1111-1111-1111-111111111111";
+const SECOND_RUN_ID: &str = "run-22222222-2222-2222-2222-222222222222";
+
+pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str) {
+    let cursor = MockServer::start().await;
+    let create_agent_request = cursor_create_agent_request();
+    assert_cursor_repo_config(&create_agent_request);
+    mount_create_agent(&cursor, create_agent_request).await;
+    mount_run_stream(&cursor, FIRST_RUN_ID, "gateway", " stream").await;
+    mount_followup_run(&cursor).await;
+    mount_run_stream(&cursor, SECOND_RUN_ID, "followup", " stream").await;
+
+    save_cursor_credentials(fixture, &cursor).await;
+    let session_id = create_cursor_session(fixture, agent_id).await;
+    assert_initial_stream(fixture, &session_id).await;
+    send_followup_prompt(fixture, &session_id).await;
+    assert_updated_run(fixture, &session_id).await;
+    assert_followup_stream(fixture, &session_id).await;
+}
+
+async fn mount_create_agent(cursor: &MockServer, request: Value) {
+    Mock::given(method("POST"))
+        .and(path("/v1/agents"))
+        .and(header("authorization", "Bearer cursor-test"))
+        .and(body_json(request))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "agent": {
+                "id": CURSOR_AGENT_ID,
+                "status": "ACTIVE",
+                "latestRunId": FIRST_RUN_ID
+            },
+            "run": {
+                "id": FIRST_RUN_ID,
+                "agentId": CURSOR_AGENT_ID,
+                "status": "CREATING"
+            }
+        })))
+        .mount(cursor)
+        .await;
+}
+
+async fn mount_run_stream(cursor: &MockServer, run_id: &str, first: &str, second: &str) {
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v1/agents/{CURSOR_AGENT_ID}/runs/{run_id}/stream"
+        )))
+        .and(header("authorization", "Bearer cursor-test"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(stream_body(run_id, first, second)),
+        )
+        .mount(cursor)
+        .await;
+}
+
+async fn mount_followup_run(cursor: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path(format!("/v1/agents/{CURSOR_AGENT_ID}/runs")))
+        .and(header("authorization", "Bearer cursor-test"))
+        .and(body_json(json!({
+            "prompt": { "text": "Follow up on the test failure" }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "run": {
+                "id": SECOND_RUN_ID,
+                "agentId": CURSOR_AGENT_ID,
+                "status": "CREATING"
+            }
+        })))
+        .mount(cursor)
+        .await;
+}
+
+async fn save_cursor_credentials(fixture: &AppFixture, cursor: &MockServer) {
+    request_json(
+        fixture.app.clone(),
+        "PUT",
+        "/api/agent-runtimes/cursor/credentials",
+        Some(json!({
+            "api_key": "cursor-test",
+            "api_base": cursor.uri()
+        })),
+    )
+    .await;
+}
+
+async fn create_cursor_session(fixture: &AppFixture, agent_id: &str) -> String {
+    let session = request_json(
+        fixture.app.clone(),
+        "POST",
+        "/session",
+        Some(cursor_session_request(agent_id)),
+    )
+    .await;
+    let session_id = session["id"].as_str().unwrap().to_owned();
+    assert_eq!(session["runtime"], "cursor");
+    assert_eq!(session["provider_session_id"], CURSOR_AGENT_ID);
+    assert_eq!(session["provider_run_id"], FIRST_RUN_ID);
+    session_id
+}
+
+async fn assert_initial_stream(fixture: &AppFixture, session_id: &str) {
+    let events = runtime_events(fixture, session_id).await;
+    assert!(events.contains("\"type\":\"session.status_running\""));
+    assert!(events.contains("\"type\":\"agent.message\""));
+    assert!(events.contains("gateway stream"));
+    assert!(events.contains("\"type\":\"session.status_idle\""));
+    assert!(!events.contains("cursor."));
+}
+
+async fn send_followup_prompt(fixture: &AppFixture, session_id: &str) {
+    request_raw(
+        fixture.app.clone(),
+        "POST",
+        &format!("/session/{session_id}/prompt_async"),
+        Some(
+            json!({
+                "parts": [{
+                    "type": "text",
+                    "text": "Follow up on the test failure"
+                }]
+            })
+            .to_string(),
+        ),
+        "application/json",
+        StatusCode::NO_CONTENT,
+    )
+    .await;
+}
+
+async fn assert_updated_run(fixture: &AppFixture, session_id: &str) {
+    let updated = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/session/{session_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(updated["provider_run_id"], SECOND_RUN_ID);
+}
+
+async fn assert_followup_stream(fixture: &AppFixture, session_id: &str) {
+    let events = runtime_events(fixture, session_id).await;
+    assert!(events.contains("\"type\":\"agent.message\""));
+    assert!(events.contains("followup stream"));
+    assert!(!events.contains("cursor."));
+}
+
+async fn runtime_events(fixture: &AppFixture, session_id: &str) -> String {
+    request_raw(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/sessions/{session_id}/events/stream?key=sk-local"),
+        None,
+        "application/json",
+        StatusCode::OK,
+    )
+    .await
+}
+
+fn cursor_create_agent_request() -> Value {
+    json!({
+        "prompt": { "text": "watch deploys\n\nFix the failing tests" },
+        "model": { "id": "composer-2" },
+        "name": "ops-agent",
+        "source": {
+            "repository": "https://github.com/acme/app",
+            "ref": "main"
+        },
+        "target": {
+            "autoCreatePr": true,
+            "branchName": "agent/cursor-proof"
+        }
+    })
+}
+
+fn cursor_session_request(agent_id: &str) -> Value {
+    json!({
+        "runtime": "cursor",
+        "agent_id": agent_id,
+        "title": "cursor proof",
+        "prompt": "Fix the failing tests",
+        "environment": {
+            "model": "composer-2",
+            "repository": "https://github.com/acme/app",
+            "ref": "main",
+            "target_branch": "agent/cursor-proof",
+            "auto_create_pr": true
+        }
+    })
+}
+
+fn assert_cursor_repo_config(request: &Value) {
+    assert_eq!(
+        request["source"]["repository"],
+        "https://github.com/acme/app"
+    );
+    assert_eq!(request["source"]["ref"], "main");
+    assert_eq!(request["target"]["branchName"], "agent/cursor-proof");
+    assert_eq!(request["target"]["autoCreatePr"], true);
+}
+
+fn stream_body(run_id: &str, first: &str, second: &str) -> String {
+    format!(
+        "event: status\n\
+         data: {{\"runId\":\"{run_id}\",\"status\":\"RUNNING\"}}\n\n\
+         event: assistant\n\
+         data: {{\"text\":\"{first}\"}}\n\n\
+         event: assistant\n\
+         data: {{\"text\":\"{second}\"}}\n\n\
+         event: result\n\
+         data: {{\"runId\":\"{run_id}\",\"status\":\"FINISHED\"}}\n\n"
+    )
+}
