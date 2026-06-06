@@ -123,7 +123,6 @@ async fn send_app_mention(fixture: &AppFixture, agent_id: &str) -> String {
         "type": "event_callback",
         "team_id": "T123",
         "api_app_id": "A123",
-        "event_id": "Ev123",
         "event_time": now_seconds(),
         "event": {
             "type": "app_mention",

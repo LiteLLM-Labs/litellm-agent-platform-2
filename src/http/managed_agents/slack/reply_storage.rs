@@ -3,12 +3,21 @@ use sqlx::PgPool;
 
 use crate::{db::managed_agents::messages, errors::GatewayError};
 
-pub(super) async fn persisted_assistant_text(
+pub(super) async fn last_message_seq(pool: &PgPool, session_id: &str) -> Result<i32, GatewayError> {
+    let rows = messages::repository::list(pool, session_id).await?;
+    Ok(rows.into_iter().map(|row| row.seq).max().unwrap_or(0))
+}
+
+pub(super) async fn persisted_assistant_text_after(
     pool: &PgPool,
     session_id: &str,
+    baseline_seq: i32,
 ) -> Result<Option<String>, GatewayError> {
     let rows = messages::repository::list(pool, session_id).await?;
     for row in rows.into_iter().rev() {
+        if row.seq <= baseline_seq {
+            continue;
+        }
         let info: Value = serde_json::from_str(&row.info_json)?;
         if info.get("role").and_then(Value::as_str) != Some("assistant") {
             continue;

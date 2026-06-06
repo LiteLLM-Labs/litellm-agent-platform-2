@@ -53,10 +53,9 @@ async fn handle_event_callback(
     let Some(message) = incoming_message(payload) else {
         return Ok(());
     };
-    if let Some(event_id) = slack_event_id(payload) {
-        if !slack::repository::record_event(&pool, &agent.id, event_id).await? {
-            return Ok(());
-        }
+    let event_key = slack_event_key(payload, &message);
+    if !slack::repository::record_event(&pool, &agent.id, &event_key).await? {
+        return Ok(());
     }
     let row = slack::repository::ensure_thread_session(
         &pool,
@@ -126,6 +125,31 @@ fn challenge(payload: &Value) -> String {
         .to_owned()
 }
 
-fn slack_event_id(payload: &Value) -> Option<&str> {
-    payload.get("event_id").and_then(Value::as_str)
+fn slack_event_key(payload: &Value, message: &SlackIncomingMessage) -> String {
+    payload
+        .get("event_id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| fallback_event_key(payload, message))
+}
+
+fn fallback_event_key(payload: &Value, message: &SlackIncomingMessage) -> String {
+    let event = payload.get("event").unwrap_or(&Value::Null);
+    let ts = event
+        .get("event_ts")
+        .or_else(|| event.get("ts"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let user = event
+        .get("user")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let text = event
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    format!(
+        "fallback:{}:{}:{}:{}:{}",
+        message.channel, message.thread_ts, ts, user, text
+    )
 }
