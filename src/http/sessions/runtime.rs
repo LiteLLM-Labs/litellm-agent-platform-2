@@ -12,13 +12,13 @@ use sqlx::PgPool;
 
 use crate::{
     db::managed_agents::{
-        registry,
+        registry::{self, schema::ManagedAgentRow},
         runtime_refs::{self, schema::UpsertRuntimeRef},
-        sessions,
+        sessions::{self, schema::SessionRow},
     },
     errors::GatewayError,
     managed_agents::providers::{
-        base::{validate_runtime, RuntimeSessionInput, CLAUDE_AGENTS_RUNTIME},
+        base::{validate_runtime, RuntimeProvision, RuntimeSessionInput, CLAUDE_AGENTS_RUNTIME},
         provision_runtime,
     },
     proxy::{auth::master_key::require_master_key, state::AppState},
@@ -37,37 +37,13 @@ pub(super) async fn create_runtime_session(
 ) -> Result<SessionResponse, GatewayError> {
     let runtime = input.runtime.clone().unwrap_or_default();
     validate_runtime_request(&runtime)?;
-    let agent_id = input
-        .agent_id
-        .clone()
-        .or(input.agent.clone())
-        .ok_or_else(|| GatewayError::InvalidJsonMessage("agent_id is required".to_owned()))?;
-    let agent = registry::repository::get(pool, &agent_id)
-        .await?
-        .ok_or_else(|| GatewayError::UnknownAgent(agent_id.clone()))?;
+    let agent = runtime_agent(pool, &input).await?;
     let credential = crate::http::agent_runtimes::load_credential(&state, &runtime).await?;
     let environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
-    let row = sessions::repository::create_runtime(
-        pool,
-        sessions::repository::CreateRuntimeSession {
-            runtime: &runtime,
-            agent_id: &agent.id,
-            title: &title,
-            timezone: input.timezone.as_deref().or(input.tz.as_deref()),
-            runtime_agent_ref_id: None,
-            environment: environment.clone(),
-            provider_session_id: None,
-            provider_run_id: None,
-        },
-    )
-    .await?;
+    let row =
+        insert_runtime_session(pool, &runtime, &agent, &input, &title, environment.clone()).await?;
     state.agent_runs.track_run(&agent.id, &row.id);
-    let prompt = input
-        .prompt
-        .or_else(|| agent.prompt.clone())
-        .filter(|prompt| !prompt.trim().is_empty())
-        .unwrap_or_else(|| format!("Start a session for {}.", agent.name));
     let provision = provision_runtime(
         &state.http,
         &runtime,
@@ -75,34 +51,93 @@ pub(super) async fn create_runtime_session(
         credential,
         RuntimeSessionInput {
             session_id: row.id.clone(),
-            prompt,
+            prompt: runtime_prompt(&input, &agent),
             environment,
         },
     )
     .await?;
+    let row = attach_runtime_refs(pool, &row, &agent.id, &runtime, provision).await?;
+    Ok(SessionResponse::from(row))
+}
+
+async fn runtime_agent(
+    pool: &PgPool,
+    input: &CreateSessionRequest,
+) -> Result<ManagedAgentRow, GatewayError> {
+    let agent_id = input
+        .agent_id
+        .clone()
+        .or(input.agent.clone())
+        .ok_or_else(|| GatewayError::InvalidJsonMessage("agent_id is required".to_owned()))?;
+    registry::repository::get(pool, &agent_id)
+        .await?
+        .ok_or_else(|| GatewayError::UnknownAgent(agent_id))
+}
+
+async fn insert_runtime_session(
+    pool: &PgPool,
+    runtime: &str,
+    agent: &ManagedAgentRow,
+    input: &CreateSessionRequest,
+    title: &str,
+    environment: serde_json::Value,
+) -> Result<SessionRow, GatewayError> {
+    sessions::repository::create_runtime(
+        pool,
+        sessions::repository::CreateRuntimeSession {
+            runtime,
+            agent_id: &agent.id,
+            title,
+            timezone: input.timezone.as_deref().or(input.tz.as_deref()),
+            runtime_agent_ref_id: None,
+            environment,
+            provider_session_id: None,
+            provider_run_id: None,
+        },
+    )
+    .await
+}
+
+fn runtime_prompt(input: &CreateSessionRequest, agent: &ManagedAgentRow) -> String {
+    input
+        .prompt
+        .clone()
+        .or_else(|| agent.prompt.clone())
+        .filter(|prompt| !prompt.trim().is_empty())
+        .unwrap_or_else(|| format!("Start a session for {}.", agent.name))
+}
+
+async fn attach_runtime_refs(
+    pool: &PgPool,
+    row: &SessionRow,
+    agent_id: &str,
+    runtime: &str,
+    provision: RuntimeProvision,
+) -> Result<SessionRow, GatewayError> {
+    let provider_session_id = provision.provider_session_id.clone();
+    let provider_run_id = provision.provider_run_id.clone();
     let runtime_ref = runtime_refs::repository::upsert(
         pool,
-        &agent.id,
-        &runtime,
+        agent_id,
+        runtime,
         UpsertRuntimeRef {
             runtime_agent_id: provision.runtime_agent_id,
-            provider_session_id: provision.provider_session_id.clone(),
-            provider_run_id: provision.provider_run_id.clone(),
+            provider_session_id: provider_session_id.clone(),
+            provider_run_id: provider_run_id.clone(),
             provider_url: provision.provider_url,
             metadata: provision.metadata,
         },
     )
     .await?;
-    let row = sessions::repository::set_runtime_refs(
+    sessions::repository::set_runtime_refs(
         pool,
         &row.id,
         &runtime_ref.id,
-        provision.provider_session_id.as_deref(),
-        provision.provider_run_id.as_deref(),
+        provider_session_id.as_deref(),
+        provider_run_id.as_deref(),
         "running",
     )
-    .await?;
-    Ok(SessionResponse::from(row))
+    .await
 }
 
 pub async fn runtime_events(
