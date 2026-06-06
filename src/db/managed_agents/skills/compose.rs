@@ -9,9 +9,10 @@ use crate::{
     errors::GatewayError,
 };
 
-/// Compose an agent's downstream system prompt: a catalog of every platform
-/// skill, the full bodies of the skills attached to this agent, and the agent's
-/// own base system prompt.
+/// Compose an agent's downstream system prompt: the full bodies of the skills
+/// **attached to this agent** (by `skill_ids`) followed by the agent's own base
+/// system prompt. Skills the agent has not attached are never included — the
+/// system prompt must not enumerate other agents' skills.
 ///
 /// This is the single source of truth for skill → system-prompt composition. It
 /// is shared by the non-runtime agent-run path (`runs/create/definition.rs`) and
@@ -21,17 +22,16 @@ pub async fn compose_agent_system_prompt(
     pool: &PgPool,
     agent: &ManagedAgentRow,
 ) -> Result<String, GatewayError> {
-    let all_skills = skills::repository::list(pool, None).await?;
     let attached_skill_ids = string_array(&agent.skill_ids);
+    if attached_skill_ids.is_empty() {
+        return Ok(agent.system.trim().to_owned());
+    }
+    let all_skills = skills::repository::list(pool, None).await?;
     let attached_skills = all_skills
         .iter()
         .filter(|skill| attached_skill_ids.iter().any(|id| id == &skill.id))
         .collect::<Vec<_>>();
-    Ok(compose_agent_system(
-        &agent.system,
-        &attached_skills,
-        &all_skills,
-    ))
+    Ok(compose_agent_system(&agent.system, &attached_skills))
 }
 
 /// Extract a JSON array of strings (the agent's `skill_ids`) into a `Vec<String>`.
@@ -44,41 +44,13 @@ pub fn string_array(value: &Value) -> Vec<String> {
         .collect()
 }
 
-fn compose_agent_system(
-    agent_system: &str,
-    attached_skills: &[&SkillRow],
-    all_skills: &[SkillRow],
-) -> String {
-    let catalog = all_skills
+fn compose_agent_system(agent_system: &str, attached_skills: &[&SkillRow]) -> String {
+    let mut parts = attached_skills
         .iter()
-        .map(skill_catalog_entry)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut parts = vec![format!(
-        "## Skills available on this platform\nSkills are reusable capability playbooks. The platform currently has:\n{}",
-        if catalog.is_empty() { "(none yet)" } else { &catalog }
-    )];
-    parts.extend(
-        attached_skills
-            .iter()
-            .map(|skill| format!("## Skill: {}\n{}", skill.name, skill.content)),
-    );
+        .map(|skill| format!("## Skill: {}\n{}", skill.name, skill.content))
+        .collect::<Vec<_>>();
     if !agent_system.trim().is_empty() {
         parts.push(agent_system.trim().to_owned());
     }
     parts.join("\n\n---\n\n")
-}
-
-fn skill_catalog_entry(skill: &SkillRow) -> String {
-    format!(
-        "- {} ({}){}",
-        skill.name,
-        skill.id,
-        skill
-            .description
-            .as_ref()
-            .filter(|description| !description.trim().is_empty())
-            .map(|description| format!(": {description}"))
-            .unwrap_or_default()
-    )
 }
