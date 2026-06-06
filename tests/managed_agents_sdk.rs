@@ -67,6 +67,7 @@ async fn streams_opencode_session_events() {
             "event: server.connected\n\
              data: {\"version\":\"1.0.0\"}\n\n\
              data: {\"type\":\"session.idle\",\"sessionID\":\"other_session\"}\n\n\
+             data: {\"type\":\"message.part.delta\",\"part\":{\"sessionID\":\"sesn_open\",\"text\":\"hello\"}}\n\n\
              data: {\"type\":\"session.idle\",\"sessionID\":\"sesn_open\"}\n\n",
         ))
         .mount(&server)
@@ -80,10 +81,14 @@ async fn streams_opencode_session_events() {
         .await
         .unwrap();
     let first = stream.next().await.unwrap().unwrap();
+    let second = stream.next().await.unwrap().unwrap();
 
-    assert_eq!(first.event_type, "session.status_idle");
+    assert_eq!(first.event_type, "assistant_response");
+    assert_eq!(first.data["text"], "hello");
     assert_eq!(first.data["sessionID"], "sesn_open");
-    assert_eq!(first.data["stop_reason"]["type"], "end_turn");
+    assert_eq!(second.event_type, "session.status_idle");
+    assert_eq!(second.data["sessionID"], "sesn_open");
+    assert_eq!(second.data["stop_reason"]["type"], "end_turn");
     assert!(stream.next().await.is_none());
 }
 
