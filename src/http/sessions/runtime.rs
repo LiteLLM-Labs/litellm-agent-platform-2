@@ -30,7 +30,7 @@ use super::{
         agent_sdk_error, provider_event_line, provider_run_id, register_runtime_session,
         runtime_sdk_client, send_events_params,
     },
-    storage::session,
+    storage::{persist_message, session},
     types::{CreateSessionRequest, SessionResponse},
 };
 
@@ -39,6 +39,7 @@ struct CreatedRuntimeSession {
     agent: ManagedAgentRow,
     credential: RuntimeCredential,
     environment: Value,
+    initial_user_prompt: Option<String>,
     prompt: String,
     row: SessionRow,
 }
@@ -49,6 +50,9 @@ pub(super) async fn create_runtime_session(
     input: CreateSessionRequest,
 ) -> Result<SessionResponse, GatewayError> {
     let created = create_runtime_session_row(&state, pool, input).await?;
+    if let Some(prompt) = created.initial_user_prompt.as_deref() {
+        persist_message(pool, &created.row.id, "user", prompt, None).await?;
+    }
     let row = match provision_runtime_session(&state, pool, &created).await {
         Ok(row) => row,
         Err(error) => {
@@ -70,6 +74,12 @@ async fn create_runtime_session_row(
     let credential = crate::http::agent_runtimes::load_credential(state, &runtime).await?;
     let environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
+    let initial_user_prompt = input
+        .prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .map(str::to_owned);
     let row = sessions::repository::create_runtime(
         pool,
         sessions::repository::CreateRuntimeSession {
@@ -90,6 +100,7 @@ async fn create_runtime_session_row(
         agent,
         credential,
         environment,
+        initial_user_prompt,
         prompt,
         row,
     })
@@ -161,7 +172,15 @@ pub async fn runtime_events(
         .stream(&row.id)
         .await
         .map_err(agent_sdk_error)?;
-    let body_stream = provider_stream.map(provider_event_line);
+    let stream_pool = pool.clone();
+    let stream_session_id = row.id.clone();
+    let body_stream = async_stream::stream! {
+        futures_util::pin_mut!(provider_stream);
+        while let Some(event) = provider_stream.next().await {
+            yield provider_event_line(event);
+        }
+        let _ = sessions::repository::set_status(&stream_pool, &stream_session_id, "idle").await;
+    };
     Response::builder()
         .header("content-type", "text/event-stream")
         .header("cache-control", "no-cache")
@@ -258,7 +277,6 @@ async fn load_agent(
 
 fn runtime_prompt(prompt: Option<String>, agent: &ManagedAgentRow) -> String {
     prompt
-        .or_else(|| agent.prompt.clone())
         .filter(|prompt| !prompt.trim().is_empty())
         .unwrap_or_else(|| format!("Start a session for {}.", agent.name))
 }

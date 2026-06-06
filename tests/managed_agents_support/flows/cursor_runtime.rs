@@ -23,9 +23,11 @@ pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str
     save_cursor_credentials(fixture, &cursor).await;
     let session_id = create_cursor_session(fixture, agent_id).await;
     assert_initial_stream(fixture, &session_id).await;
+    assert_session_status(fixture, &session_id, "idle").await;
     send_followup_prompt(fixture, &session_id).await;
     assert_updated_run(fixture, &session_id).await;
     assert_followup_stream(fixture, &session_id).await;
+    assert_session_status(fixture, &session_id, "idle").await;
 }
 
 async fn mount_create_agent(cursor: &MockServer, request: Value) {
@@ -165,6 +167,17 @@ async fn assert_followup_stream(fixture: &AppFixture, session_id: &str) {
     assert!(!events.contains("cursor."));
 }
 
+async fn assert_session_status(fixture: &AppFixture, session_id: &str, status: &str) {
+    let session = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/session/{session_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(session["status"], status);
+}
+
 async fn runtime_events(fixture: &AppFixture, session_id: &str) -> String {
     request_raw(
         fixture.app.clone(),
@@ -179,17 +192,13 @@ async fn runtime_events(fixture: &AppFixture, session_id: &str) -> String {
 
 fn cursor_create_agent_request() -> Value {
     json!({
-        "prompt": { "text": "watch deploys\n\nFix the failing tests" },
+        "prompt": { "text": "watch deploys\n\nRepository: https://github.com/acme/app\nBase branch: main\n\nFix the failing tests" },
         "model": { "id": "composer-2" },
         "name": "ops-agent",
-        "source": {
-            "repository": "https://github.com/acme/app",
-            "ref": "main"
-        },
-        "target": {
-            "autoCreatePr": true,
-            "branchName": "agent/cursor-proof"
-        }
+        "repos": [
+            { "url": "https://github.com/acme/app", "startingRef": "main" }
+        ],
+        "autoCreatePR": true
     })
 }
 
@@ -210,13 +219,9 @@ fn cursor_session_request(agent_id: &str) -> Value {
 }
 
 fn assert_cursor_repo_config(request: &Value) {
-    assert_eq!(
-        request["source"]["repository"],
-        "https://github.com/acme/app"
-    );
-    assert_eq!(request["source"]["ref"], "main");
-    assert_eq!(request["target"]["branchName"], "agent/cursor-proof");
-    assert_eq!(request["target"]["autoCreatePr"], true);
+    assert_eq!(request["repos"][0]["url"], "https://github.com/acme/app");
+    assert_eq!(request["repos"][0]["startingRef"], "main");
+    assert_eq!(request["autoCreatePR"], true);
 }
 
 fn stream_body(run_id: &str, first: &str, second: &str) -> String {

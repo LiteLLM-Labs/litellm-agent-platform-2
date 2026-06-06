@@ -37,7 +37,7 @@ pub async fn provision(
             lap_provider_options: Some(cursor_provider_options(agent, &input)?),
             name: agent.name.clone(),
             model: AgentModel::from(cursor_model(agent, &input.environment)),
-            system: cursor_prompt(agent, &input.prompt),
+            system: cursor_prompt(agent, &input.prompt, &input.environment),
             description: agent.description.clone(),
             tools: Vec::new(),
             mcp_servers: mcp_servers(agent),
@@ -80,12 +80,18 @@ fn cursor_model(agent: &ManagedAgentRow, environment: &Value) -> String {
         .to_owned()
 }
 
-fn cursor_prompt(agent: &ManagedAgentRow, prompt: &str) -> String {
-    if agent.system.trim().is_empty() {
-        prompt.to_owned()
-    } else {
-        format!("{}\n\n{}", agent.system.trim(), prompt)
+fn cursor_prompt(agent: &ManagedAgentRow, prompt: &str, environment: &Value) -> String {
+    let mut parts = Vec::new();
+    if !agent.system.trim().is_empty() {
+        parts.push(agent.system.trim().to_owned());
     }
+    if let Some(context) = repository_context(environment) {
+        parts.push(context);
+    }
+    if !prompt.trim().is_empty() {
+        parts.push(prompt.trim().to_owned());
+    }
+    parts.join("\n\n")
 }
 
 fn mcp_servers(agent: &ManagedAgentRow) -> Vec<Value> {
@@ -117,27 +123,26 @@ fn mcp_servers(agent: &ManagedAgentRow) -> Vec<Value> {
 }
 
 fn cursor_provider_options(
-    agent: &ManagedAgentRow,
+    _agent: &ManagedAgentRow,
     input: &RuntimeSessionInput,
 ) -> Result<Value, GatewayError> {
     let mut options = Map::new();
-    if let Some(source) = source(&input.environment)? {
-        options.insert("source".to_owned(), source);
+    if let Some(repos) = repos(&input.environment)? {
+        options.insert("repos".to_owned(), repos);
     }
-    options.insert("target".to_owned(), target(agent, input)?);
+    let auto_create_pr = input
+        .environment
+        .get("auto_create_pr")
+        .or_else(|| input.environment.get("autoCreatePr"))
+        .or_else(|| input.environment.get("autoCreatePR"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    options.insert("autoCreatePR".to_owned(), Value::Bool(auto_create_pr));
     Ok(Value::Object(options))
 }
 
-fn source(environment: &Value) -> Result<Option<Value>, GatewayError> {
-    let repository = environment
-        .get("repository")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            environment
-                .get("source")
-                .and_then(|source| source.get("repository"))
-                .and_then(Value::as_str)
-        });
+fn repos(environment: &Value) -> Result<Option<Value>, GatewayError> {
+    let repository = repository_url(environment);
     let Some(repository) = repository else {
         return Ok(None);
     };
@@ -146,7 +151,33 @@ fn source(environment: &Value) -> Result<Option<Value>, GatewayError> {
             "repository cannot be empty".to_owned(),
         ));
     }
-    let ref_name = environment
+    Ok(Some(
+        json!([{ "url": repository, "startingRef": starting_ref(environment) }]),
+    ))
+}
+
+fn repository_context(environment: &Value) -> Option<String> {
+    let repository = repository_url(environment)?;
+    Some(format!(
+        "Repository: {repository}\nBase branch: {}",
+        starting_ref(environment)
+    ))
+}
+
+fn repository_url(environment: &Value) -> Option<&str> {
+    environment
+        .get("repository")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            environment
+                .get("source")
+                .and_then(|source| source.get("repository"))
+                .and_then(Value::as_str)
+        })
+}
+
+fn starting_ref(environment: &Value) -> &str {
+    environment
         .get("ref")
         .and_then(Value::as_str)
         .or_else(|| {
@@ -155,34 +186,7 @@ fn source(environment: &Value) -> Result<Option<Value>, GatewayError> {
                 .and_then(|source| source.get("ref"))
                 .and_then(Value::as_str)
         })
-        .unwrap_or("main");
-    Ok(Some(json!({ "repository": repository, "ref": ref_name })))
-}
-
-fn target(agent: &ManagedAgentRow, input: &RuntimeSessionInput) -> Result<Value, GatewayError> {
-    let auto_create_pr = input
-        .environment
-        .get("auto_create_pr")
-        .or_else(|| input.environment.get("autoCreatePr"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let branch = input
-        .environment
-        .get("target_branch")
-        .or_else(|| input.environment.get("branchName"))
-        .and_then(Value::as_str)
-        .unwrap_or("agent/{agent_id}/{session_id}")
-        .replace("{agent_id}", &agent.id)
-        .replace("{session_id}", &input.session_id);
-    if branch.trim().is_empty() {
-        return Err(GatewayError::InvalidJsonMessage(
-            "target branch cannot be empty".to_owned(),
-        ));
-    }
-    Ok(json!({
-        "autoCreatePr": auto_create_pr,
-        "branchName": branch,
-    }))
+        .unwrap_or("main")
 }
 
 fn provider_url(raw: &Value) -> Option<String> {

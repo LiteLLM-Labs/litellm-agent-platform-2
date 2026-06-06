@@ -134,6 +134,24 @@ pub async fn set_provider_run(
     Ok(())
 }
 
+pub async fn set_status(pool: &PgPool, session_id: &str, status: &str) -> Result<(), GatewayError> {
+    sqlx::query(
+        r#"
+        UPDATE "LiteLLM_ManagedAgentSessionsTable"
+        SET status = $2,
+            updated_at = $3
+        WHERE id = $1
+        "#,
+    )
+    .bind(session_id)
+    .bind(status)
+    .bind(now_ms())
+    .execute(pool)
+    .await
+    .map_err(GatewayError::Database)?;
+    Ok(())
+}
+
 pub async fn list(pool: &PgPool) -> Result<Vec<SessionRow>, GatewayError> {
     sqlx::query_as::<_, SessionRow>(
         r#"
