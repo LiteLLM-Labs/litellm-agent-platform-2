@@ -16,13 +16,16 @@ use crate::{
 
 mod execution;
 mod runtime;
+mod runtime_events_api;
 mod runtime_sdk;
 mod storage;
 mod types;
 
 use execution::execute_prompt;
-pub use runtime::runtime_events;
+pub(crate) use runtime::create_runtime_session_for_agent;
 use runtime::{create_runtime_session, execute_runtime_prompt};
+pub(crate) use runtime_events_api::runtime_event_stream_for_session;
+pub use runtime_events_api::{runtime_event_list, runtime_events};
 use storage::{db, persist_message, resolve_session_request, session};
 pub use types::{CreateSessionRequest, MessageResponse, PromptRequest, SessionResponse};
 
@@ -44,7 +47,7 @@ pub async fn create(
     if input.has_runtime() {
         return create_runtime_session(state, &pool, input).await.map(Json);
     }
-    let resolved = resolve_session_request(&pool, input).await?;
+    let resolved = resolve_session_request(&state, &pool, input).await?;
     let row = sessions::repository::create(
         &pool,
         &resolved.harness,
@@ -96,9 +99,21 @@ pub async fn prompt_async(
     Json(input): Json<PromptRequest>,
 ) -> Result<StatusCode, GatewayError> {
     let pool = db(&state, &headers)?.clone();
-    let row = session(&pool, &session_id).await?;
     let prompt = input.prompt_text()?;
     let model = input.model_id().unwrap_or("claude-sonnet-4-6").to_owned();
+    enqueue_prompt_text(state, pool, &session_id, prompt, model).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub(crate) async fn enqueue_prompt_text(
+    state: Arc<AppState>,
+    pool: sqlx::PgPool,
+    session_id: &str,
+    prompt: String,
+    model: String,
+) -> Result<(), GatewayError> {
+    let session_id = session_id.to_owned();
+    let row = session(&pool, &session_id).await?;
 
     persist_message(&pool, &session_id, "user", &prompt, None).await?;
     state
@@ -107,7 +122,7 @@ pub async fn prompt_async(
 
     if row.runtime.is_some() {
         execute_runtime_prompt(state, &pool, row, prompt).await?;
-        return Ok(StatusCode::NO_CONTENT);
+        return Ok(());
     }
 
     tokio::spawn(async move {
@@ -116,7 +131,7 @@ pub async fn prompt_async(
         }
     });
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 pub async fn send_message(

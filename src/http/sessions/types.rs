@@ -101,6 +101,12 @@ pub struct SessionResponse {
     time: SessionTime,
 }
 
+impl SessionResponse {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 impl From<SessionRow> for SessionResponse {
     fn from(row: SessionRow) -> Self {
         Self {

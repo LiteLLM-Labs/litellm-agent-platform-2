@@ -1,12 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use axum::{
-    body::Body,
-    extract::{Path, Query, State},
-    http::HeaderMap,
-    response::Response,
-};
-use futures_util::StreamExt;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
@@ -18,7 +11,7 @@ use crate::{
     },
     errors::GatewayError,
     http::agent_runtimes::{load_credential, RuntimeCredential},
-    proxy::{auth::master_key::require_master_key, state::AppState},
+    proxy::state::AppState,
     sdk::{
         agents::{
             AgentModel, AgentModelConfig, AgentWorkspace, CreateAgentParams,
@@ -30,10 +23,9 @@ use crate::{
 
 use super::{
     runtime_sdk::{
-        agent_sdk_error, provider_event_line, provider_run_id, register_runtime_session,
+        agent_sdk_error, provider_run_id, register_runtime_session,
         runtime_sdk_client, sdk_runtime, send_events_params,
     },
-    storage::session,
     types::{CreateSessionRequest, SessionResponse},
 };
 
@@ -71,13 +63,47 @@ pub(super) async fn create_runtime_session(
     Ok(SessionResponse::from(row))
 }
 
+pub(crate) async fn create_runtime_session_for_agent(
+    state: Arc<AppState>,
+    pool: &PgPool,
+    agent_id: String,
+    title: String,
+    prompt: String,
+    environment: Value,
+) -> Result<String, GatewayError> {
+    let response = create_runtime_session(
+        state,
+        pool,
+        CreateSessionRequest {
+            title: Some(title),
+            harness: None,
+            agent: Some(agent_id.clone()),
+            agent_id: Some(agent_id),
+            runtime: Some(crate::sdk::agents::CLAUDE_MANAGED_AGENTS.to_owned()),
+            prompt: Some(prompt),
+            environment: Some(environment),
+            timezone: None,
+            tz: None,
+        },
+    )
+    .await?;
+    Ok(response.id().to_owned())
+}
+
 async fn create_runtime_session_row(
     state: &AppState,
     pool: &PgPool,
     input: CreateSessionRequest,
 ) -> Result<CreatedRuntimeSession, GatewayError> {
     let runtime = validated_runtime(&input)?;
-    let agent = load_agent(pool, &input).await?;
+    let mut agent = load_agent(pool, &input).await?;
+    // Compose the agent's attached skills into its system prompt so the runtime
+    // provider (e.g. claude_managed_agents) receives skill content downstream.
+    // Without this the provider agent is created with the bare base system and
+    // skills are silently dropped.
+    agent.system =
+        crate::db::managed_agents::skills::compose::compose_agent_system_prompt(pool, &agent)
+            .await?;
     let credential = load_credential(state, &runtime).await?;
     let environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
@@ -124,6 +150,11 @@ async fn provision_runtime_session(
             crate::sdk::agents::AgentRuntime::Cursor => {
                 config.cursor_api_key = Some(created.credential.api_key.clone());
                 config.cursor_base_url = created.credential.api_base.clone();
+            }
+            crate::sdk::agents::AgentRuntime::OpenCode => {
+                config.opencode_base_url = Some(created.credential.api_base.clone());
+                config.opencode_api_key = Some(created.credential.api_key.clone());
+                config.opencode_password = Some(created.credential.api_key.clone());
             }
         }
         Lap::with_http_client(config, state.http.clone())
@@ -229,39 +260,6 @@ async fn provision_runtime_session(
     .await
 }
 
-pub async fn runtime_events(
-    State(state): State<Arc<AppState>>,
-    Query(query): Query<HashMap<String, String>>,
-    headers: HeaderMap,
-    Path(session_id): Path<String>,
-) -> Result<Response, GatewayError> {
-    require_events_master_key(
-        &headers,
-        &query,
-        state.config.general_settings.master_key.as_deref(),
-    )?;
-    let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    let row = session(pool, &session_id).await?;
-    let runtime = row.runtime.as_deref().ok_or_else(|| {
-        GatewayError::InvalidConfig("session is not a runtime session".to_owned())
-    })?;
-    let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, &row)?;
-    let provider_stream = client
-        .beta()
-        .sessions()
-        .events()
-        .stream(&row.id)
-        .await
-        .map_err(agent_sdk_error)?;
-    let body_stream = provider_stream.map(provider_event_line);
-    Response::builder()
-        .header("content-type", "text/event-stream")
-        .header("cache-control", "no-cache")
-        .body(Body::from_stream(body_stream))
-        .map_err(|error| GatewayError::SandboxError(error.to_string()))
-}
-
 pub(super) async fn execute_runtime_prompt(
     state: Arc<AppState>,
     pool: &PgPool,
@@ -287,17 +285,6 @@ pub(super) async fn execute_runtime_prompt(
         sessions::repository::set_provider_run(pool, &row.id, &run_id, "running").await?;
     }
     Ok(())
-}
-
-fn require_events_master_key(
-    headers: &HeaderMap,
-    query: &HashMap<String, String>,
-    configured: Option<&str>,
-) -> Result<(), GatewayError> {
-    if query.get("key").map(String::as_str) == configured {
-        return Ok(());
-    }
-    require_master_key(headers, configured)
 }
 
 fn validated_runtime(input: &CreateSessionRequest) -> Result<String, GatewayError> {

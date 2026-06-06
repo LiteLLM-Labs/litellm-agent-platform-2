@@ -14,23 +14,37 @@ use crate::{
 use super::types::{CreateSessionRequest, ResolvedSession};
 
 pub(super) async fn resolve_session_request(
+    state: &AppState,
     pool: &PgPool,
     input: CreateSessionRequest,
 ) -> Result<ResolvedSession, GatewayError> {
     let requested = input.agent.or(input.harness);
-    if let Some(agent_id) = requested
-        .as_deref()
-        .filter(|value| value.starts_with("agent_"))
-    {
-        let agent = registry::repository::get(pool, agent_id)
-            .await?
-            .ok_or_else(|| GatewayError::UnknownAgent(agent_id.to_owned()))?;
-        return Ok(ResolvedSession {
-            title: input.title.unwrap_or(agent.name),
-            harness: agent.harness,
-            agent_id: Some(agent.id),
-            timezone: input.timezone.or(input.tz),
-        });
+    if let Some(agent_id) = requested.as_deref() {
+        if agent_id.starts_with("agent_") {
+            let agent = registry::repository::get(pool, agent_id)
+                .await?
+                .ok_or_else(|| GatewayError::UnknownAgent(agent_id.to_owned()))?;
+            return Ok(ResolvedSession {
+                title: input.title.unwrap_or(agent.name),
+                harness: agent.harness,
+                agent_id: Some(agent.id),
+                timezone: input.timezone.or(input.tz),
+            });
+        }
+
+        if let Some(agent) = state
+            .config
+            .agents
+            .iter()
+            .find(|agent| agent.id() == agent_id)
+        {
+            return Ok(ResolvedSession {
+                title: input.title.unwrap_or_else(|| agent.name.clone()),
+                harness: agent.resolved_harness().to_owned(),
+                agent_id: Some(agent.id()),
+                timezone: input.timezone.or(input.tz),
+            });
+        }
     }
 
     let harness = requested

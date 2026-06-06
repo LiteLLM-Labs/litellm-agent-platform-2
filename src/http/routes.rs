@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    routing::{any, get, post, put},
+    routing::{any, delete, get, post, put},
     Router,
 };
 
@@ -46,6 +46,10 @@ fn public_routes() -> Router<Arc<AppState>> {
             "/v1/sessions/{session_id}/events/stream",
             get(sessions::runtime_events),
         )
+        .route(
+            "/v1/sessions/{session_id}/events",
+            get(sessions::runtime_event_list),
+        )
 }
 
 fn api_routes() -> Router<Arc<AppState>> {
@@ -71,6 +75,14 @@ fn api_routes() -> Router<Arc<AppState>> {
             "/api/providers/{provider_id}",
             post(crate::http::provider_credentials::save_provider)
                 .delete(crate::http::provider_credentials::delete_provider),
+        )
+        .route(
+            "/api/vault/{user_id}",
+            get(crate::http::vault::list).post(crate::http::vault::save),
+        )
+        .route(
+            "/api/vault/{user_id}/{key}",
+            delete(crate::http::vault::delete),
         )
 }
 
@@ -108,6 +120,10 @@ fn session_routes() -> Router<Arc<AppState>> {
         .route(
             "/session/{session_id}/runtime_events",
             get(sessions::runtime_events),
+        )
+        .route(
+            "/session/{session_id}/runtime_events/list",
+            get(sessions::runtime_event_list),
         )
         .route("/session/{session_id}/abort", post(sessions::abort))
 }

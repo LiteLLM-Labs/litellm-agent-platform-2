@@ -83,14 +83,24 @@ async fn mount_followup_run(cursor: &MockServer) {
 async fn save_cursor_credentials(fixture: &AppFixture, cursor: &MockServer) {
     request_json(
         fixture.app.clone(),
-        "PUT",
-        "/api/agent-runtimes/cursor/credentials",
+        "POST",
+        "/api/providers/cursor",
         Some(json!({
             "api_key": "cursor-test",
             "api_base": cursor.uri()
         })),
     )
     .await;
+    let response = request_json(fixture.app.clone(), "GET", "/api/agent-runtimes", None).await;
+    let cursor_runtime = response["runtimes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|runtime| runtime["id"] == "cursor")
+        .unwrap();
+    assert_eq!(cursor_runtime["connected"], true);
+    assert_eq!(cursor_runtime["credential_provider_id"], "cursor");
+    assert_eq!(cursor_runtime["api_base"].as_str().unwrap(), cursor.uri());
 }
 
 async fn create_cursor_session(fixture: &AppFixture, agent_id: &str) -> String {

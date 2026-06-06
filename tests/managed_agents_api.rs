@@ -14,11 +14,13 @@ async fn managed_agent_endpoints_round_trip_against_postgres() {
         return;
     };
 
+    flows::assert_agent_runtime_catalog(&fixture).await;
     let agent_id = flows::create_agent(&fixture).await;
     flows::exercise_agent_lifecycle(&fixture, &agent_id).await;
     flows::exercise_memory(&fixture, &agent_id).await;
     flows::exercise_files(&fixture, &agent_id).await;
     flows::exercise_runs(&fixture, &agent_id).await;
+    flows::exercise_slack(&fixture, &agent_id).await;
     flows::exercise_sessions(&fixture).await;
     flows::exercise_cursor_runtime_stream(&fixture, &agent_id).await;
     flows::exercise_skills(&fixture).await;

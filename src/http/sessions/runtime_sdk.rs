@@ -38,6 +38,11 @@ pub(super) fn lap_from_credential(
             config.cursor_api_key = Some(credential.api_key.clone());
             config.cursor_base_url = credential.api_base.clone();
         }
+        AgentRuntime::OpenCode => {
+            config.opencode_base_url = Some(credential.api_base.clone());
+            config.opencode_api_key = Some(credential.api_key.clone());
+            config.opencode_password = Some(credential.api_key.clone());
+        }
     }
     Ok(Lap::new(config))
 }

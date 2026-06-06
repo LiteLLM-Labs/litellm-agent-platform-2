@@ -240,7 +240,7 @@ export default function AgentsPage() {
   };
 
   const openAgent = (ag: Agent) => {
-    router.push(`/agents/detail/?id=${encodeURIComponent(ag.id)}`);
+    router.push(`/sessions/?agent=${encodeURIComponent(ag.id)}`);
   };
 
   return (

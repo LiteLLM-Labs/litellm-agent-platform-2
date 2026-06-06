@@ -1,11 +1,17 @@
 use super::{
     client::Lap,
     events::AgentEventStream,
+    opencode,
+    response_fields::id,
     types::{
-        AgentSdkError, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
-        Environment, ManagedAgent, SendEventsParams, SendEventsResponse, Session,
+        AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
+        CreateSessionParams, Environment, ManagedAgent, SendEventsParams, SendEventsResponse,
+        Session,
     },
 };
+
+// Re-export SessionEvents so it can be referenced as resources::SessionEvents.
+pub use super::session_events::SessionEvents;
 
 pub struct Beta<'a> {
     pub(super) client: &'a Lap,
@@ -38,6 +44,11 @@ pub struct Agents<'a> {
 impl Agents<'_> {
     pub async fn create(&self, params: CreateAgentParams) -> Result<ManagedAgent, AgentSdkError> {
         let runtime = params.lap_agent_runtime;
+        if runtime == AgentRuntime::OpenCode {
+            return Err(AgentSdkError::InvalidRequest(
+                "agents.create is not supported for opencode".to_owned(),
+            ));
+        }
         self.client
             .adapter(runtime)?
             .create_agent(self.client, params)
@@ -55,6 +66,11 @@ impl Environments<'_> {
         params: CreateEnvironmentParams,
     ) -> Result<Environment, AgentSdkError> {
         let runtime = params.lap_agent_runtime;
+        if runtime == AgentRuntime::OpenCode {
+            return Err(AgentSdkError::InvalidRequest(
+                "environments.create is not supported for opencode".to_owned(),
+            ));
+        }
         self.client
             .adapter(runtime)?
             .create_environment(self.client, params)
@@ -72,6 +88,9 @@ impl<'a> Sessions<'a> {
             .lap_agent_runtime
             .map(Ok)
             .unwrap_or_else(|| self.client.default_runtime())?;
+        if runtime == AgentRuntime::OpenCode {
+            return self.create_opencode_session(params).await;
+        }
         self.client
             .adapter(runtime)?
             .create_session(self.client, params)
@@ -83,30 +102,45 @@ impl<'a> Sessions<'a> {
             client: self.client,
         }
     }
+
+    async fn create_opencode_session(
+        &self,
+        params: CreateSessionParams,
+    ) -> Result<Session, AgentSdkError> {
+        let raw = self
+            .client
+            .post(
+                AgentRuntime::OpenCode,
+                "/session",
+                &opencode::session_body(params.title),
+            )
+            .await?;
+        let session = Session {
+            id: id(&raw)?,
+            agent: None,
+            environment_id: None,
+            status: None,
+            metadata: None,
+            created_at: None,
+            updated_at: None,
+            raw,
+        };
+        self.client
+            .remember_session(&session.id, AgentRuntime::OpenCode)?;
+        Ok(session)
+    }
 }
 
-pub struct SessionEvents<'a> {
-    client: &'a Lap,
-}
-
-impl SessionEvents<'_> {
-    pub async fn send(
+impl Sessions<'_> {
+    pub async fn send_events(
         &self,
         session_id: &str,
         params: SendEventsParams,
     ) -> Result<SendEventsResponse, AgentSdkError> {
-        let runtime = self.client.runtime_for_session(session_id)?;
-        self.client
-            .adapter(runtime)?
-            .send_events(self.client, session_id, params)
-            .await
+        self.events().send(session_id, params).await
     }
 
     pub async fn stream(&self, session_id: &str) -> Result<AgentEventStream, AgentSdkError> {
-        let runtime = self.client.runtime_for_session(session_id)?;
-        self.client
-            .adapter(runtime)?
-            .stream_events(self.client, session_id)
-            .await
+        self.events().stream(session_id).await
     }
 }

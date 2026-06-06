@@ -169,7 +169,7 @@ async function reqHarness(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export async function whoami(): Promise<void> {
-  const res = await req("/whoami");
+  const res = await req("/v1/models");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new ApiError(res.status, body);
@@ -250,11 +250,14 @@ export async function listAgents(): Promise<Agent[]> {
   return data.agents;
 }
 
+export type ProviderCategory = "model" | "runtime";
+
 export interface AvailableProvider {
   id: string;
   name: string;
   description: string;
   default_base_url: string;
+  category?: ProviderCategory;
 }
 
 export interface ConnectedProvider {
@@ -262,6 +265,7 @@ export interface ConnectedProvider {
   name: string;
   api_base: string;
   masked_api_key: string;
+  category?: ProviderCategory;
 }
 
 export interface ProvidersResponse {
@@ -425,6 +429,21 @@ export async function sendMessage(opts: {
     const body = await res.text().catch(() => "");
     throw new ApiError(res.status, body);
   }
+}
+
+export async function sendMessageWithRuntimeModel(opts: {
+  sessionId: string;
+  text: string;
+  model: string;
+  runtime?: AgentRuntimeId | "claude_agents";
+}): Promise<void> {
+  const model =
+    opts.runtime === "claude_managed_agents" || opts.runtime === "claude_agents"
+      ? "anthropic/*"
+      : opts.runtime === "cursor"
+        ? "cursor/*"
+        : opts.model;
+  return sendMessage({ sessionId: opts.sessionId, text: opts.text, model });
 }
 
 export async function abortSession(id: string): Promise<void> {
@@ -737,39 +756,119 @@ export interface RuntimeAgentEvent {
   [key: string]: unknown;
 }
 
+export async function listRuntimeEvents(sessionId: string): Promise<RuntimeAgentEvent[]> {
+  // Best-effort history replay. The gateway currently only implements the live
+  // SSE stream (/events/stream), not a list endpoint — a GET to
+  // /v1/sessions/{id}/events falls through to the static UI handler and returns
+  // the HTML app shell. Treat any non-JSON or error response as "no history"
+  // instead of throwing a JSON-parse error the caller would surface to the user.
+  const res = await reqHarness(`/v1/sessions/${encodeURIComponent(sessionId)}/events`);
+  if (!res.ok) return [];
+  if (!res.headers.get("content-type")?.includes("application/json")) return [];
+  const data = (await res.json().catch(() => null)) as
+    | { data?: RuntimeAgentEvent[] }
+    | RuntimeAgentEvent[]
+    | null;
+  if (Array.isArray(data)) return data;
+  return Array.isArray(data?.data) ? data.data : [];
+}
+
 export function subscribeRuntimeEvents(opts: {
   sessionId: string;
   onEvent: (ev: RuntimeAgentEvent) => void;
   onError?: (err: unknown) => void;
 }): () => void {
-  let es: EventSource | null = null;
-  try {
-    es = new EventSource(runtimeEventSourceUrl(opts.sessionId));
-  } catch (e) {
-    opts.onError?.(e);
-    return () => {};
-  }
-  es.onmessage = (msg) => {
+  const abort = new AbortController();
+  const base = getHarnessServerUrl();
+
+  void (async () => {
     try {
-      opts.onEvent(JSON.parse(msg.data) as RuntimeAgentEvent);
+      const init = base
+        ? withHarnessProxyAuth({ headers: { accept: "text/event-stream" } })
+        : withAuth({ headers: { accept: "text/event-stream" } });
+      const res = await fetch(runtimeEventSourceUrl(opts.sessionId), {
+        ...init,
+        signal: abort.signal,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new ApiError(res.status, body);
+      }
+      if (!res.body) throw new Error("Runtime event stream did not return a body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (!abort.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = sseBoundaryIndex(buffer);
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary.length);
+          emitRuntimeEventFrame(frame, opts.onEvent, opts.onError);
+          boundary = sseBoundaryIndex(buffer);
+        }
+      }
     } catch (e) {
-      opts.onError?.(e);
+      if (!abort.signal.aborted) opts.onError?.(e);
     }
-  };
-  es.onerror = (e) => opts.onError?.(e);
+  })();
+
   return () => {
-    try {
-      es?.close();
-    } catch {
-      /* noop */
-    }
+    abort.abort();
   };
+}
+
+function sseBoundaryIndex(buffer: string): { index: number; length: number } | -1 {
+  const crlf = buffer.indexOf("\r\n\r\n");
+  const lf = buffer.indexOf("\n\n");
+  if (crlf === -1 && lf === -1) return -1;
+  if (crlf !== -1 && (lf === -1 || crlf < lf)) return { index: crlf, length: 4 };
+  return { index: lf, length: 2 };
+}
+
+function emitRuntimeEventFrame(
+  frame: string,
+  onEvent: (ev: RuntimeAgentEvent) => void,
+  onError?: (err: unknown) => void,
+): void {
+  const data = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+  if (!data || data === "[DONE]") return;
+  try {
+    onEvent(JSON.parse(data) as RuntimeAgentEvent);
+  } catch (e) {
+    onError?.(e);
+  }
 }
 
 export function runtimeEventSourceUrl(sessionId: string): string {
   const localKey = getStoredMasterKey();
-  const qs = localKey ? `?key=${encodeURIComponent(localKey)}` : "";
-  return `${BASE}/session/${encodeURIComponent(sessionId)}/runtime_events${qs}`;
+  const remoteBase = getHarnessServerUrl();
+  const params = new URLSearchParams();
+  if (remoteBase) params.set("base", remoteBase);
+  if (localKey) params.set("key", localKey);
+  const targetKey = getHarnessServerKey();
+  if (targetKey) params.set("target_key", targetKey);
+  const qs = params.toString();
+  const encoded = encodeURIComponent(sessionId);
+  // Always use the canonical /v1 SSE path. In production the built UI is served
+  // same-origin by the Rust gateway; in `next dev` the /v1/:path* rewrite proxies
+  // it to the gateway and streams it correctly. (The old /runtime-events/{id}.sse
+  // dev rewrite never matched and returned the HTML app shell, so the browser saw
+  // 0 events.) Remote harness sessions go through the harness proxy.
+  const path = remoteBase
+    ? `/api/harness-proxy/v1/sessions/${encoded}/events/stream`
+    : `/v1/sessions/${encoded}/events/stream`;
+  return `${BASE}${path}${qs ? `?${qs}` : ""}`;
 }
 
 export function harnessEventSourceUrl(): string {
@@ -820,6 +919,14 @@ export async function updateAgent(id: string, fields: Partial<Agent>): Promise<A
     body: JSON.stringify(fields),
   });
   return jsonOrThrow<Agent>(res);
+}
+
+export async function createSlackOAuthState(agentId: string): Promise<string> {
+  const res = await req(`/api/agents/${encodeURIComponent(agentId)}/slack/oauth-state`, {
+    method: "POST",
+  });
+  const data = await jsonOrThrow<{ state: string }>(res);
+  return data.state;
 }
 
 export async function deleteAgent(id: string): Promise<void> {

@@ -5,8 +5,10 @@ use serde_json::Value;
 
 pub const CLAUDE_MANAGED_AGENTS: &str = "claude_managed_agents";
 pub const CURSOR: &str = "cursor";
+pub const OPENCODE: &str = "opencode";
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_CURSOR_BASE_URL: &str = "https://api.cursor.com";
+pub const DEFAULT_OPENCODE_BASE_URL: &str = "http://127.0.0.1:4096";
 pub const MANAGED_AGENTS_BETA: &str = "managed-agents-2026-04-01";
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
@@ -14,14 +16,65 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 pub enum AgentRuntime {
     ClaudeManagedAgents,
     Cursor,
+    OpenCode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentRuntimeCatalogEntry {
+    pub runtime: AgentRuntime,
+    pub id: &'static str,
+    pub name: &'static str,
+    pub default_api_base: &'static str,
 }
 
 impl AgentRuntime {
+    pub const CATALOG: [AgentRuntimeCatalogEntry; 3] = [
+        AgentRuntimeCatalogEntry {
+            runtime: Self::ClaudeManagedAgents,
+            id: CLAUDE_MANAGED_AGENTS,
+            name: "Claude Agents",
+            default_api_base: DEFAULT_ANTHROPIC_BASE_URL,
+        },
+        AgentRuntimeCatalogEntry {
+            runtime: Self::Cursor,
+            id: CURSOR,
+            name: "Cursor",
+            default_api_base: DEFAULT_CURSOR_BASE_URL,
+        },
+        AgentRuntimeCatalogEntry {
+            runtime: Self::OpenCode,
+            id: OPENCODE,
+            name: "OpenCode",
+            default_api_base: DEFAULT_OPENCODE_BASE_URL,
+        },
+    ];
+
+    pub fn catalog() -> &'static [AgentRuntimeCatalogEntry] {
+        &Self::CATALOG
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ClaudeManagedAgents => CLAUDE_MANAGED_AGENTS,
             Self::Cursor => CURSOR,
+            Self::OpenCode => OPENCODE,
         }
+    }
+
+    pub fn name(self) -> &'static str {
+        Self::catalog()
+            .iter()
+            .find(|entry| entry.runtime == self)
+            .map(|entry| entry.name)
+            .unwrap_or_else(|| self.as_str())
+    }
+
+    pub fn default_api_base(self) -> &'static str {
+        Self::catalog()
+            .iter()
+            .find(|entry| entry.runtime == self)
+            .map(|entry| entry.default_api_base)
+            .unwrap_or_default()
     }
 }
 
@@ -32,6 +85,7 @@ impl TryFrom<&str> for AgentRuntime {
         match value {
             CLAUDE_MANAGED_AGENTS => Ok(Self::ClaudeManagedAgents),
             CURSOR => Ok(Self::Cursor),
+            OPENCODE => Ok(Self::OpenCode),
             runtime => Err(AgentSdkError::UnsupportedRuntime(runtime.to_owned())),
         }
     }
@@ -49,6 +103,10 @@ pub struct LapConfig {
     pub anthropic_base_url: String,
     pub cursor_api_key: Option<String>,
     pub cursor_base_url: String,
+    pub opencode_api_key: Option<String>,
+    pub opencode_base_url: Option<String>,
+    pub opencode_username: String,
+    pub opencode_password: Option<String>,
 }
 
 impl LapConfig {
@@ -65,6 +123,13 @@ impl LapConfig {
             ..Self::default()
         }
     }
+
+    pub fn opencode(base_url: impl Into<String>) -> Self {
+        Self {
+            opencode_base_url: Some(base_url.into()),
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for LapConfig {
@@ -74,6 +139,10 @@ impl Default for LapConfig {
             anthropic_base_url: DEFAULT_ANTHROPIC_BASE_URL.to_owned(),
             cursor_api_key: None,
             cursor_base_url: DEFAULT_CURSOR_BASE_URL.to_owned(),
+            opencode_api_key: None,
+            opencode_base_url: None,
+            opencode_username: "opencode".to_owned(),
+            opencode_password: None,
         }
     }
 }
@@ -157,6 +226,19 @@ pub struct CreateSessionParams {
     pub metadata: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resources: Option<Value>,
+}
+
+impl CreateSessionParams {
+    pub fn opencode(title: impl Into<String>) -> Self {
+        Self {
+            agent: String::new(),
+            environment_id: String::new(),
+            title: title.into(),
+            lap_agent_runtime: Some(AgentRuntime::OpenCode),
+            metadata: None,
+            resources: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -193,7 +193,7 @@ impl RuntimeAdapter for CursorRuntime {
     }
 }
 
-fn run_id(raw: &Value) -> Option<String> {
+pub(crate) fn run_id(raw: &Value) -> Option<String> {
     raw.get("run")
         .and_then(|value| value.get("id"))
         .and_then(Value::as_str)
@@ -230,7 +230,7 @@ fn create_agent_body(params: CreateAgentParams) -> Value {
     Value::Object(body)
 }
 
-fn prompt_from_events(events: &[Value]) -> Result<Value, AgentSdkError> {
+pub(crate) fn prompt_from_events(events: &[Value]) -> Result<Value, AgentSdkError> {
     let mut text = Vec::new();
     for event in events {
         if event.get("type").and_then(Value::as_str) != Some("user.message") {
@@ -255,7 +255,7 @@ fn prompt_from_events(events: &[Value]) -> Result<Value, AgentSdkError> {
     Ok(json!({ "text": text.join("\n\n") }))
 }
 
-fn agent_id_from_context(session_id: &str, context: Option<&SessionContext>) -> String {
+pub(crate) fn agent_id_from_context(session_id: &str, context: Option<&SessionContext>) -> String {
     context
         .and_then(|context| context.agent_id.clone())
         .or_else(|| context.and_then(|context| context.provider_session_id.clone()))

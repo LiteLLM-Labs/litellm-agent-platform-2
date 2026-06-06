@@ -33,11 +33,12 @@ import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
-import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval } from "@/lib/api";
+import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel, listRuntimeEvents } from "@/lib/api";
 import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
 import type { Agent, AgentRuntimeId, HarnessMessage, HarnessMessagePart } from "@/lib/types";
 import type { Frame } from "@/components/inspector-panel";
+import SessionsPage from "../sessions/page";
 
 const FALLBACK_MODELS = [
   "anthropic/claude-opus-4-7",
@@ -65,32 +66,44 @@ function shortPrompt(prompt: string): string {
 }
 
 function runtimeLabel(runtime?: string): string {
-  if (runtime === "claude_agents") return "Claude Managed Agents";
+  if (runtime === "claude_managed_agents" || runtime === "claude_agents") return "Claude Managed Agents";
   if (runtime === "cursor") return "Cursor";
   return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
 }
 
-function providerSessionUrl(runtime?: AgentRuntimeId, providerSessionId?: string, providerUrl?: string): string | null {
+function providerSessionUrl(runtime?: string, providerSessionId?: string, providerUrl?: string): string | null {
   if (providerUrl) return providerUrl;
-  if (runtime === "claude_agents" && providerSessionId) {
-    return `https://platform.claude.com/workspaces/default/agent-sessions/${encodeURIComponent(providerSessionId)}`;
+  if ((runtime === "claude_managed_agents" || runtime === "claude_agents") && providerSessionId) {
+    return `https://platform.claude.com/workspaces/default/sessions/${encodeURIComponent(providerSessionId)}`;
   }
   return null;
 }
 
-function runtimeEventText(ev: RuntimeAgentEvent): string {
-  const value = ev.text ?? ev.delta ?? ev.content;
+function runtimeTextValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    return value
-      .map((block) => {
-        if (!block || typeof block !== "object") return "";
-        const text = (block as { text?: unknown }).text;
-        return typeof text === "string" ? text : "";
-      })
-      .join("");
+    return value.map(runtimeTextValue).join("");
   }
-  return "";
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  return [
+    record.text,
+    record.thinking,
+    record.content,
+    record.delta,
+    record.content_block,
+  ]
+    .map(runtimeTextValue)
+    .join("");
+}
+
+function runtimeEventText(ev: RuntimeAgentEvent): string {
+  return runtimeTextValue(ev.text ?? ev.delta ?? ev.content ?? ev.content_block);
+}
+
+function normalizedRuntimeEventType(ev: RuntimeAgentEvent): string {
+  const type = ev.type;
+  return typeof type === "string" ? type : "";
 }
 
 function runtimeEventPartKind(ev: RuntimeAgentEvent): "text" | "thinking" {
@@ -119,16 +132,121 @@ function runtimeErrorMessage(ev: RuntimeAgentEvent): string {
 }
 
 function isRuntimeAssistantTextEvent(type: string): boolean {
-  return type === "assistant_response" || type === "agent.message";
+  return (
+    type === "assistant_response" ||
+    type === "agent.message" ||
+    type === "content_block_start" ||
+    type === "content_block_delta" ||
+    type === "message_delta"
+  );
 }
 
 function isRuntimeThinkingEvent(type: string): boolean {
   return type === "thinking_back" || type === "agent.thinking" || type === "agent.reasoning";
 }
 
+function isRuntimeToolEvent(type: string): boolean {
+  return (
+    type === "tool_call" ||
+    type === "tool_result" ||
+    type === "agent.tool_use" ||
+    type === "agent.tool_result"
+  );
+}
+
+function runtimeToolId(ev: RuntimeAgentEvent): string {
+  const id = ev.id ?? ev.tool_use_id;
+  return typeof id === "string" && id ? id : `tool_${Date.now().toString(36)}`;
+}
+
+function optimisticUserMessage(sessionId: string, text: string): HarnessMessage {
+  const stamp = Date.now().toString(36);
+  const messageId = `${sessionId}_runtime_user_${stamp}`;
+  return {
+    info: { id: messageId, role: "user", sessionID: sessionId },
+    parts: [
+      {
+        id: `${messageId}_text`,
+        messageID: messageId,
+        sessionID: sessionId,
+        type: "text",
+        text,
+      },
+    ],
+  };
+}
+
+function messageText(message: HarnessMessage): string {
+  return message.parts
+    .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
+function isRuntimeOptimisticUser(message: HarnessMessage, sessionId: string): boolean {
+  return (
+    message.info.role === "user" &&
+    typeof message.info.id === "string" &&
+    message.info.id.startsWith(`${sessionId}_runtime_user_`)
+  );
+}
+
+function mergeServerAndRuntimeMessages(
+  serverMessages: HarnessMessage[],
+  localMessages: HarnessMessage[],
+  sessionId: string,
+): HarnessMessage[] {
+  const serverIds = new Set(serverMessages.map((message) => message.info.id));
+  const localOnly = localMessages.filter((message) => !serverIds.has(message.info.id));
+  if (localOnly.length === 0) return serverMessages;
+
+  const insertAfter = new Map<number, HarnessMessage[]>();
+  const trailing: HarnessMessage[] = [];
+  const consumedServerUsers = new Set<number>();
+  let activeServerUserIndex: number | null = null;
+
+  for (const message of localOnly) {
+    if (isRuntimeOptimisticUser(message, sessionId)) {
+      const text = messageText(message);
+      const serverIndex = serverMessages.findIndex((serverMessage, index) => (
+        !consumedServerUsers.has(index) &&
+        serverMessage.info.role === "user" &&
+        messageText(serverMessage) === text
+      ));
+      if (serverIndex === -1) {
+        activeServerUserIndex = null;
+        trailing.push(message);
+      } else {
+        consumedServerUsers.add(serverIndex);
+        activeServerUserIndex = serverIndex;
+      }
+      continue;
+    }
+
+    if (activeServerUserIndex !== null) {
+      const items = insertAfter.get(activeServerUserIndex) ?? [];
+      items.push(message);
+      insertAfter.set(activeServerUserIndex, items);
+      continue;
+    }
+
+    trailing.push(message);
+  }
+
+  const merged: HarnessMessage[] = [];
+  serverMessages.forEach((message, index) => {
+    merged.push(message);
+    const localAfter = insertAfter.get(index);
+    if (localAfter) merged.push(...localAfter);
+  });
+  merged.push(...trailing);
+  return merged;
+}
+
 function ChatInner() {
   const sp = useSearchParams();
   const sid = sp.get("id");
+  const autostartPrompt = sp.get("autostart") === "1" ? sp.get("prompt")?.trim() : "";
   const [messages, setMessages] = useState<HarnessMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>(FALLBACK_MODELS);
@@ -140,6 +258,7 @@ function ChatInner() {
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
+  const seenRuntimeEventIdsRef = useRef<Set<string>>(new Set());
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -147,6 +266,7 @@ function ChatInner() {
   const [providerUrl, setProviderUrl] = useState<string | undefined>();
   const [sessionTitle, setSessionTitle] = useState<string>("");
   const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
+  const [switchingAgent, setSwitchingAgent] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
   const runtimeAssistantRef = useRef<{
@@ -154,6 +274,7 @@ function ChatInner() {
     textPartId: string;
     thinkingPartId: string;
   } | null>(null);
+  const autostartedRef = useRef<string | null>(null);
 
   const refetch = useCallback(async () => {
     if (!sid) return;
@@ -161,9 +282,7 @@ function ChatInner() {
       const list = await getMessages(sid);
       setMessages((prev) => {
         if (!prev) return list;
-        const serverIds = new Set(list.map((m) => m.info.id));
-        const inflight = prev.filter((m) => !serverIds.has(m.info.id));
-        return [...list, ...inflight];
+        return mergeServerAndRuntimeMessages(list, prev, sid);
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -193,7 +312,6 @@ function ChatInner() {
   const skills = Array.isArray(activeAgent?.skills) ? activeAgent.skills : [];
   const vaultKeys = Array.isArray(activeAgent?.vault_keys) ? activeAgent.vault_keys : [];
   const hasStarted = Boolean(messages && messages.length > 0);
-  const agentLocked = hasStarted || Boolean(activeAgent);
 
   const onCopyPrompt = useCallback(() => {
     if (!activePrompt) return;
@@ -215,6 +333,9 @@ function ChatInner() {
   // Fetch session metadata to get the locked agent
   useEffect(() => {
     if (!sid) return;
+    seenRuntimeEventIdsRef.current = new Set();
+    eventBufferRef.current = [];
+    runtimeAssistantRef.current = null;
     setSessionLoaded(false);
     getSession(sid).then(s => {
       const a = s.agent_id ?? s.agent ?? s.harness;
@@ -231,37 +352,20 @@ function ChatInner() {
     listAgents().then(setSavedAgents).catch(() => {});
   }, []);
 
-  // On agent change before first message: delete current empty session, create new, redirect
   const onHarnessChange = useCallback(async (next: string) => {
     if (!sid || next === sessionHarness) return;
-    await deleteSession(sid);
-    const s = await createSession(undefined, next);
-    router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
-  }, [sid, sessionHarness, router]);
-
-  const appendRuntimeUserMessage = useCallback((text: string) => {
-    if (!sid) return;
-    const stamp = Date.now().toString(36);
-    setMessages((prev) => [
-      ...(prev ?? []),
-      {
-        info: {
-          id: `${sid}_user_${stamp}`,
-          role: "user",
-          sessionID: sid,
-        },
-        parts: [
-          {
-            id: `${sid}_user_${stamp}_text`,
-            messageID: `${sid}_user_${stamp}`,
-            sessionID: sid,
-            type: "text",
-            text,
-          },
-        ],
-      },
-    ]);
-  }, [sid]);
+    setSwitchingAgent(true);
+    setError(null);
+    try {
+      if (!hasStarted) await deleteSession(sid).catch(() => {});
+      const options = next.startsWith("agent_") && sessionRuntime ? { runtime: sessionRuntime } : undefined;
+      const s = await createSession(undefined, next, options);
+      router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to switch agent");
+      setSwitchingAgent(false);
+    }
+  }, [hasStarted, sid, sessionHarness, sessionRuntime, router]);
 
   const runtimeAssistantIds = useCallback(() => {
     if (!sid) return null;
@@ -369,22 +473,106 @@ function ChatInner() {
     });
   }, [runtimeAssistantIds, sid]);
 
+  const appendRuntimeToolEvent = useCallback((ev: RuntimeAgentEvent) => {
+    const ids = runtimeAssistantIds();
+    if (!ids) return;
+    const toolId = runtimeToolId(ev);
+    const partId = `${ids.messageId}_${toolId}`;
+    const name = typeof ev.name === "string" ? ev.name : "tool";
+    const status = typeof ev.status === "string" ? ev.status : ev.type === "tool_result" ? "completed" : "running";
+    setMessages((prev) => {
+      let next = prev ?? [];
+      let idx = next.findIndex((m) => m.info.id === ids.messageId);
+      if (idx === -1) {
+        next = [
+          ...next,
+          {
+            info: { id: ids.messageId, role: "assistant", sessionID: sid ?? undefined },
+            parts: [],
+          },
+        ];
+        idx = next.length - 1;
+      } else {
+        next = [...next];
+      }
+      const msg = next[idx];
+      let foundPart = false;
+      const parts = msg.parts.map((part) => {
+        if (part.id !== partId || part.type !== "tool") return part;
+        foundPart = true;
+        return {
+          ...part,
+          tool: part.tool || name,
+          state: {
+            ...part.state,
+            status,
+            input: part.state.input ?? ev.input,
+            output: ev.output ?? part.state.output,
+            error: ev.error ?? part.state.error,
+          },
+        } as HarnessMessagePart;
+      });
+      if (!foundPart) {
+        parts.push({
+          id: partId,
+          messageID: ids.messageId,
+          sessionID: sid ?? undefined,
+          type: "tool",
+          tool: name,
+          state: {
+            status,
+            input: ev.input,
+            output: ev.output,
+            error: ev.error,
+          },
+        });
+      }
+      next[idx] = { ...msg, parts };
+      return next;
+    });
+  }, [runtimeAssistantIds, sid]);
+
+  const beginRuntimeTurn = useCallback((text?: string) => {
+    if (!sessionRuntime || !sid) return;
+    runtimeAssistantRef.current = null;
+    const ids = runtimeAssistantIds();
+    if (!ids) return;
+    const trimmed = text?.trim();
+    setMessages((prev) => {
+      const next = [...(prev ?? [])];
+      if (trimmed) {
+        next.push(optimisticUserMessage(sid, trimmed));
+      }
+      next.push({
+        info: { id: ids.messageId, role: "assistant", sessionID: sid },
+        parts: [],
+      });
+      return next;
+    });
+    setSessionStatus("busy");
+  }, [runtimeAssistantIds, sessionRuntime, sid]);
+
   const handleRuntimeEvent = useCallback((ev: RuntimeAgentEvent) => {
+    const eventId = typeof ev.id === "string" ? ev.id : "";
+    if (eventId) {
+      if (seenRuntimeEventIdsRef.current.has(eventId)) return;
+      seenRuntimeEventIdsRef.current.add(eventId);
+    }
+
     eventBufferRef.current = [
       ...eventBufferRef.current.slice(-499),
       { ts: Date.now(), ev: ev as Frame["ev"] },
     ];
 
-    if (
-      ev.type === "session.status_running" ||
-      ev.type === "session.thread_status_running"
-    ) {
+    const type = normalizedRuntimeEventType(ev);
+
+    if (type === "session.status_running") {
       ensureRuntimeAssistantMessage();
       setSessionStatus("busy");
       return;
     }
 
-    if (ev.type === "session.status") {
+    if (type === "session.status") {
       const status = ev.status;
       const statusType =
         typeof status === "string"
@@ -403,37 +591,34 @@ function ChatInner() {
       return;
     }
 
-    if (ev.type === "session.status_idle" || ev.type === "session.thread_status_idle") {
+    if (type === "session.status_idle") {
       setSessionStatus("idle");
       finishRuntimeAssistantMessage();
       return;
     }
 
-    if (ev.type === "session.error") {
+    if (type === "session.error") {
       setError(`Error: ${runtimeErrorMessage(ev)}`);
       setSessionStatus("idle");
       runtimeAssistantRef.current = null;
       return;
     }
 
-    if (!isRuntimeAssistantTextEvent(ev.type) && !isRuntimeThinkingEvent(ev.type)) return;
-    ensureRuntimeAssistantMessage();
-    const delta = runtimeEventText(ev);
-    if (delta) {
-      appendRuntimePartText(isRuntimeThinkingEvent(ev.type) ? "thinking" : runtimeEventPartKind(ev), delta);
-    }
-    setSessionStatus("busy");
-  }, [appendRuntimePartText, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
-
-  const onComposerSent = useCallback((text: string) => {
-    if (sessionRuntime) {
-      appendRuntimeUserMessage(text);
+    if (isRuntimeToolEvent(type)) {
       ensureRuntimeAssistantMessage();
+      appendRuntimeToolEvent(ev);
       setSessionStatus("busy");
       return;
     }
-    void refetch();
-  }, [appendRuntimeUserMessage, ensureRuntimeAssistantMessage, refetch, sessionRuntime]);
+
+    if (!isRuntimeAssistantTextEvent(type) && !isRuntimeThinkingEvent(type)) return;
+    ensureRuntimeAssistantMessage();
+    const delta = runtimeEventText(ev);
+    if (delta) {
+      appendRuntimePartText(isRuntimeThinkingEvent(type) ? "thinking" : runtimeEventPartKind(ev), delta);
+    }
+    setSessionStatus("busy");
+  }, [appendRuntimePartText, appendRuntimeToolEvent, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
@@ -443,9 +628,31 @@ function ChatInner() {
       onEvent: handleRuntimeEvent,
       onError: (err) => setError(err instanceof Error ? err.message : String(err)),
     });
+    listRuntimeEvents(sid)
+      .then((events) => events.forEach(handleRuntimeEvent))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    if (autostartPrompt && autostartedRef.current !== sid) {
+      autostartedRef.current = sid;
+      beginRuntimeTurn(autostartPrompt);
+      void sendMessageWithRuntimeModel({
+        sessionId: sid,
+        text: autostartPrompt,
+        model,
+        runtime: sessionRuntime,
+      })
+        .then(() => {
+          if (!sessionRuntime) return refetch();
+        })
+        .then(() => router.replace(`/chat/?id=${encodeURIComponent(sid)}`))
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : String(err));
+          setSessionStatus("idle");
+          runtimeAssistantRef.current = null;
+        });
+    }
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, sessionLoaded, refetch, handleRuntimeEvent]);
+  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
 
   const onApprovalAccept = useCallback(async (id: string, args: Record<string, unknown>) => {
     setApprovalBusy(true);
@@ -485,14 +692,7 @@ function ChatInner() {
   }, [messages]);
 
   if (!sid) {
-    return (
-      <div className="flex h-screen bg-background text-foreground">
-        <Sidebar />
-        <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-          Missing <code className="font-mono mx-1">?id=</code> parameter.
-        </div>
-      </div>
-    );
+    return <SessionsPage />;
   }
 
   const shortSid = sid.length > 12 ? sid.slice(0, 12) + "…" : sid;
@@ -529,36 +729,32 @@ function ChatInner() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">agent</span>
-              {agentLocked ? (
-                <span
-                  className="h-8 max-w-[220px] px-3 flex items-center text-xs font-mono border border-border rounded-md bg-muted text-muted-foreground truncate"
-                  title={activeAgentName}
-                >
-                  {activeAgentName}
-                </span>
-              ) : (
-                <Select value={sessionHarness} onValueChange={(v) => v && onHarnessChange(v)}>
-                  <SelectTrigger className="h-8 text-xs w-[150px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
-                    <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
-                    <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
-                    {savedAgents.length > 0 && (
-                      <>
-                        <div className="px-2 py-1.5 text-[10px] text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">Saved agents</div>
-                        {savedAgents.map(a => (
-                          <SelectItem key={a.id} value={a.id} className="text-xs font-mono">{a.name}</SelectItem>
-                        ))}
-                      </>
-                    )}
-                    <div className="px-2 py-2 text-[10px] text-muted-foreground border-t mt-1">
-                      💡 Say <span className="font-mono">&quot;save this agent&quot;</span> to save a session
-                    </div>
-                  </SelectContent>
-                </Select>
-              )}
+              <Select
+                value={sessionHarness}
+                onValueChange={(v) => v && onHarnessChange(v)}
+                disabled={switchingAgent || sessionStatus === "busy"}
+              >
+                <SelectTrigger className="h-8 text-xs w-[190px]">
+                  <SelectValue placeholder={activeAgentName} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
+                  <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
+                  <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
+                  {savedAgents.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-[10px] text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">Saved agents</div>
+                      {savedAgents.map(a => (
+                        <SelectItem key={a.id} value={a.id} className="text-xs font-mono">{a.name}</SelectItem>
+                      ))}
+                    </>
+                  )}
+                  <div className="px-2 py-2 text-[10px] text-muted-foreground border-t mt-1">
+                    Switching agents opens a new session.
+                  </div>
+                </SelectContent>
+              </Select>
+              {switchingAgent && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">model</span>
@@ -776,7 +972,14 @@ function ChatInner() {
         <Composer
           sessionId={sid}
           model={model}
-          onSent={onComposerSent}
+          onSent={sessionRuntime ? undefined : refetch}
+          onSend={sessionRuntime ? (text) => sendMessageWithRuntimeModel({
+            sessionId: sid,
+            text,
+            model,
+            runtime: sessionRuntime,
+          }) : undefined}
+          onSendStart={beginRuntimeTurn}
           disabled={Boolean(sessionRuntime && sessionStatus === "busy")}
         />
       </div>

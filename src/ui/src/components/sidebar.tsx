@@ -9,6 +9,7 @@ import {
   FileText,
   Inbox,
   KeyRound,
+  MessageCircle,
   Plus,
   Puzzle,
   ServerCog,
@@ -90,14 +91,14 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
   }, [pathname]);
 
   const onNew = async () => {
-    router.push("/sessions/");
+    router.push("/chat/");
   };
 
   const onDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     setSessions((prev) => prev?.filter((s) => s.id !== id) ?? null);
     await deleteSession(id);
-    if (id === activeId) router.push("/sessions/");
+    if (id === activeId) router.push("/chat/");
   };
 
   const currentPath = pathname ?? "";
@@ -106,7 +107,7 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
       label: "AI Gateway",
       icon: ShieldCheck,
       home: "/providers/",
-      description: "Keys, teams, logs, and models",
+      description: "Keys, teams, logs, providers, and runtimes",
       items: [
         {
           label: "Keys",
@@ -127,19 +128,31 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           active: (path) => path.startsWith("/observability"),
         },
         {
-          label: "Providers",
+          label: "LLM Providers",
           href: "/providers/",
           icon: ServerCog,
           active: (path) => path.startsWith("/providers"),
+        },
+        {
+          label: "Agent Runtimes",
+          href: "/runtimes/",
+          icon: ServerCog,
+          active: (path) => path.startsWith("/runtimes"),
         },
       ],
     },
     {
       label: "Agent Platform",
       icon: Bot,
-      home: "/agents/",
+      home: "/chat/",
       description: "Agents, inbox, integrations, skills",
       items: [
+        {
+          label: "Chat",
+          href: "/chat/",
+          icon: MessageCircle,
+          active: (path) => path === "/" || path.startsWith("/chat") || path.startsWith("/sessions"),
+        },
         {
           label: "Agents",
           href: "/agents/",
@@ -158,12 +171,6 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           href: "/integrations/",
           icon: Puzzle,
           active: (path) => path.startsWith("/integrations"),
-        },
-        {
-          label: "Agent Runtimes",
-          href: "/runtimes/",
-          icon: ServerCog,
-          active: (path) => path.startsWith("/runtimes"),
         },
         {
           label: "Skills",

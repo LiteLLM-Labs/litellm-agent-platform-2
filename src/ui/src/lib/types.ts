@@ -16,12 +16,14 @@ export interface OpencodeSession {
   [k: string]: unknown;
 }
 
-export type AgentRuntimeId = "cursor" | "claude_agents";
+export type AgentRuntimeId = "claude_managed_agents" | "cursor" | "opencode";
 
 export interface AgentRuntime {
   id: AgentRuntimeId;
   name: string;
   default_api_base: string;
+  credential_provider_id: string;
+  credential_provider_name: string;
   connected: boolean;
   api_base?: string | null;
   masked_api_key?: string | null;

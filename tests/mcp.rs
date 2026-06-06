@@ -43,6 +43,7 @@ fn base_config(api_base: String) -> GatewayConfig {
             database_url: None,
             ..Default::default()
         },
+        slack: Default::default(),
         agents: Vec::new(),
     }
 }
