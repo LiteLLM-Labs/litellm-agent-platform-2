@@ -46,6 +46,10 @@ fn public_routes() -> Router<Arc<AppState>> {
             "/v1/sessions/{session_id}/events/stream",
             get(sessions::runtime_events),
         )
+        .route(
+            "/v1/sessions/{session_id}/events",
+            get(sessions::runtime_event_list),
+        )
 }
 
 fn api_routes() -> Router<Arc<AppState>> {
@@ -108,6 +112,10 @@ fn session_routes() -> Router<Arc<AppState>> {
         .route(
             "/session/{session_id}/runtime_events",
             get(sessions::runtime_events),
+        )
+        .route(
+            "/session/{session_id}/runtime_events/list",
+            get(sessions::runtime_event_list),
         )
         .route("/session/{session_id}/abort", post(sessions::abort))
 }

@@ -33,7 +33,7 @@ import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
-import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel } from "@/lib/api";
+import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel, listRuntimeEvents } from "@/lib/api";
 import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
 import type { Agent, AgentRuntimeId, HarnessMessage, HarnessMessagePart } from "@/lib/types";
@@ -257,6 +257,7 @@ function ChatInner() {
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
+  const seenRuntimeEventIdsRef = useRef<Set<string>>(new Set());
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -331,6 +332,9 @@ function ChatInner() {
   // Fetch session metadata to get the locked agent
   useEffect(() => {
     if (!sid) return;
+    seenRuntimeEventIdsRef.current = new Set();
+    eventBufferRef.current = [];
+    runtimeAssistantRef.current = null;
     setSessionLoaded(false);
     getSession(sid).then(s => {
       const a = s.agent_id ?? s.agent ?? s.harness;
@@ -548,6 +552,12 @@ function ChatInner() {
   }, [runtimeAssistantIds, sessionRuntime, sid]);
 
   const handleRuntimeEvent = useCallback((ev: RuntimeAgentEvent) => {
+    const eventId = typeof ev.id === "string" ? ev.id : "";
+    if (eventId) {
+      if (seenRuntimeEventIdsRef.current.has(eventId)) return;
+      seenRuntimeEventIdsRef.current.add(eventId);
+    }
+
     eventBufferRef.current = [
       ...eventBufferRef.current.slice(-499),
       { ts: Date.now(), ev: ev as Frame["ev"] },
@@ -617,6 +627,9 @@ function ChatInner() {
       onEvent: handleRuntimeEvent,
       onError: (err) => setError(err instanceof Error ? err.message : String(err)),
     });
+    listRuntimeEvents(sid)
+      .then((events) => events.forEach(handleRuntimeEvent))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     if (autostartPrompt && autostartedRef.current !== sid) {
       autostartedRef.current = sid;
       beginRuntimeTurn(autostartPrompt);

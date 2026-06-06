@@ -752,6 +752,13 @@ export interface RuntimeAgentEvent {
   [key: string]: unknown;
 }
 
+export async function listRuntimeEvents(sessionId: string): Promise<RuntimeAgentEvent[]> {
+  const res = await reqHarness(`/v1/sessions/${encodeURIComponent(sessionId)}/events`);
+  const data = await jsonOrThrow<{ data?: RuntimeAgentEvent[] } | RuntimeAgentEvent[]>(res);
+  if (Array.isArray(data)) return data;
+  return Array.isArray(data.data) ? data.data : [];
+}
+
 export function subscribeRuntimeEvents(opts: {
   sessionId: string;
   onEvent: (ev: RuntimeAgentEvent) => void;
