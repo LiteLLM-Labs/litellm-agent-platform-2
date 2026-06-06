@@ -6,7 +6,9 @@ use crate::{
     sdk::agents::{AgentSdkError, CreateSessionParams, Lap, LapConfig, OPENCODE},
 };
 
-use super::base::{RuntimeCredential, RuntimeProvision, RuntimeSessionInput};
+use super::base::{RuntimeCredential, RuntimeProvision, RuntimeSessionInput, RuntimeTool};
+
+pub const TOOLS: &[RuntimeTool] = &[];
 
 pub async fn provision(
     http: &reqwest::Client,

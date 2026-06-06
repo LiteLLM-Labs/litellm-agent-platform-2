@@ -23,6 +23,26 @@ pub async fn assert_agent_runtime_catalog(fixture: &AppFixture) {
     assert_eq!(runtimes[0]["credential_provider_id"], "anthropic");
     assert_eq!(runtimes[1]["credential_provider_id"], "cursor");
     assert_eq!(runtimes[2]["credential_provider_id"], "opencode");
+    let claude_tools: Vec<_> = runtimes[0]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        claude_tools,
+        vec![
+            "bash",
+            "read",
+            "write",
+            "edit",
+            "glob",
+            "grep",
+            "web_fetch",
+            "web_search"
+        ]
+    );
+    assert!(runtimes[2]["tools"].as_array().unwrap().is_empty());
 }
 
 pub async fn create_agent(fixture: &AppFixture) -> String {

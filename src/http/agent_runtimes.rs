@@ -10,9 +10,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     db::credentials,
     errors::GatewayError,
-    managed_agents::providers::base::{
-        default_api_base, normalize_runtime, RuntimeCredential, CLAUDE_AGENTS_RUNTIME,
-        CLAUDE_AGENTS_RUNTIME_LEGACY, CURSOR_RUNTIME,
+    managed_agents::providers::{
+        base::{
+            default_api_base, normalize_runtime, RuntimeCredential, RuntimeTool,
+            CLAUDE_AGENTS_RUNTIME, CLAUDE_AGENTS_RUNTIME_LEGACY, CURSOR_RUNTIME,
+        },
+        runtime_tools,
     },
     proxy::{
         auth::master_key::require_master_key,
@@ -38,6 +41,7 @@ pub struct RuntimeResponse {
     pub default_api_base: String,
     pub credential_provider_id: String,
     pub credential_provider_name: String,
+    pub tools: Vec<RuntimeTool>,
     pub connected: bool,
     pub api_base: Option<String>,
     pub masked_api_key: Option<String>,
@@ -208,6 +212,7 @@ async fn runtime_value(
         default_api_base: entry.default_api_base.to_owned(),
         credential_provider_id: provider.id.to_owned(),
         credential_provider_name: provider.name.to_owned(),
+        tools: runtime_tools(entry.id).unwrap_or(&[]).to_vec(),
         connected: credential.is_some(),
         api_base: credential.as_ref().map(|value| value.api_base.clone()),
         masked_api_key: credential.map(|value| provider_credentials::mask_api_key(&value.api_key)),

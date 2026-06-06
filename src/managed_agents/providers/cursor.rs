@@ -9,7 +9,11 @@ use crate::{
     },
 };
 
-use super::base::{RuntimeCredential, RuntimeProvision, RuntimeSessionInput, CURSOR_RUNTIME};
+use super::base::{
+    RuntimeCredential, RuntimeProvision, RuntimeSessionInput, RuntimeTool, CURSOR_RUNTIME,
+};
+
+pub const TOOLS: &[RuntimeTool] = &[];
 
 pub async fn provision(
     http: &reqwest::Client,

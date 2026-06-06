@@ -18,12 +18,20 @@ export interface OpencodeSession {
 
 export type AgentRuntimeId = "claude_managed_agents" | "cursor" | "opencode";
 
+export interface AgentRuntimeTool {
+  id: string;
+  name: string;
+  description: string;
+  enabled_by_default: boolean;
+}
+
 export interface AgentRuntime {
   id: AgentRuntimeId;
   name: string;
   default_api_base: string;
   credential_provider_id: string;
   credential_provider_name: string;
+  tools: AgentRuntimeTool[];
   connected: boolean;
   api_base?: string | null;
   masked_api_key?: string | null;

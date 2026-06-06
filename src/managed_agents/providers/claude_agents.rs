@@ -3,11 +3,62 @@ use serde_json::{json, Value};
 use crate::{db::managed_agents::registry::schema::ManagedAgentRow, errors::GatewayError};
 
 use super::base::{
-    runtime_agent_id, RuntimeCredential, RuntimeProvision, RuntimeSessionInput,
-    CLAUDE_AGENTS_RUNTIME,
+    runtime_agent_id, selected_tool_ids, toolset_payload, RuntimeCredential, RuntimeProvision,
+    RuntimeSessionInput, RuntimeTool, CLAUDE_AGENTS_RUNTIME,
 };
 
 const MANAGED_AGENTS_BETA: &str = "managed-agents-2026-04-01";
+const AGENT_TOOLSET: &str = "agent_toolset_20260401";
+pub const TOOLS: &[RuntimeTool] = &[
+    RuntimeTool {
+        id: "bash",
+        name: "Shell",
+        description: "Run shell commands in the agent environment.",
+        enabled_by_default: true,
+    },
+    RuntimeTool {
+        id: "read",
+        name: "Read files",
+        description: "Read files from the agent environment.",
+        enabled_by_default: true,
+    },
+    RuntimeTool {
+        id: "write",
+        name: "Write files",
+        description: "Create or overwrite files in the agent environment.",
+        enabled_by_default: true,
+    },
+    RuntimeTool {
+        id: "edit",
+        name: "Edit files",
+        description: "Patch existing files in the agent environment.",
+        enabled_by_default: true,
+    },
+    RuntimeTool {
+        id: "glob",
+        name: "Find files",
+        description: "Find files by glob pattern.",
+        enabled_by_default: true,
+    },
+    RuntimeTool {
+        id: "grep",
+        name: "Search files",
+        description: "Search file contents by regular expression.",
+        enabled_by_default: true,
+    },
+    RuntimeTool {
+        id: "web_fetch",
+        name: "Fetch URL",
+        description: "Fetch content from a URL.",
+        enabled_by_default: true,
+    },
+    RuntimeTool {
+        id: "web_search",
+        name: "Web search",
+        description: "Search the web for information.",
+        enabled_by_default: true,
+    },
+];
 
 pub async fn provision(
     http: &reqwest::Client,
@@ -54,13 +105,17 @@ async fn create_agent(
         "name": agent.name,
         "model": { "id": agent.model },
         "system": agent.system,
-        "tools": [{ "type": "agent_toolset_20260401" }],
+        "tools": agent_tools(agent),
         "metadata": {
             "local_agent_id": agent.id,
             "source": "litellm-agent-platform"
         }
     });
     post_managed(http, base, api_key, "/v1/agents", body).await
+}
+
+fn agent_tools(agent: &ManagedAgentRow) -> Value {
+    toolset_payload(AGENT_TOOLSET, &selected_tool_ids(&agent.tools, TOOLS))
 }
 
 async fn create_environment(

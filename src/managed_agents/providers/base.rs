@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{
     db::managed_agents::registry::schema::ManagedAgentRow,
@@ -32,6 +32,14 @@ pub struct RuntimeProvision {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct RuntimeTool {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub enabled_by_default: bool,
+}
+
 pub fn validate_runtime(runtime: &str) -> bool {
     normalize_runtime(runtime).is_some()
 }
@@ -53,4 +61,47 @@ pub fn default_api_base(runtime: &str) -> Option<&'static str> {
 
 pub fn runtime_agent_id(agent: &ManagedAgentRow, runtime: &str) -> String {
     format!("{runtime}:{}", agent.id)
+}
+
+pub fn selected_tool_ids(tools: &Value, defaults: &'static [RuntimeTool]) -> Vec<String> {
+    let mut values = tools
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(tool_id)
+        .filter(|id| defaults.iter().any(|tool| tool.id == id))
+        .collect::<Vec<_>>();
+    if values.is_empty() && tools.as_array().is_none_or(Vec::is_empty) {
+        values = defaults
+            .iter()
+            .filter(|tool| tool.enabled_by_default)
+            .map(|tool| tool.id.to_owned())
+            .collect();
+    }
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn tool_id(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .or_else(|| value.get("type").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+pub fn toolset_payload(toolset_type: &str, selected: &[String]) -> Value {
+    if selected.is_empty() {
+        return json!([]);
+    }
+    json!([{
+        "type": toolset_type,
+        "default_config": { "enabled": false },
+        "configs": selected
+            .iter()
+            .map(|name| json!({ "name": name, "enabled": true }))
+            .collect::<Vec<_>>()
+    }])
 }
