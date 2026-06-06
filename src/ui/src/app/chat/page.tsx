@@ -239,6 +239,30 @@ function ChatInner() {
     router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
   }, [sid, sessionHarness, router]);
 
+  const appendRuntimeUserMessage = useCallback((text: string) => {
+    if (!sid) return;
+    const stamp = Date.now().toString(36);
+    setMessages((prev) => [
+      ...(prev ?? []),
+      {
+        info: {
+          id: `${sid}_user_${stamp}`,
+          role: "user",
+          sessionID: sid,
+        },
+        parts: [
+          {
+            id: `${sid}_user_${stamp}_text`,
+            messageID: `${sid}_user_${stamp}`,
+            sessionID: sid,
+            type: "text",
+            text,
+          },
+        ],
+      },
+    ]);
+  }, [sid]);
+
   const runtimeAssistantIds = useCallback(() => {
     if (!sid) return null;
     if (!runtimeAssistantRef.current) {
@@ -400,6 +424,16 @@ function ChatInner() {
     }
     setSessionStatus("busy");
   }, [appendRuntimePartText, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
+
+  const onComposerSent = useCallback((text: string) => {
+    if (sessionRuntime) {
+      appendRuntimeUserMessage(text);
+      ensureRuntimeAssistantMessage();
+      setSessionStatus("busy");
+      return;
+    }
+    void refetch();
+  }, [appendRuntimeUserMessage, ensureRuntimeAssistantMessage, refetch, sessionRuntime]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
@@ -739,7 +773,12 @@ function ChatInner() {
           </div>
         </div>
 
-        <Composer sessionId={sid} model={model} onSent={refetch} />
+        <Composer
+          sessionId={sid}
+          model={model}
+          onSent={onComposerSent}
+          disabled={Boolean(sessionRuntime && sessionStatus === "busy")}
+        />
       </div>
 
       <InspectorPanel
