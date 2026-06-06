@@ -1,15 +1,16 @@
-# LAP Managed Agents SDK Contract
+# Managed Agent Runtime SDK
 
-This SDK is a provider-facing Rust client for managed-agent runtimes. It does
-not read or write LAP database state. LAP service code owns DB lookup,
-idempotency, vaults, and remote-ID storage.
+This SDK is a provider-facing Rust client for managed-agent runtimes. The Rust
+client type is still named `Lap` for API compatibility. It does not read or
+write LAP database state; service code owns DB lookup, idempotency, vaults, and
+remote-ID storage.
 
 ## Rust Quickstart
 
 ```rust
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
-    AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
+    AgentEventPayload, AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
     CreateSessionParams, Lap, LapConfig, SendEventsParams,
 };
 use serde_json::json;
@@ -95,26 +96,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(event) = stream.next().await {
         let event = event?;
-        match event.event_type.as_str() {
-            "agent.message" => {
-                if let Some(content) = event.data.get("content").and_then(|value| value.as_array()) {
-                    for block in content {
-                        if let Some(text) = block.get("text").and_then(|value| value.as_str()) {
-                            print!("{text}");
-                        }
+        match event.payload() {
+            AgentEventPayload::AgentMessage(message) => {
+                for block in message.content {
+                    if let Some(text) = block.get("text").and_then(|value| value.as_str()) {
+                        print!("{text}");
                     }
                 }
             }
-            "agent.tool_use" => {
-                if let Some(name) = event.data.get("name").and_then(|value| value.as_str()) {
+            AgentEventPayload::AgentToolUse(tool) => {
+                if let Some(name) = tool.name {
                     println!("\n[Using tool: {name}]");
                 }
             }
-            "session.status_idle" => {
+            AgentEventPayload::SessionStatusIdle(_) => {
                 println!("\n\nAgent finished.");
                 break;
             }
-            "session.error" => return Err(format!("session error: {:?}", event.data).into()),
+            AgentEventPayload::SessionError(error) => {
+                return Err(format!("session error: {:?}", error.raw).into())
+            }
             _ => {}
         }
     }
@@ -127,14 +128,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - `LapConfig::anthropic(...)` configures the `claude_managed_agents` runtime.
 - `LapConfig::cursor(...)` configures the `cursor` runtime.
+- Gateway and UI runtime configuration uses `claude_agents`; the SDK runtime id
+  remains `claude_managed_agents`.
 - `lap_agent_runtime` selects the runtime.
 - `lap_provider_options` is reserved for LAP gateway adapters that must carry
-  provider-specific fields such as Cursor `source` and `target`.
+  provider-specific fields such as Cursor `repos` and `autoCreatePR`.
 - `agent.id`, `environment.id`, and `session.id` are provider/runtime IDs.
 - The SDK forwards Anthropic-shaped payloads to the runtime provider.
 - Cursor requests are translated to Cursor's v1 Cloud Agent APIs.
 - The SDK sets the Managed Agents beta header and parses SSE session events.
 - Cursor stream chunks are normalized to Anthropic Managed Agents event shape.
+- `AgentEvent` keeps the flat JSON event shape and adds typed views through
+  `kind()` and `payload()`.
+- Runtime-specific behavior is isolated behind provider-owned adapters under
+  `src/sdk/providers/<provider>/runtime/`.
 - The gateway exposes the same normalized stream at `/v1/sessions/{session_id}/events/stream`.
   The route requires the configured master key in `Authorization: Bearer ...` or `?key=...`.
 - The SDK does not perform DB calls, idempotency checks, or vault operations.
@@ -156,9 +163,11 @@ claude_managed_agents
 cursor
 ```
 
-## Future Python Sugar
+## Possible Python Wrapper
 
-Python bindings can wrap this Rust client and preserve the Anthropic-like shape:
+This wrapper is not a shipped public API. Python bindings can wrap this Rust
+client and preserve the Anthropic-like shape:
+
 
 ```python
 from lap import LAP

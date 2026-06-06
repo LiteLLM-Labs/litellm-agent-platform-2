@@ -10,10 +10,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     db::credentials,
     errors::GatewayError,
-    managed_agents::providers::base::{
-        default_api_base, normalize_runtime, RuntimeCredential, CLAUDE_AGENTS_RUNTIME,
-        CLAUDE_AGENTS_RUNTIME_LEGACY, CURSOR_RUNTIME,
-    },
     proxy::{
         auth::master_key::require_master_key,
         credential_crypto,
@@ -23,8 +19,21 @@ use crate::{
         },
         state::AppState,
     },
-    sdk::agents::{AgentRuntime, AgentRuntimeCatalogEntry, OPENCODE},
+    sdk::{
+        agents::{CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
+        providers,
+    },
 };
+
+/// Legacy ID used before we renamed the runtime.
+const CLAUDE_AGENTS_RUNTIME_LEGACY: &str = "claude_agents";
+
+/// Opaque credential loaded from the DB for a runtime.
+#[derive(Debug, Clone)]
+pub struct RuntimeCredential {
+    pub(crate) api_key: String,
+    pub(crate) api_base: String,
+}
 
 #[derive(Debug, Serialize)]
 pub struct AgentRuntimesResponse {
@@ -79,12 +88,18 @@ pub async fn save(
             "api_key is required".to_owned(),
         ));
     }
+    let registry = providers::runtime_registry();
     let api_base = input
         .api_base
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| default_api_base(runtime).unwrap_or_default());
+        .unwrap_or_else(|| {
+            registry
+                .entry_for_id(runtime)
+                .map(|e| e.default_api_base)
+                .unwrap_or_default()
+        });
     provider_credentials::save(
         pool,
         &state.config,
@@ -114,7 +129,7 @@ pub async fn delete(
             .await?;
     let deleted_runtime =
         credentials::delete_by_name(pool, &legacy_credential_name(runtime)).await?;
-    let deleted_legacy = if runtime == CLAUDE_AGENTS_RUNTIME {
+    let deleted_legacy = if runtime == CLAUDE_MANAGED_AGENTS {
         credentials::delete_by_name(pool, &legacy_credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY))
             .await?
     } else {
@@ -144,7 +159,7 @@ pub async fn load_credential(
     }
     let row = match credentials::get_by_name(pool, &legacy_credential_name(runtime)).await? {
         Some(row) => row,
-        None if runtime == CLAUDE_AGENTS_RUNTIME => {
+        None if runtime == CLAUDE_MANAGED_AGENTS => {
             match credentials::get_by_name(
                 pool,
                 &legacy_credential_name(CLAUDE_AGENTS_RUNTIME_LEGACY),
@@ -185,53 +200,61 @@ fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), GatewayErr
 }
 
 async fn runtime_values(state: &AppState) -> Result<Vec<RuntimeResponse>, GatewayError> {
+    let registry = providers::runtime_registry();
     let mut values = Vec::new();
-    for entry in AgentRuntime::catalog() {
-        values.push(runtime_value(state, *entry).await?);
+    for entry in registry.all_entries() {
+        let provider = provider_credentials::catalog_entry(credential_provider_id(entry.id)?)?;
+        let credential = match load_credential(state, entry.id).await {
+            Ok(value) => Some(value),
+            Err(GatewayError::InvalidJsonMessage(_)) | Err(GatewayError::MissingDatabase) => None,
+            Err(error) => return Err(error),
+        };
+        values.push(RuntimeResponse {
+            id: entry.id.to_owned(),
+            name: entry.name.to_owned(),
+            default_api_base: entry.default_api_base.to_owned(),
+            credential_provider_id: provider.id.to_owned(),
+            credential_provider_name: provider.name.to_owned(),
+            connected: credential.is_some(),
+            api_base: credential.as_ref().map(|c| c.api_base.clone()),
+            masked_api_key: credential
+                .map(|c| provider_credentials::mask_api_key(&c.api_key)),
+        });
     }
     Ok(values)
-}
-
-async fn runtime_value(
-    state: &AppState,
-    entry: AgentRuntimeCatalogEntry,
-) -> Result<RuntimeResponse, GatewayError> {
-    let provider = provider_credentials::catalog_entry(credential_provider_id(entry.id)?)?;
-    let credential = match load_credential(state, entry.id).await {
-        Ok(value) => Some(value),
-        Err(GatewayError::InvalidJsonMessage(_)) | Err(GatewayError::MissingDatabase) => None,
-        Err(error) => return Err(error),
-    };
-    Ok(RuntimeResponse {
-        id: entry.id.to_owned(),
-        name: entry.name.to_owned(),
-        default_api_base: entry.default_api_base.to_owned(),
-        credential_provider_id: provider.id.to_owned(),
-        credential_provider_name: provider.name.to_owned(),
-        connected: credential.is_some(),
-        api_base: credential.as_ref().map(|value| value.api_base.clone()),
-        masked_api_key: credential.map(|value| provider_credentials::mask_api_key(&value.api_key)),
-    })
 }
 
 fn legacy_credential_name(runtime: &str) -> String {
     format!("agent-runtime:{runtime}")
 }
 
-fn credential_provider_id(runtime: &str) -> Result<&'static str, GatewayError> {
-    match canonical_runtime(runtime)? {
-        CLAUDE_AGENTS_RUNTIME => Ok(ANTHROPIC_PROVIDER_ID),
-        CURSOR_RUNTIME => Ok(CURSOR_PROVIDER_ID),
-        OPENCODE => Ok(OPENCODE_PROVIDER_ID),
-        runtime => Err(GatewayError::InvalidJsonMessage(format!(
-            "unsupported runtime: {runtime}"
-        ))),
+/// Map a runtime string ID (possibly legacy) to its canonical form.
+fn canonical_runtime(runtime: &str) -> Result<&'static str, GatewayError> {
+    // Handle the legacy "claude_agents" alias.
+    if runtime == CLAUDE_AGENTS_RUNTIME_LEGACY {
+        return Ok(CLAUDE_MANAGED_AGENTS);
     }
+    providers::runtime_registry()
+        .entry_for_id(runtime)
+        .map(|e| e.id)
+        .ok_or_else(|| {
+            GatewayError::InvalidJsonMessage(format!("unsupported runtime: {runtime}"))
+        })
 }
 
-fn canonical_runtime(runtime: &str) -> Result<&'static str, GatewayError> {
-    normalize_runtime(runtime)
-        .ok_or_else(|| GatewayError::InvalidJsonMessage(format!("unsupported runtime: {runtime}")))
+/// Map a runtime ID to the provider credential ID used in the credential store.
+///
+/// NOTE: This has provider-specific string literals by design; a follow-up will
+/// make providers self-register their credential provider ID.
+fn credential_provider_id(runtime: &str) -> Result<&'static str, GatewayError> {
+    match runtime {
+        CLAUDE_MANAGED_AGENTS | CLAUDE_AGENTS_RUNTIME_LEGACY => Ok(ANTHROPIC_PROVIDER_ID),
+        CURSOR => Ok(CURSOR_PROVIDER_ID),
+        OPENCODE => Ok(OPENCODE_PROVIDER_ID),
+        _ => Err(GatewayError::InvalidConfig(format!(
+            "no credential provider for runtime: {runtime}"
+        ))),
+    }
 }
 
 fn decrypt(

@@ -1,9 +1,18 @@
+//! Base contract for provider endpoint transformations.
+//!
+//! Implement this once per provider endpoint, such as Anthropic Messages or
+//! OpenAI Responses. Routing selects the implementation; HTTP owns networking.
+
+pub mod anthropic_messages;
+pub mod openai_responses;
+pub(crate) mod runtime;
+
 use std::{collections::HashMap, sync::Arc};
 
 use axum::http::HeaderMap;
 use serde_json::Value;
 
-use crate::{errors::GatewayError, sdk::router::Deployment};
+use crate::{errors::GatewayError, sdk::routing::Deployment};
 
 pub struct ProviderRequest {
     pub body: Vec<u8>,

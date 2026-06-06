@@ -182,14 +182,11 @@ fn cursor_create_agent_request() -> Value {
         "prompt": { "text": "watch deploys\n\nFix the failing tests" },
         "model": { "id": "composer-2" },
         "name": "ops-agent",
-        "source": {
-            "repository": "https://github.com/acme/app",
-            "ref": "main"
-        },
-        "target": {
-            "autoCreatePr": true,
-            "branchName": "agent/cursor-proof"
-        }
+        "repos": [{
+            "url": "https://github.com/acme/app",
+            "startingRef": "main"
+        }],
+        "autoCreatePR": true
     })
 }
 
@@ -210,13 +207,9 @@ fn cursor_session_request(agent_id: &str) -> Value {
 }
 
 fn assert_cursor_repo_config(request: &Value) {
-    assert_eq!(
-        request["source"]["repository"],
-        "https://github.com/acme/app"
-    );
-    assert_eq!(request["source"]["ref"], "main");
-    assert_eq!(request["target"]["branchName"], "agent/cursor-proof");
-    assert_eq!(request["target"]["autoCreatePr"], true);
+    assert_eq!(request["repos"][0]["url"], "https://github.com/acme/app");
+    assert_eq!(request["repos"][0]["startingRef"], "main");
+    assert_eq!(request["autoCreatePR"], true);
 }
 
 fn stream_body(run_id: &str, first: &str, second: &str) -> String {

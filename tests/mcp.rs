@@ -15,8 +15,8 @@ use litellm_rust::{
         state::AppState,
     },
     sdk::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
+        providers::{self, ProviderRegistry},
+        routing::Router as ModelRouter,
     },
 };
 use serde_json::json;

@@ -8,13 +8,13 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::{
-    cursor_stream::normalize_cursor_stream,
     events::{stream_events, AgentEventStream},
     resources::Beta,
     responses::{ensure_success, response_json},
     runtime_config::{configured_http_client, runtime_configs, RuntimeConfig},
     types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
+use crate::sdk::{providers, providers::base::runtime::RuntimeAdapter};
 
 #[derive(Clone)]
 pub struct Lap {
@@ -29,11 +29,11 @@ struct Inner {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct SessionContext {
-    pub(super) runtime: AgentRuntime,
-    pub(super) provider_session_id: Option<String>,
-    pub(super) agent_id: Option<String>,
-    pub(super) run_id: Option<String>,
+pub(crate) struct SessionContext {
+    pub(crate) runtime: AgentRuntime,
+    pub(crate) provider_session_id: Option<String>,
+    pub(crate) agent_id: Option<String>,
+    pub(crate) run_id: Option<String>,
 }
 
 impl Lap {
@@ -46,26 +46,11 @@ impl Lap {
     }
 
     pub fn register_session(&self, session: ManagedSessionRef) -> Result<(), AgentSdkError> {
-        let ManagedSessionRef {
-            session_id,
-            lap_agent_runtime,
-            provider_session_id,
-            provider_agent_id,
-            provider_run_id,
-        } = session;
-        let agent_id = match lap_agent_runtime {
-            AgentRuntime::Cursor => provider_agent_id.or_else(|| provider_session_id.clone()),
-            AgentRuntime::ClaudeManagedAgents | AgentRuntime::OpenCode => provider_agent_id,
-        };
-        self.remember_session_context(
-            &session_id,
-            SessionContext {
-                runtime: lap_agent_runtime,
-                provider_session_id,
-                agent_id,
-                run_id: provider_run_id,
-            },
-        )
+        let session_id = session.session_id.clone();
+        let context = self
+            .adapter(session.lap_agent_runtime)?
+            .session_context(session);
+        self.remember_session_context(&session_id, context)
     }
 
     fn with_http(http: reqwest::Client, runtimes: HashMap<AgentRuntime, RuntimeConfig>) -> Self {
@@ -83,7 +68,7 @@ impl Lap {
         Beta { client: self }
     }
 
-    pub(super) async fn post<T: Serialize>(
+    pub(crate) async fn post<T: Serialize>(
         &self,
         runtime: AgentRuntime,
         path: &str,
@@ -116,7 +101,7 @@ impl Lap {
         response_json(response).await
     }
 
-    pub(super) async fn stream(
+    pub(crate) async fn stream(
         &self,
         runtime: AgentRuntime,
         path: &str,
@@ -135,13 +120,14 @@ impl Lap {
             }
         }
         let stream = stream_events(ensure_success(response).await?);
-        match runtime {
-            AgentRuntime::ClaudeManagedAgents | AgentRuntime::OpenCode => Ok(stream),
-            AgentRuntime::Cursor => Ok(normalize_cursor_stream(stream)),
+        // OpenCode stream normalization is handled in session_events.rs; skip adapter for it.
+        if runtime == AgentRuntime::OpenCode {
+            return Ok(stream);
         }
+        Ok(self.adapter(runtime)?.normalize_stream(stream))
     }
 
-    pub(super) fn request(
+    pub(crate) fn request(
         &self,
         runtime: AgentRuntime,
         method: Method,
@@ -178,6 +164,13 @@ impl Lap {
         Ok(config.authorize_opencode_bearer(request))
     }
 
+    pub(super) fn adapter(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<Arc<dyn RuntimeAdapter>, AgentSdkError> {
+        providers::adapter(runtime).ok_or(AgentSdkError::RuntimeNotConfigured(runtime))
+    }
+
     pub(super) fn default_runtime(&self) -> Result<AgentRuntime, AgentSdkError> {
         if self.inner.runtimes.len() == 1 {
             self.inner
@@ -209,7 +202,7 @@ impl Lap {
             .unwrap_or_else(|| self.default_runtime())
     }
 
-    pub(super) fn context_for_session(
+    pub(crate) fn context_for_session(
         &self,
         session_id: &str,
     ) -> Result<Option<SessionContext>, AgentSdkError> {
@@ -221,7 +214,7 @@ impl Lap {
         Ok(contexts.get(session_id).cloned())
     }
 
-    pub(super) fn remember_cursor_run(
+    pub(crate) fn remember_cursor_run(
         &self,
         agent_id: &str,
         run_id: &str,
@@ -234,7 +227,7 @@ impl Lap {
         Ok(())
     }
 
-    pub(super) fn cursor_run_for_agent(
+    pub(crate) fn cursor_run_for_agent(
         &self,
         agent_id: &str,
     ) -> Result<Option<String>, AgentSdkError> {
@@ -247,7 +240,7 @@ impl Lap {
             .cloned())
     }
 
-    pub(super) fn remember_session_context(
+    pub(crate) fn remember_session_context(
         &self,
         session_id: &str,
         context: SessionContext,
@@ -260,7 +253,7 @@ impl Lap {
         Ok(())
     }
 
-    pub(super) fn remember_session(
+    pub(crate) fn remember_session(
         &self,
         session_id: &str,
         runtime: AgentRuntime,
@@ -278,7 +271,7 @@ impl Lap {
 }
 
 impl SessionContext {
-    pub(super) fn cursor(agent_id: String, run_id: Option<String>) -> Self {
+    pub(crate) fn cursor(agent_id: String, run_id: Option<String>) -> Self {
         Self {
             runtime: AgentRuntime::Cursor,
             provider_session_id: Some(agent_id.clone()),

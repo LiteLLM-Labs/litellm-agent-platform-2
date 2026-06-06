@@ -13,7 +13,7 @@ use litellm_rust::{
         config::{GatewayConfig, GeneralSettings, SlackSettings},
         state::AppState,
     },
-    sdk::{providers::transform::ProviderRegistry, router::Router as ModelRouter},
+    sdk::{providers::ProviderRegistry, routing::Router as ModelRouter},
 };
 use serde_json::{json, Value};
 use sqlx::PgPool;

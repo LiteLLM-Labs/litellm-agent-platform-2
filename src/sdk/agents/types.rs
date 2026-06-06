@@ -147,6 +147,13 @@ impl Default for LapConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentWorkspace {
+    pub repository: String,
+    pub ref_name: Option<String>,
+    pub auto_create_pr: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateAgentParams {
     #[serde(skip)]
@@ -162,6 +169,12 @@ pub struct CreateAgentParams {
     pub tools: Vec<Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<Value>,
+    #[serde(skip)]
+    pub env_vars: Option<HashMap<String, String>>,
+    #[serde(skip)]
+    pub workspace: Option<AgentWorkspace>,
+    #[serde(skip)]
+    pub metadata: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -246,6 +259,15 @@ pub struct ManagedSessionRef {
 pub struct ManagedAgent {
     pub id: String,
     pub version: Option<u64>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub model: Option<String>,
+    pub system: Option<String>,
+    pub tools: Vec<Value>,
+    pub mcp_servers: Vec<Value>,
+    pub metadata: Option<Value>,
+    pub created_at: Option<i64>,
+    pub updated_at: Option<i64>,
     pub raw: Value,
 }
 
@@ -258,6 +280,12 @@ pub struct Environment {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
     pub id: String,
+    pub agent: Option<String>,
+    pub environment_id: Option<String>,
+    pub status: Option<String>,
+    pub metadata: Option<Value>,
+    pub created_at: Option<i64>,
+    pub updated_at: Option<i64>,
     pub raw: Value,
 }
 

@@ -2,7 +2,7 @@ use axum::http::{HeaderMap, HeaderValue};
 use litellm_rust::{
     callbacks::standard_logging::{error_information, StandardLoggingPayload},
     proxy::config::GeneralSettings,
-    sdk::router::Deployment,
+    sdk::routing::Deployment,
 };
 use serde_json::json;
 use std::collections::HashMap;
