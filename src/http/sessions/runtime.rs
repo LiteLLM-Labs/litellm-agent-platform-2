@@ -66,7 +66,14 @@ async fn create_runtime_session_row(
     input: CreateSessionRequest,
 ) -> Result<CreatedRuntimeSession, GatewayError> {
     let runtime = validated_runtime(&input)?;
-    let agent = load_agent(pool, &input).await?;
+    let mut agent = load_agent(pool, &input).await?;
+    // Compose the agent's attached skills into its system prompt so the runtime
+    // provider (e.g. claude_managed_agents) receives skill content downstream.
+    // Without this the provider agent is created with the bare base system and
+    // skills are silently dropped. Shared with the non-runtime agent-run path.
+    agent.system =
+        crate::db::managed_agents::skills::compose::compose_agent_system_prompt(pool, &agent)
+            .await?;
     let credential = crate::http::agent_runtimes::load_credential(state, &runtime).await?;
     let environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
