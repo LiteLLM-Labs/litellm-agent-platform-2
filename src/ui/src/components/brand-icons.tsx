@@ -100,6 +100,22 @@ function CodexIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function CursorIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <rect width="48" height="48" rx="10" fill="#000" />
+      <path
+        fill="#fff"
+        d="M23.2 8.9a3.2 3.2 0 0 1 3.2 0l14.9 8.7a3.2 3.2 0 0 1 1.6 2.8v17.2a3.2 3.2 0 0 1-1.6 2.8l-14.9 8.7a3.2 3.2 0 0 1-3.2 0L8.7 40.4a3.2 3.2 0 0 1-1.6-2.8V20.4a3.2 3.2 0 0 1 1.6-2.8l14.5-8.7Z"
+      />
+      <path
+        fill="#000"
+        d="M12.2 19.4h23.4a.8.8 0 0 1 .7 1.2L25.1 40.1a.8.8 0 0 1-1.5-.1l-3.9-11.4a2 2 0 0 0-.8-1.1L11.8 21a.8.8 0 0 1 .4-1.5Z"
+      />
+    </svg>
+  );
+}
+
 function FallbackIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" {...props}>
@@ -112,6 +128,7 @@ const ICONS: Record<string, (p: SVGProps<SVGSVGElement>) => ReactNode> = {
   anthropic: AnthropicIcon,
   claude: ClaudeIcon,
   codex: CodexIcon,
+  cursor: CursorIcon,
   gmail: GmailIcon,
   linear: LinearIcon,
   pylon: PylonIcon,

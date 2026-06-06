@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    routing::{any, get, post},
+    routing::{any, get, post, put},
     Router,
 };
 
@@ -32,6 +32,14 @@ pub fn router(state: Arc<AppState>) -> Router {
             any(crate::http::harness_proxy::proxy),
         )
         .route("/api/capabilities", get(capabilities))
+        .route(
+            "/api/agent-runtimes",
+            get(crate::http::agent_runtimes::list),
+        )
+        .route(
+            "/api/agent-runtimes/{runtime}/credentials",
+            put(crate::http::agent_runtimes::save).delete(crate::http::agent_runtimes::delete),
+        )
         .route(
             "/api/providers",
             get(crate::http::provider_credentials::list),

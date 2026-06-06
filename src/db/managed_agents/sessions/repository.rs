@@ -1,3 +1,4 @@
+use serde_json::Value;
 use sqlx::PgPool;
 
 use crate::{
@@ -29,6 +30,75 @@ pub async fn create(
     .bind(title)
     .bind(now_ms())
     .bind(timezone)
+    .fetch_one(pool)
+    .await
+    .map_err(GatewayError::Database)
+}
+
+pub async fn create_runtime(
+    pool: &PgPool,
+    runtime: &str,
+    agent_id: &str,
+    title: &str,
+    timezone: Option<&str>,
+    runtime_agent_ref_id: Option<&str>,
+    environment: Value,
+    provider_session_id: Option<&str>,
+    provider_run_id: Option<&str>,
+) -> Result<SessionRow, GatewayError> {
+    let session_id = id("ses");
+    sqlx::query_as::<_, SessionRow>(
+        r#"
+        INSERT INTO "LiteLLM_ManagedAgentSessionsTable" (
+          id, harness, agent_id, title, created_at, tz, runtime,
+          runtime_agent_ref_id, environment_json, provider_session_id,
+          provider_run_id, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $2, $7, $8, $9, $10, 'starting')
+        RETURNING *
+        "#,
+    )
+    .bind(session_id)
+    .bind(runtime)
+    .bind(agent_id)
+    .bind(title)
+    .bind(now_ms())
+    .bind(timezone)
+    .bind(runtime_agent_ref_id)
+    .bind(environment)
+    .bind(provider_session_id)
+    .bind(provider_run_id)
+    .fetch_one(pool)
+    .await
+    .map_err(GatewayError::Database)
+}
+
+pub async fn set_runtime_refs(
+    pool: &PgPool,
+    session_id: &str,
+    runtime_agent_ref_id: &str,
+    provider_session_id: Option<&str>,
+    provider_run_id: Option<&str>,
+    status: &str,
+) -> Result<SessionRow, GatewayError> {
+    sqlx::query_as::<_, SessionRow>(
+        r#"
+        UPDATE "LiteLLM_ManagedAgentSessionsTable"
+        SET runtime_agent_ref_id = $2,
+            provider_session_id = COALESCE($3, provider_session_id),
+            provider_run_id = COALESCE($4, provider_run_id),
+            status = $5,
+            updated_at = $6
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(session_id)
+    .bind(runtime_agent_ref_id)
+    .bind(provider_session_id)
+    .bind(provider_run_id)
+    .bind(status)
+    .bind(now_ms())
     .fetch_one(pool)
     .await
     .map_err(GatewayError::Database)
