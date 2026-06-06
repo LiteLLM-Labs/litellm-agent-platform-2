@@ -4,11 +4,15 @@ use sqlx::PgPool;
 
 use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
+mod claude_runtime;
 mod cursor_runtime;
 mod sessions;
+mod slack;
+mod slack_helpers;
 
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use sessions::exercise_sessions;
+pub use slack::exercise_slack;
 
 pub async fn assert_agent_runtime_catalog(fixture: &AppFixture) {
     let response = request_json(fixture.app.clone(), "GET", "/api/agent-runtimes", None).await;

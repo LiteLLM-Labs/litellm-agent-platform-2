@@ -11,8 +11,8 @@ use litellm_rust::{
         state::AppState,
     },
     sdk::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
+        providers::{self, ProviderRegistry},
+        routing::Router as ModelRouter,
     },
 };
 use tempfile::TempDir;
@@ -84,6 +84,7 @@ fn test_config() -> GatewayConfig {
             master_key: Some("sk-local".to_owned()),
             ..Default::default()
         },
+        slack: Default::default(),
         agents: Vec::new(),
     }
 }

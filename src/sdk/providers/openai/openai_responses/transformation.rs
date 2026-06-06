@@ -4,8 +4,9 @@ use serde_json::Value;
 use crate::{
     errors::GatewayError,
     sdk::{
-        providers::transform::{ProviderRequest, Transformation},
-        router::Deployment,
+        routing::Deployment,
+        providers::base::openai_responses::BaseOpenAiResponsesTransformation,
+        providers::base::{ProviderRequest, Transformation},
     },
 };
 
@@ -25,18 +26,20 @@ const FORWARDED_HEADERS: &[&str] = &[
 #[derive(Debug, Default, Clone)]
 pub struct OpenAiResponsesTransformation;
 
-impl Transformation for OpenAiResponsesTransformation {
-    fn transform_request(
+impl BaseOpenAiResponsesTransformation for OpenAiResponsesTransformation {
+    fn supports_native_file_search(&self) -> bool {
+        true
+    }
+
+    fn supports_native_websocket(&self) -> bool {
+        true
+    }
+
+    fn validate_environment(
         &self,
-        mut body: Value,
         deployment: &Deployment,
         inbound_headers: &HeaderMap,
-    ) -> Result<ProviderRequest, GatewayError> {
-        if body.get("model").and_then(Value::as_str) != Some(deployment.upstream_model.as_str()) {
-            body["model"] = Value::String(deployment.upstream_model.clone());
-        }
-        let stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
-
+    ) -> Result<HeaderMap, GatewayError> {
         let mut headers = HeaderMap::new();
         let bearer = format!("Bearer {}", deployment.api_key);
         headers.insert(
@@ -56,28 +59,22 @@ impl Transformation for OpenAiResponsesTransformation {
             }
         }
 
-        Ok(ProviderRequest {
-            body: serde_json::to_vec(&body)?,
-            headers,
-            stream,
-        })
+        Ok(headers)
+    }
+}
+
+impl Transformation for OpenAiResponsesTransformation {
+    fn transform_request(
+        &self,
+        body: Value,
+        deployment: &Deployment,
+        inbound_headers: &HeaderMap,
+    ) -> Result<ProviderRequest, GatewayError> {
+        self.transform_openai_responses_request(body, deployment, inbound_headers)
     }
 
     fn transform_response_headers(&self, upstream: &HeaderMap, stream: bool) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        let content_type = if stream {
-            HeaderValue::from_static("text/event-stream")
-        } else {
-            upstream
-                .get(header::CONTENT_TYPE)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static("application/json"))
-        };
-        headers.insert(header::CONTENT_TYPE, content_type);
-        if let Some(request_id) = upstream.get("x-request-id").cloned() {
-            headers.insert("x-request-id", request_id);
-        }
-        headers
+        self.transform_openai_responses_response_headers(upstream, stream)
     }
 }
 
@@ -87,7 +84,12 @@ mod tests {
     use serde_json::json;
 
     use super::OpenAiResponsesTransformation;
-    use crate::sdk::{providers::transform::Transformation, router::Deployment};
+    use crate::sdk::{
+        providers::base::{
+            openai_responses::BaseOpenAiResponsesTransformation, Transformation,
+        },
+        routing::Deployment,
+    };
 
     fn deployment() -> Deployment {
         Deployment {
@@ -148,5 +150,34 @@ mod tests {
         let headers =
             OpenAiResponsesTransformation.transform_response_headers(&HeaderMap::new(), true);
         assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "text/event-stream");
+    }
+
+    #[test]
+    fn strips_custom_tool_namespace_in_base_responses_transform() {
+        let req = OpenAiResponsesTransformation
+            .transform_request(
+                json!({
+                    "model": "gpt-5.5",
+                    "input": [
+                        {
+                            "type": "custom_tool_call",
+                            "name": "tool",
+                            "namespace": "internal"
+                        }
+                    ]
+                }),
+                &deployment(),
+                &HeaderMap::new(),
+            )
+            .unwrap();
+
+        let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+        assert!(body["input"][0].get("namespace").is_none());
+    }
+
+    #[test]
+    fn declares_native_responses_capabilities() {
+        assert!(OpenAiResponsesTransformation.supports_native_file_search());
+        assert!(OpenAiResponsesTransformation.supports_native_websocket());
     }
 }

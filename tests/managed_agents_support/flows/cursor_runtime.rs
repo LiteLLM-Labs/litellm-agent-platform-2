@@ -195,9 +195,10 @@ fn cursor_create_agent_request() -> Value {
         "prompt": { "text": "watch deploys\n\nRepository: https://github.com/acme/app\nBase branch: main\n\nFix the failing tests" },
         "model": { "id": "composer-2" },
         "name": "ops-agent",
-        "repos": [
-            { "url": "https://github.com/acme/app", "startingRef": "main" }
-        ],
+        "repos": [{
+            "url": "https://github.com/acme/app",
+            "startingRef": "main"
+        }],
         "autoCreatePR": true
     })
 }

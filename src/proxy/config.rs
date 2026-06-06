@@ -22,6 +22,9 @@ pub struct GatewayConfig {
     pub general_settings: GeneralSettings,
 
     #[serde(default)]
+    pub slack: SlackSettings,
+
+    #[serde(default)]
     pub agents: Vec<AgentDefinition>,
 }
 
@@ -58,6 +61,24 @@ impl Default for GeneralSettings {
             e2b_sandbox_params: E2bSandboxParams::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SlackSettings {
+    #[serde(default = "default_slack_api_base_url")]
+    pub api_base_url: String,
+}
+
+impl Default for SlackSettings {
+    fn default() -> Self {
+        Self {
+            api_base_url: default_slack_api_base_url(),
+        }
+    }
+}
+
+fn default_slack_api_base_url() -> String {
+    "https://slack.com/api".to_owned()
 }
 
 fn default_spend_logs_batch_interval_seconds() -> u64 {
@@ -126,6 +147,7 @@ fn expand_env(config: &mut GatewayConfig) -> Result<(), GatewayError> {
     if let Some(database_url) = config.general_settings.database_url.as_deref() {
         config.general_settings.database_url = Some(expand_env_value(database_url)?);
     }
+    config.slack.api_base_url = expand_env_value(&config.slack.api_base_url)?;
 
     for entry in &mut config.model_list {
         if let Some(api_key) = entry.litellm_params.api_key.as_deref() {

@@ -1,3 +1,4 @@
+mod agent_runtime_tools;
 pub mod agent_runtimes;
 pub mod agents;
 pub mod capabilities;
@@ -16,3 +17,4 @@ pub mod responses;
 pub mod routes;
 pub mod sessions;
 pub mod ui;
+pub mod vault;

@@ -7,10 +7,13 @@ use serde_json::{json, Value};
 use crate::{
     db::managed_agents::sessions::schema::SessionRow,
     errors::GatewayError,
-    managed_agents::providers::base::{normalize_runtime, CURSOR_RUNTIME},
+    http::agent_runtimes::{load_credential, RuntimeCredential},
     proxy::state::AppState,
-    sdk::agents::{
-        AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams,
+    sdk::{
+        agents::{
+            AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams,
+        },
+        providers,
     },
 };
 
@@ -18,24 +21,32 @@ pub(super) async fn runtime_sdk_client(
     state: &AppState,
     runtime: &str,
 ) -> Result<Lap, GatewayError> {
-    let credential = crate::http::agent_runtimes::load_credential(state, runtime).await?;
+    let credential = load_credential(state, runtime).await?;
+    lap_from_credential(runtime, &credential)
+}
+
+pub(super) fn lap_from_credential(
+    runtime: &str,
+    credential: &RuntimeCredential,
+) -> Result<Lap, GatewayError> {
+    let sdk_rt = sdk_runtime(runtime)?;
     let mut config = LapConfig::default();
-    match sdk_runtime(runtime)? {
+    match sdk_rt {
         AgentRuntime::ClaudeManagedAgents => {
-            config.anthropic_api_key = Some(credential.api_key);
-            config.anthropic_base_url = credential.api_base;
+            config.anthropic_api_key = Some(credential.api_key.clone());
+            config.anthropic_base_url = credential.api_base.clone();
         }
         AgentRuntime::Cursor => {
-            config.cursor_api_key = Some(credential.api_key);
-            config.cursor_base_url = credential.api_base;
+            config.cursor_api_key = Some(credential.api_key.clone());
+            config.cursor_base_url = credential.api_base.clone();
         }
         AgentRuntime::OpenCode => {
-            config.opencode_base_url = Some(credential.api_base);
+            config.opencode_base_url = Some(credential.api_base.clone());
             config.opencode_api_key = Some(credential.api_key.clone());
-            config.opencode_password = Some(credential.api_key);
+            config.opencode_password = Some(credential.api_key.clone());
         }
     }
-    Ok(Lap::with_http_client(config, state.http.clone()))
+    Ok(Lap::new(config))
 }
 
 pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result<(), GatewayError> {
@@ -43,12 +54,20 @@ pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result
         GatewayError::InvalidConfig("runtime session is missing runtime".to_owned())
     })?;
     let lap_agent_runtime = sdk_runtime(runtime)?;
-    let provider_session_id = provider_session_id(row, lap_agent_runtime)?;
+    let provider_session_id = row.provider_session_id.clone().ok_or_else(|| {
+        GatewayError::InvalidConfig(format!("{runtime} session is missing provider_session_id"))
+    })?;
+    let provider_agent_id = providers::runtime_registry()
+        .entry_for_id(runtime)
+        .and_then(|e| {
+            e.adapter
+                .provider_agent_id_from_session_id(&provider_session_id)
+        });
     client
         .register_session(ManagedSessionRef {
             session_id: row.id.clone(),
             lap_agent_runtime,
-            provider_agent_id: provider_agent_id(lap_agent_runtime, &provider_session_id),
+            provider_agent_id,
             provider_session_id: Some(provider_session_id),
             provider_run_id: row.provider_run_id.clone(),
         })
@@ -77,14 +96,12 @@ pub(super) fn provider_event_line<T: Serialize>(
     Ok(Bytes::from(line))
 }
 
+/// Extract a provider-specific run ID from a `send_events` raw response.
+/// Delegates to the adapter — no runtime string literals here.
 pub(super) fn provider_run_id(runtime: &str, raw: &Value) -> Option<String> {
-    if normalize_runtime(runtime) != Some(CURSOR_RUNTIME) {
-        return None;
-    }
-    raw.get("run")
-        .and_then(|run| run.get("id"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
+    providers::runtime_registry()
+        .entry_for_id(runtime)
+        .and_then(|e| e.adapter.provider_run_id_from_agent_raw(raw))
 }
 
 pub(super) fn agent_sdk_error(error: AgentSdkError) -> GatewayError {
@@ -96,29 +113,11 @@ pub(super) fn agent_sdk_error(error: AgentSdkError) -> GatewayError {
     }
 }
 
-fn provider_session_id(row: &SessionRow, runtime: AgentRuntime) -> Result<String, GatewayError> {
-    match runtime {
-        AgentRuntime::ClaudeManagedAgents => row.provider_session_id.clone().ok_or_else(|| {
-            GatewayError::InvalidConfig(
-                "Claude Agents session is missing provider_session_id".to_owned(),
-            )
-        }),
-        AgentRuntime::Cursor => row.provider_session_id.clone().ok_or_else(|| {
-            GatewayError::InvalidConfig("Cursor session is missing provider_session_id".to_owned())
-        }),
-        AgentRuntime::OpenCode => row.provider_session_id.clone().ok_or_else(|| {
-            GatewayError::InvalidConfig(
-                "OpenCode session is missing provider_session_id".to_owned(),
-            )
-        }),
-    }
-}
-
-fn provider_agent_id(runtime: AgentRuntime, provider_session_id: &str) -> Option<String> {
-    match runtime {
-        AgentRuntime::Cursor => Some(provider_session_id.to_owned()),
-        AgentRuntime::ClaudeManagedAgents | AgentRuntime::OpenCode => None,
-    }
+pub(super) fn sdk_runtime(runtime: &str) -> Result<AgentRuntime, GatewayError> {
+    providers::runtime_registry()
+        .entry_for_id(runtime)
+        .map(|e| e.runtime)
+        .ok_or_else(|| GatewayError::InvalidConfig(format!("unsupported runtime: {runtime}")))
 }
 
 fn error_event_line(message: String) -> String {
@@ -126,14 +125,4 @@ fn error_event_line(message: String) -> String {
         "data: {}\n\n",
         json!({ "type": "session.error", "error": { "message": message } })
     )
-}
-
-fn sdk_runtime(runtime: &str) -> Result<AgentRuntime, GatewayError> {
-    let Some(runtime) = normalize_runtime(runtime) else {
-        return Err(GatewayError::InvalidConfig(format!(
-            "unsupported runtime session: {runtime}"
-        )));
-    };
-    AgentRuntime::try_from(runtime)
-        .map_err(|_| GatewayError::InvalidConfig(format!("unsupported runtime session: {runtime}")))
 }

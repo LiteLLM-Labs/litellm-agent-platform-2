@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     errors::GatewayError,
     proxy::config::GatewayConfig,
-    sdk::providers::transform::{ProviderRegistry, Transformation},
+    sdk::providers::{ProviderRegistry, Transformation},
 };
 
 #[derive(Debug, Clone)]
@@ -139,7 +139,7 @@ mod tests {
 
     use super::Router;
     use crate::proxy::config::{GatewayConfig, LiteLlmParams, ModelEntry};
-    use crate::sdk::providers::{self, transform::ProviderRegistry};
+    use crate::sdk::providers::{self, ProviderRegistry};
 
     #[test]
     fn resolves_model_to_upstream() {
@@ -158,6 +158,7 @@ mod tests {
             }],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 
@@ -184,6 +185,7 @@ mod tests {
             }],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 
@@ -210,6 +212,7 @@ mod tests {
             }],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 
@@ -246,6 +249,7 @@ mod tests {
             ],
             mcp_servers: HashMap::new(),
             general_settings: Default::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         };
 

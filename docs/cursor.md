@@ -1,6 +1,6 @@
 # Cursor Managed Agent Runtime
 
-The managed-agents SDK exposes Cursor through the same Anthropic-shaped beta
+The Agent Runtime SDK exposes Cursor through the same Anthropic-shaped beta
 surface used for Claude Managed Agents. Configure Cursor by setting a Cursor
 runtime key, then select `AgentRuntime::Cursor` when creating the agent.
 
@@ -74,8 +74,8 @@ GET /v1/sessions/{session_id}/events/stream
 Authenticate with the configured master key using `Authorization: Bearer ...`
 or `?key=...`.
 
-Cursor runtime session creation forwards repository and PR targeting from the
-session `environment` into Cursor `source` and `target` fields:
+Cursor runtime session creation translates repository and PR preferences from
+the session `environment` into Cursor `repos` and `autoCreatePR` fields:
 
 ```json
 {
@@ -86,7 +86,6 @@ session `environment` into Cursor `source` and `target` fields:
     "model": "composer-2",
     "repository": "https://github.com/acme/app",
     "ref": "main",
-    "target_branch": "agent/{agent_id}/{session_id}",
     "auto_create_pr": true
   }
 }

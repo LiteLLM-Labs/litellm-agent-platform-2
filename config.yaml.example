@@ -24,6 +24,9 @@ general_settings:
     envs:
       ANTHROPIC_API_KEY: os.environ/ANTHROPIC_API_KEY
 
+slack:
+  api_base_url: https://slack.com/api
+
 # MCP servers use the same dict-keyed shape as LiteLLM (key = server name).
 mcp_servers:
   linear:
