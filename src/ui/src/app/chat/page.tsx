@@ -11,6 +11,7 @@ import {
   Clipboard,
   ClipboardCheck,
   Cpu,
+  ExternalLink,
   FileText,
   KeyRound,
   Loader2,
@@ -35,7 +36,7 @@ import { InspectorPanel } from "@/components/inspector-panel";
 import { getMessages, getSession, createSession, deleteSession, subscribeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval } from "@/lib/api";
 import type { PendingApproval } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
-import type { Agent, HarnessMessage, HarnessMessagePart, MessageInfo } from "@/lib/types";
+import type { Agent, AgentRuntimeId, HarnessMessage, HarnessMessagePart, MessageInfo } from "@/lib/types";
 import type { Frame } from "@/components/inspector-panel";
 
 const FALLBACK_MODELS = [
@@ -63,6 +64,20 @@ function shortPrompt(prompt: string): string {
   return compact.length > 220 ? compact.slice(0, 220).trimEnd() + "..." : compact;
 }
 
+function runtimeLabel(runtime?: string): string {
+  if (runtime === "claude_agents") return "Claude Managed Agents";
+  if (runtime === "cursor") return "Cursor";
+  return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
+}
+
+function providerSessionUrl(runtime?: AgentRuntimeId, providerSessionId?: string, providerUrl?: string): string | null {
+  if (providerUrl) return providerUrl;
+  if (runtime === "claude_agents" && providerSessionId) {
+    return `https://platform.claude.com/workspaces/default/agent-sessions/${encodeURIComponent(providerSessionId)}`;
+  }
+  return null;
+}
+
 function ChatInner() {
   const sp = useSearchParams();
   const sid = sp.get("id");
@@ -78,6 +93,9 @@ function ChatInner() {
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
+  const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
+  const [providerSessionId, setProviderSessionId] = useState<string | undefined>();
+  const [providerUrl, setProviderUrl] = useState<string | undefined>();
   const [sessionTitle, setSessionTitle] = useState<string>("");
   const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -119,7 +137,10 @@ function ChatInner() {
   const activeAgentName =
     activeAgent?.name || sessionTitle || BUILTIN_AGENTS[sessionHarness] || sessionHarness;
   const baseRuntime =
-    String(activeAgent?.harness ?? activeAgent?.base_agent ?? sessionHarness ?? "claude-code");
+    sessionRuntime
+      ? runtimeLabel(sessionRuntime)
+      : String(activeAgent?.harness ?? activeAgent?.base_agent ?? sessionHarness ?? "claude-code");
+  const providerLink = providerSessionUrl(sessionRuntime, providerSessionId, providerUrl);
   const skills = Array.isArray(activeAgent?.skills) ? activeAgent.skills : [];
   const vaultKeys = Array.isArray(activeAgent?.vault_keys) ? activeAgent.vault_keys : [];
   const hasStarted = Boolean(messages && messages.length > 0);
@@ -148,6 +169,9 @@ function ChatInner() {
     getSession(sid).then(s => {
       const a = s.agent_id ?? s.agent ?? s.harness;
       if (a) setSessionHarness(a);
+      setSessionRuntime(s.runtime);
+      setProviderSessionId(s.provider_session_id);
+      setProviderUrl(s.provider_url);
       if (s.title) setSessionTitle(s.title);
     }).catch(() => {});
   }, [sid]);
@@ -384,6 +408,19 @@ function ChatInner() {
               <span className="text-[11px] text-muted-foreground">model</span>
               <ModelSelect value={model} models={models} onValueChange={setModel} />
             </div>
+            {providerLink && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8"
+                render={
+                  <a href={providerLink} target="_blank" rel="noreferrer">
+                    <ExternalLink className="size-3.5" />
+                    Open provider session
+                  </a>
+                }
+              />
+            )}
             <Button
               variant={inspectorOpen ? "default" : "outline"}
               size="sm"
@@ -453,6 +490,20 @@ function ChatInner() {
                           <span className="text-muted-foreground">session</span>
                           <span className="ml-auto truncate font-mono text-foreground">{shortSid}</span>
                         </div>
+                        {providerLink && (
+                          <a
+                            href={providerLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex min-w-0 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2 py-1.5 hover:bg-muted"
+                          >
+                            <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="text-muted-foreground">provider</span>
+                            <span className="ml-auto truncate font-mono text-foreground">
+                              {providerSessionId ?? "open"}
+                            </span>
+                          </a>
+                        )}
                       </div>
                       {(skills.length > 0 || vaultKeys.length > 0) && (
                         <div className="mt-3 flex flex-wrap gap-1.5">

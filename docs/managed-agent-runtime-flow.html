@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Managed Agent Runtime Flow</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fa;
+        --panel: #ffffff;
+        --ink: #17181c;
+        --muted: #626a73;
+        --line: #d9dde3;
+        --accent: #2563eb;
+        --accent-soft: #e8f0ff;
+        --ok: #0f766e;
+        --warn: #b45309;
+        --code: #111827;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 28px;
+        line-height: 1.15;
+        letter-spacing: 0;
+      }
+
+      h2 {
+        margin-bottom: 12px;
+        font-size: 18px;
+      }
+
+      h3 {
+        font-size: 14px;
+      }
+
+      .intro {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 22px;
+      }
+
+      .intro p {
+        max-width: 850px;
+        color: var(--muted);
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .flow {
+        grid-template-columns: repeat(5, minmax(160px, 1fr));
+        align-items: stretch;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 14px;
+      }
+
+      .step {
+        position: relative;
+        min-height: 170px;
+      }
+
+      .step:not(:last-child)::after {
+        content: "";
+        position: absolute;
+        top: 42px;
+        right: -15px;
+        width: 15px;
+        border-top: 2px solid var(--line);
+      }
+
+      .kicker {
+        margin-bottom: 8px;
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .endpoint {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: #1d4ed8;
+        padding: 4px 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      section {
+        margin-top: 22px;
+      }
+
+      .two {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+
+      .three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      pre {
+        margin: 10px 0 0;
+        overflow-x: auto;
+        border-radius: 6px;
+        background: var(--code);
+        color: #f9fafb;
+        padding: 12px;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 12px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: #eef1f5;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      code {
+        border-radius: 4px;
+        background: #eef1f5;
+        padding: 1px 4px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .callout {
+        border-left: 4px solid var(--warn);
+        background: #fff7ed;
+      }
+
+      .ok {
+        color: var(--ok);
+        font-weight: 600;
+      }
+
+      @media (max-width: 900px) {
+        main {
+          padding: 18px;
+        }
+
+        .flow,
+        .two,
+        .three {
+          grid-template-columns: 1fr;
+        }
+
+        .step:not(:last-child)::after {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="intro">
+        <div class="kicker">Implementation plan</div>
+        <h1>Managed Agent Runtime Flow</h1>
+        <p>
+          Browser-facing endpoint map for starting a managed-agent runtime
+          session, storing runtime credentials, landing on chat, and routing
+          messages through the shared runtime contract. Examples use placeholders
+          only; API keys are never rendered back to the browser except as masked
+          status.
+        </p>
+      </header>
+
+      <section>
+        <h2>Happy Path</h2>
+        <div class="grid flow">
+          <article class="card step">
+            <div class="kicker">1. Open Start Session</div>
+            <h3>Load selectable agents and runtimes</h3>
+            <p class="muted">
+              The page asks for DB-backed managed agents and runtime connection
+              status before enabling the Start session button.
+            </p>
+            <div class="endpoint">GET /api/agents</div>
+            <div class="endpoint">GET /api/agent-runtimes</div>
+          </article>
+
+          <article class="card step">
+            <div class="kicker">2. Save Credentials</div>
+            <h3>Store runtime secret server-side</h3>
+            <p class="muted">
+              Runtime API keys are encrypted in the credentials table. The UI
+              receives connection metadata and a masked key, not the secret.
+            </p>
+            <div class="endpoint">PUT /api/agent-runtimes/{runtime}/credentials</div>
+          </article>
+
+          <article class="card step">
+            <div class="kicker">3. Start Session</div>
+            <h3>Create local session, then provision provider runtime</h3>
+            <p class="muted">
+              LAP owns the local session row, credential lookup, idempotency
+              refs, and provider IDs. Provider-specific launch logic stays
+              behind the runtime adapter.
+            </p>
+            <div class="endpoint">POST /session</div>
+          </article>
+
+          <article class="card step">
+            <div class="kicker">4. Land On Chat</div>
+            <h3>Hydrate transcript and subscribe to events</h3>
+            <p class="muted">
+              Chat loads the session metadata and stored messages, then opens
+              the event stream used by the local UI renderer.
+            </p>
+            <div class="endpoint">GET /session/{id}</div>
+            <div class="endpoint">GET /session/{id}/message</div>
+            <div class="endpoint">GET /event</div>
+          </article>
+
+          <article class="card step">
+            <div class="kicker">5. Send / Invoke</div>
+            <h3>Normalize user input into runtime events</h3>
+            <p class="muted">
+              The planned managed-runtime path converts composer text into the
+              SDK event contract and forwards it to the provider session.
+            </p>
+            <div class="endpoint">POST /session/{id}/prompt_async</div>
+            <div class="endpoint">POST /v1/sessions/{provider_session_id}/events</div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Endpoint Shapes</h2>
+        <div class="grid two">
+          <article class="card">
+            <h3>Runtime status</h3>
+            <pre>GET /api/agent-runtimes
+200 {
+  "runtimes": [{
+    "id": "cursor | claude_agents",
+    "name": "Cursor | Claude Agents",
+    "default_api_base": "https://...",
+    "connected": true,
+    "api_base": "https://...",
+    "masked_api_key": "configured...1234"
+  }]
+}</pre>
+          </article>
+
+          <article class="card">
+            <h3>Save runtime credentials</h3>
+            <pre>PUT /api/agent-runtimes/{runtime}/credentials
+{
+  "api_key": "&lt;runtime key from form&gt;",
+  "api_base": "https://api.cursor.com"
+}
+
+200 { "runtimes": [ ...same shape as list... ] }</pre>
+          </article>
+
+          <article class="card">
+            <h3>Start runtime session</h3>
+            <pre>POST /session
+{
+  "title": "Runtime PoC",
+  "agent_id": "agent_...",
+  "runtime": "cursor | claude_agents",
+  "prompt": "Initial task",
+  "environment": {
+    "repository": "https://github.com/org/repo",
+    "ref": "main",
+    "target_branch": "agent/{agent_id}/{session_id}",
+    "auto_create_pr": false
+  }
+}</pre>
+          </article>
+
+          <article class="card">
+            <h3>Session response</h3>
+            <pre>200 {
+  "id": "session_...",
+  "title": "Runtime PoC",
+  "agent": "agent_...",
+  "agent_id": "agent_...",
+  "harness": "claude-code",
+  "runtime": "cursor | claude_agents",
+  "runtime_agent_ref_id": "runtime_ref_...",
+  "provider_session_id": "sesn_...",
+  "provider_run_id": "run_...",
+  "status": "running",
+  "environment": { "...": "..." },
+  "time": { "created": 1710000000000 }
+}</pre>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Unified SDK Contract</h2>
+        <div class="grid three">
+          <article class="card">
+            <div class="kicker">Create</div>
+            <p>
+              LAP maps the selected managed agent into provider runtime calls.
+              The shared abstraction returns <code>RuntimeProvision</code>:
+              runtime agent ID, provider session/run IDs, optional provider URL,
+              and provider metadata.
+            </p>
+            <pre>RuntimeSessionInput {
+  session_id,
+  prompt,
+  environment
+}</pre>
+          </article>
+
+          <article class="card">
+            <div class="kicker">Send</div>
+            <p>
+              Chat composer text should become the provider-neutral event shape.
+              For Claude Agents this is the Anthropic Managed Agents events API.
+            </p>
+            <pre>POST /v1/sessions/{id}/events
+{
+  "events": [{
+    "type": "user.message",
+    "content": [{ "type": "text", "text": "..." }]
+  }]
+}</pre>
+          </article>
+
+          <article class="card">
+            <div class="kicker">Stream</div>
+            <p>
+              Runtime SSE is normalized back into the UI's message and tool
+              event model: <code>agent.message</code>, <code>agent.tool_use</code>,
+              <code>agent.tool_result</code>, <code>session.status_idle</code>,
+              and <code>session.error</code>.
+            </p>
+            <pre>GET /v1/sessions/{id}/events/stream</pre>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Runtime Divergence</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Concern</th>
+              <th>Cursor</th>
+              <th>Claude Agents</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Runtime ID</td>
+              <td><code>cursor</code></td>
+              <td><code>claude_agents</code></td>
+            </tr>
+            <tr>
+              <td>Default API base</td>
+              <td><code>https://api.cursor.com</code></td>
+              <td><code>https://api.anthropic.com</code></td>
+            </tr>
+            <tr>
+              <td>Required start-session environment</td>
+              <td>
+                Requires repo source data: <code>repository</code>, optional
+                <code>ref</code>, target branch template, and optional PR flag.
+              </td>
+              <td>
+                Does not require repo fields in the current UI. Environment is
+                created by the provider adapter with cloud networking defaults.
+              </td>
+            </tr>
+            <tr>
+              <td>Provider launch calls</td>
+              <td>
+                <code>POST /v0/agents</code> with
+                <code>prompt</code>, <code>source</code>, <code>model</code>,
+                and <code>target</code>.
+              </td>
+              <td>
+                <code>POST /v1/agents</code>, then
+                <code>POST /v1/environments</code>, then
+                <code>POST /v1/sessions</code> with Managed Agents beta headers.
+              </td>
+            </tr>
+            <tr>
+              <td>Remote IDs stored locally</td>
+              <td>
+                Provider agent/run ID is stored as <code>provider_run_id</code>;
+                <code>provider_session_id</code> is usually empty.
+              </td>
+              <td>
+                Provider session ID is stored as <code>provider_session_id</code>;
+                run ID is usually empty.
+              </td>
+            </tr>
+            <tr>
+              <td>Message invocation plan</td>
+              <td>
+                Needs a Cursor event/run continuation adapter before chat sends
+                can be fully provider-backed.
+              </td>
+              <td>
+                Uses the SDK event contract:
+                <code>/v1/sessions/{id}/events</code> and
+                <code>/v1/sessions/{id}/events/stream</code>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Implementation Notes</h2>
+        <div class="grid two">
+          <article class="card">
+            <h3>Security boundary</h3>
+            <p>
+              Browser requests authenticate to LAP with the master-key flow.
+              Runtime API keys are submitted once, encrypted server-side, and
+              only returned as masked status. Do not place provider keys in query
+              strings, localStorage, server logs, or this artifact.
+            </p>
+          </article>
+
+          <article class="card callout">
+            <h3>Current gap to close</h3>
+            <p>
+              The current chat UI posts composer text to
+              <code>/session/{id}/prompt_async</code>. For runtime sessions, that
+              handler should branch on stored <code>runtime</code> and
+              <code>provider_session_id</code> / <code>provider_run_id</code>,
+              then call the unified SDK send/stream path instead of launching a
+              local sandbox harness.
+            </p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

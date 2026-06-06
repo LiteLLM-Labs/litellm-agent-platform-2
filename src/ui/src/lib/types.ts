@@ -7,6 +7,7 @@ export interface OpencodeSession {
   runtime_agent_ref_id?: string;
   provider_session_id?: string;
   provider_run_id?: string;
+  provider_url?: string;
   status?: string;
   environment?: Record<string, unknown>;
   /** @deprecated use agent */
