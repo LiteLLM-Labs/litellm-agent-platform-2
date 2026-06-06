@@ -33,7 +33,7 @@ import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
-import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel } from "@/lib/api";
+import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel, listRuntimeEvents } from "@/lib/api";
 import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
 import type { Agent, AgentRuntimeId, HarnessMessage, HarnessMessagePart } from "@/lib/types";
@@ -73,24 +73,31 @@ function runtimeLabel(runtime?: string): string {
 function providerSessionUrl(runtime?: string, providerSessionId?: string, providerUrl?: string): string | null {
   if (providerUrl) return providerUrl;
   if ((runtime === "claude_managed_agents" || runtime === "claude_agents") && providerSessionId) {
-    return `https://platform.claude.com/workspaces/default/agent-sessions/${encodeURIComponent(providerSessionId)}`;
+    return `https://platform.claude.com/workspaces/default/sessions/${encodeURIComponent(providerSessionId)}`;
   }
   return null;
 }
 
-function runtimeEventText(ev: RuntimeAgentEvent): string {
-  const value = ev.text ?? ev.delta ?? ev.content;
+function runtimeTextValue(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    return value
-      .map((block) => {
-        if (!block || typeof block !== "object") return "";
-        const text = (block as { text?: unknown }).text;
-        return typeof text === "string" ? text : "";
-      })
-      .join("");
+    return value.map(runtimeTextValue).join("");
   }
-  return "";
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  return [
+    record.text,
+    record.thinking,
+    record.content,
+    record.delta,
+    record.content_block,
+  ]
+    .map(runtimeTextValue)
+    .join("");
+}
+
+function runtimeEventText(ev: RuntimeAgentEvent): string {
+  return runtimeTextValue(ev.text ?? ev.delta ?? ev.content ?? ev.content_block);
 }
 
 function normalizedRuntimeEventType(ev: RuntimeAgentEvent): string {
@@ -124,15 +131,26 @@ function runtimeErrorMessage(ev: RuntimeAgentEvent): string {
 }
 
 function isRuntimeAssistantTextEvent(type: string): boolean {
-  return type === "assistant_response";
+  return (
+    type === "assistant_response" ||
+    type === "agent.message" ||
+    type === "content_block_start" ||
+    type === "content_block_delta" ||
+    type === "message_delta"
+  );
 }
 
 function isRuntimeThinkingEvent(type: string): boolean {
-  return type === "thinking_back";
+  return type === "thinking_back" || type === "agent.thinking" || type === "agent.reasoning";
 }
 
 function isRuntimeToolEvent(type: string): boolean {
-  return type === "tool_call" || type === "tool_result";
+  return (
+    type === "tool_call" ||
+    type === "tool_result" ||
+    type === "agent.tool_use" ||
+    type === "agent.tool_result"
+  );
 }
 
 function runtimeToolId(ev: RuntimeAgentEvent): string {
@@ -239,6 +257,7 @@ function ChatInner() {
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
+  const seenRuntimeEventIdsRef = useRef<Set<string>>(new Set());
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -246,6 +265,7 @@ function ChatInner() {
   const [providerUrl, setProviderUrl] = useState<string | undefined>();
   const [sessionTitle, setSessionTitle] = useState<string>("");
   const [savedAgents, setSavedAgents] = useState<Agent[]>([]);
+  const [switchingAgent, setSwitchingAgent] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
   const runtimeAssistantRef = useRef<{
@@ -291,7 +311,6 @@ function ChatInner() {
   const skills = Array.isArray(activeAgent?.skills) ? activeAgent.skills : [];
   const vaultKeys = Array.isArray(activeAgent?.vault_keys) ? activeAgent.vault_keys : [];
   const hasStarted = Boolean(messages && messages.length > 0);
-  const agentLocked = hasStarted || Boolean(activeAgent);
 
   const onCopyPrompt = useCallback(() => {
     if (!activePrompt) return;
@@ -313,6 +332,9 @@ function ChatInner() {
   // Fetch session metadata to get the locked agent
   useEffect(() => {
     if (!sid) return;
+    seenRuntimeEventIdsRef.current = new Set();
+    eventBufferRef.current = [];
+    runtimeAssistantRef.current = null;
     setSessionLoaded(false);
     getSession(sid).then(s => {
       const a = s.agent_id ?? s.agent ?? s.harness;
@@ -329,13 +351,20 @@ function ChatInner() {
     listAgents().then(setSavedAgents).catch(() => {});
   }, []);
 
-  // On agent change before first message: delete current empty session, create new, redirect
   const onHarnessChange = useCallback(async (next: string) => {
     if (!sid || next === sessionHarness) return;
-    await deleteSession(sid);
-    const s = await createSession(undefined, next);
-    router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
-  }, [sid, sessionHarness, router]);
+    setSwitchingAgent(true);
+    setError(null);
+    try {
+      if (!hasStarted) await deleteSession(sid).catch(() => {});
+      const options = next.startsWith("agent_") && sessionRuntime ? { runtime: sessionRuntime } : undefined;
+      const s = await createSession(undefined, next, options);
+      router.replace(`/chat/?id=${encodeURIComponent(s.id)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to switch agent");
+      setSwitchingAgent(false);
+    }
+  }, [hasStarted, sid, sessionHarness, sessionRuntime, router]);
 
   const runtimeAssistantIds = useCallback(() => {
     if (!sid) return null;
@@ -523,6 +552,12 @@ function ChatInner() {
   }, [runtimeAssistantIds, sessionRuntime, sid]);
 
   const handleRuntimeEvent = useCallback((ev: RuntimeAgentEvent) => {
+    const eventId = typeof ev.id === "string" ? ev.id : "";
+    if (eventId) {
+      if (seenRuntimeEventIdsRef.current.has(eventId)) return;
+      seenRuntimeEventIdsRef.current.add(eventId);
+    }
+
     eventBufferRef.current = [
       ...eventBufferRef.current.slice(-499),
       { ts: Date.now(), ev: ev as Frame["ev"] },
@@ -592,6 +627,9 @@ function ChatInner() {
       onEvent: handleRuntimeEvent,
       onError: (err) => setError(err instanceof Error ? err.message : String(err)),
     });
+    listRuntimeEvents(sid)
+      .then((events) => events.forEach(handleRuntimeEvent))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     if (autostartPrompt && autostartedRef.current !== sid) {
       autostartedRef.current = sid;
       beginRuntimeTurn(autostartPrompt);
@@ -697,36 +735,32 @@ function ChatInner() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">agent</span>
-              {agentLocked ? (
-                <span
-                  className="h-8 max-w-[220px] px-3 flex items-center text-xs font-mono border border-border rounded-md bg-muted text-muted-foreground truncate"
-                  title={activeAgentName}
-                >
-                  {activeAgentName}
-                </span>
-              ) : (
-                <Select value={sessionHarness} onValueChange={(v) => v && onHarnessChange(v)}>
-                  <SelectTrigger className="h-8 text-xs w-[150px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
-                    <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
-                    <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
-                    {savedAgents.length > 0 && (
-                      <>
-                        <div className="px-2 py-1.5 text-[10px] text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">Saved agents</div>
-                        {savedAgents.map(a => (
-                          <SelectItem key={a.id} value={a.id} className="text-xs font-mono">{a.name}</SelectItem>
-                        ))}
-                      </>
-                    )}
-                    <div className="px-2 py-2 text-[10px] text-muted-foreground border-t mt-1">
-                      💡 Say <span className="font-mono">&quot;save this agent&quot;</span> to save a session
-                    </div>
-                  </SelectContent>
-                </Select>
-              )}
+              <Select
+                value={sessionHarness}
+                onValueChange={(v) => v && onHarnessChange(v)}
+                disabled={switchingAgent || sessionStatus === "busy"}
+              >
+                <SelectTrigger className="h-8 text-xs w-[190px]">
+                  <SelectValue placeholder={activeAgentName} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="opencode" className="text-xs font-mono">opencode</SelectItem>
+                  <SelectItem value="claude-code" className="text-xs font-mono">claude code</SelectItem>
+                  <SelectItem value="github-copilot" className="text-xs font-mono">github copilot</SelectItem>
+                  {savedAgents.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-[10px] text-muted-foreground uppercase tracking-wider border-t mt-1 pt-2">Saved agents</div>
+                      {savedAgents.map(a => (
+                        <SelectItem key={a.id} value={a.id} className="text-xs font-mono">{a.name}</SelectItem>
+                      ))}
+                    </>
+                  )}
+                  <div className="px-2 py-2 text-[10px] text-muted-foreground border-t mt-1">
+                    Switching agents opens a new session.
+                  </div>
+                </SelectContent>
+              </Select>
+              {switchingAgent && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">model</span>
@@ -945,6 +979,12 @@ function ChatInner() {
           sessionId={sid}
           model={model}
           onSent={sessionRuntime ? undefined : refetch}
+          onSend={sessionRuntime ? (text) => sendMessageWithRuntimeModel({
+            sessionId: sid,
+            text,
+            model,
+            runtime: sessionRuntime,
+          }) : undefined}
           onSendStart={beginRuntimeTurn}
           disabled={Boolean(sessionRuntime && sessionStatus === "busy")}
         />

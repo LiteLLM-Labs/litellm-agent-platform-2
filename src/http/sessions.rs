@@ -21,6 +21,7 @@ mod storage;
 mod types;
 
 use execution::execute_prompt;
+pub use runtime::runtime_event_list;
 pub use runtime::runtime_events;
 use runtime::{create_runtime_session, execute_runtime_prompt};
 use storage::{db, persist_message, resolve_session_request, session};
