@@ -54,9 +54,6 @@ async fn handle_event_callback(
         return Ok(());
     };
     let event_key = slack_event_key(payload, &message);
-    if !slack::repository::record_event(&pool, &agent.id, &event_key).await? {
-        return Ok(());
-    }
     let row = slack::repository::ensure_thread_session(
         &pool,
         &agent.id,
@@ -66,6 +63,9 @@ async fn handle_event_callback(
         &message.thread_ts,
     )
     .await?;
+    if !slack::repository::record_event(&pool, &agent.id, &event_key).await? {
+        return Ok(());
+    }
     spawn_slack_prompt(state, pool, agent, config, message, row.session_id);
     Ok(())
 }
