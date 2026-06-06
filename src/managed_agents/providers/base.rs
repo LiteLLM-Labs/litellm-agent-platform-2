@@ -63,24 +63,43 @@ pub fn runtime_agent_id(agent: &ManagedAgentRow, runtime: &str) -> String {
     format!("{runtime}:{}", agent.id)
 }
 
-pub fn selected_tool_ids(tools: &Value, defaults: &'static [RuntimeTool]) -> Vec<String> {
-    let mut values = tools
-        .as_array()
-        .into_iter()
+pub fn selected_tool_ids(
+    tools: &Value,
+    defaults: &'static [RuntimeTool],
+    toolset_aliases: &[&str],
+) -> Vec<String> {
+    let Some(items) = tools.as_array() else {
+        return default_tool_ids(defaults);
+    };
+
+    let mut values = items
+        .iter()
+        .filter_map(|value| selected_tool_id(value, defaults, toolset_aliases))
         .flatten()
-        .filter_map(tool_id)
-        .filter(|id| defaults.iter().any(|tool| tool.id == id))
         .collect::<Vec<_>>();
-    if values.is_empty() && tools.as_array().is_none_or(Vec::is_empty) {
-        values = defaults
-            .iter()
-            .filter(|tool| tool.enabled_by_default)
-            .map(|tool| tool.id.to_owned())
-            .collect();
-    }
     values.sort();
     values.dedup();
     values
+}
+
+fn selected_tool_id(
+    value: &Value,
+    defaults: &'static [RuntimeTool],
+    toolset_aliases: &[&str],
+) -> Option<Vec<String>> {
+    let id = tool_id(value)?;
+    if toolset_aliases.iter().any(|alias| *alias == id) {
+        return Some(default_tool_ids(defaults));
+    }
+    defaults.iter().any(|tool| tool.id == id).then(|| vec![id])
+}
+
+fn default_tool_ids(defaults: &'static [RuntimeTool]) -> Vec<String> {
+    defaults
+        .iter()
+        .filter(|tool| tool.enabled_by_default)
+        .map(|tool| tool.id.to_owned())
+        .collect()
 }
 
 fn tool_id(value: &Value) -> Option<String> {
@@ -104,4 +123,60 @@ pub fn toolset_payload(toolset_type: &str, selected: &[String]) -> Value {
             .map(|name| json!({ "name": name, "enabled": true }))
             .collect::<Vec<_>>()
     }])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_TOOLS: &[RuntimeTool] = &[
+        RuntimeTool {
+            id: "bash",
+            name: "Shell",
+            description: "Run commands.",
+            enabled_by_default: true,
+        },
+        RuntimeTool {
+            id: "read",
+            name: "Read",
+            description: "Read files.",
+            enabled_by_default: true,
+        },
+        RuntimeTool {
+            id: "web_search",
+            name: "Web search",
+            description: "Search the web.",
+            enabled_by_default: false,
+        },
+    ];
+
+    #[test]
+    fn unset_tools_enable_defaults() {
+        assert_eq!(
+            selected_tool_ids(&Value::Null, TEST_TOOLS, &["agent_toolset_20260401"]),
+            vec!["bash".to_owned(), "read".to_owned()]
+        );
+    }
+
+    #[test]
+    fn empty_tools_selects_no_tools() {
+        assert!(selected_tool_ids(&json!([]), TEST_TOOLS, &["agent_toolset_20260401"]).is_empty());
+    }
+
+    #[test]
+    fn legacy_toolset_alias_enables_defaults() {
+        assert_eq!(
+            selected_tool_ids(
+                &json!([{ "type": "agent_toolset_20260401" }]),
+                TEST_TOOLS,
+                &["agent_toolset_20260401"]
+            ),
+            vec!["bash".to_owned(), "read".to_owned()]
+        );
+    }
+
+    #[test]
+    fn unknown_tool_ids_do_not_enable_defaults() {
+        assert!(selected_tool_ids(&json!([{ "type": "unknown" }]), TEST_TOOLS, &[]).is_empty());
+    }
 }

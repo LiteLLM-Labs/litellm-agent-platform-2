@@ -115,7 +115,10 @@ async fn create_agent(
 }
 
 fn agent_tools(agent: &ManagedAgentRow) -> Value {
-    toolset_payload(AGENT_TOOLSET, &selected_tool_ids(&agent.tools, TOOLS))
+    toolset_payload(
+        AGENT_TOOLSET,
+        &selected_tool_ids(&agent.tools, TOOLS, &[AGENT_TOOLSET]),
+    )
 }
 
 async fn create_environment(

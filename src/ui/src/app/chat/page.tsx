@@ -259,6 +259,7 @@ function ChatInner() {
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
   const seenRuntimeEventIdsRef = useRef<Set<string>>(new Set());
+  const runtimeReplayEventCountRef = useRef(0);
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -334,6 +335,7 @@ function ChatInner() {
   useEffect(() => {
     if (!sid) return;
     seenRuntimeEventIdsRef.current = new Set();
+    runtimeReplayEventCountRef.current = 0;
     eventBufferRef.current = [];
     runtimeAssistantRef.current = null;
     setSessionLoaded(false);
@@ -620,6 +622,12 @@ function ChatInner() {
     setSessionStatus("busy");
   }, [appendRuntimePartText, appendRuntimeToolEvent, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
 
+  const replayRuntimeEvents = useCallback((events: RuntimeAgentEvent[]) => {
+    const start = Math.min(runtimeReplayEventCountRef.current, events.length);
+    runtimeReplayEventCountRef.current = events.length;
+    events.slice(start).forEach(handleRuntimeEvent);
+  }, [handleRuntimeEvent]);
+
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
     refetch();
@@ -629,7 +637,7 @@ function ChatInner() {
       onError: (err) => setError(err instanceof Error ? err.message : String(err)),
     });
     listRuntimeEvents(sid)
-      .then((events) => events.forEach(handleRuntimeEvent))
+      .then(replayRuntimeEvents)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
     if (autostartPrompt && autostartedRef.current !== sid) {
       autostartedRef.current = sid;
@@ -652,7 +660,7 @@ function ChatInner() {
     }
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
+  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, replayRuntimeEvents, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
 
   useEffect(() => {
     if (!sid || !sessionRuntime || sessionStatus !== "busy") return;
@@ -661,7 +669,7 @@ function ChatInner() {
       listRuntimeEvents(sid)
         .then((events) => {
           if (!active) return;
-          events.forEach(handleRuntimeEvent);
+          replayRuntimeEvents(events);
         })
         .catch((err) => {
           if (active) setError(err instanceof Error ? err.message : String(err));
@@ -673,7 +681,7 @@ function ChatInner() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [sid, sessionRuntime, sessionStatus, handleRuntimeEvent]);
+  }, [sid, sessionRuntime, sessionStatus, replayRuntimeEvents]);
 
   const onApprovalAccept = useCallback(async (id: string, args: Record<string, unknown>) => {
     setApprovalBusy(true);
