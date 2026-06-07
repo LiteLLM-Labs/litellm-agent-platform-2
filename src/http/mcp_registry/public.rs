@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::HeaderMap, Json};
-use serde::Serialize;
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
@@ -138,6 +142,74 @@ pub async fn mcp_hub(
     let rows = repository::list_public(pool).await?;
     let data = rows.into_iter().map(PublicMcpServer::from).collect();
     Ok(Json(McpHubResponse { data }))
+}
+
+// ── Tool discovery ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct ToolsResponse {
+    pub server_id: String,
+    pub tools: Vec<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpToolsListResponse {
+    tools: Option<Vec<Value>>,
+    result: Option<McpToolsResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpToolsResult {
+    tools: Option<Vec<Value>>,
+}
+
+/// GET /v1/mcp/server/{server_id}/tools — public, no auth required.
+/// Calls the MCP server's tools/list endpoint and returns discovered tools.
+pub async fn list_tools(
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<String>,
+) -> Result<Json<ToolsResponse>, GatewayError> {
+    let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
+    let server = repository::get(pool, &server_id)
+        .await?
+        .ok_or_else(|| GatewayError::NotFound(format!("MCP server not found: {server_id}")))?;
+
+    let url = server
+        .url
+        .as_deref()
+        .filter(|u| !u.trim().is_empty())
+        .ok_or_else(|| {
+            GatewayError::InvalidConfig("MCP server has no URL configured".to_owned())
+        })?;
+
+    // Call tools/list on the MCP server
+    let tools_url = format!("{}/tools/list", url.trim_end_matches('/'));
+    let res = state
+        .http
+        .post(&tools_url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?;
+
+    let tools = if res.status().is_success() {
+        let body: Value = res.json().await.map_err(GatewayError::Upstream)?;
+        // Handle both {tools:[]} and {result:{tools:[]}} shapes
+        body.get("result")
+            .and_then(|r| r.get("tools"))
+            .or_else(|| body.get("tools"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    Ok(Json(ToolsResponse {
+        server_id,
+        tools,
+    }))
 }
 
 /// GET /v1/mcp/discover — auth: any configured gateway key (or open if none set).

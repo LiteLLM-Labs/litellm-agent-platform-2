@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, Info, Check, Loader2, Unplug } from "lucide-react";
+import { Eye, EyeOff, Info, Check, Loader2, Unplug, Zap, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,8 @@ export function IntegrationDialog({
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; tools: string[]; count: number } | null>(null);
+  const [testing, setTesting] = useState(false);
 
   if (!server) return null;
 
@@ -38,6 +40,26 @@ export function IntegrationDialog({
     setApiKey("");
     setReveal(false);
     setError(null);
+    setTestResult(null);
+  };
+
+  const onTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/v1/mcp/server/${server.server_id}/tools`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json() as { tools?: { name?: string }[] };
+        const tools = (data.tools ?? []).map((t) => t.name ?? "").filter(Boolean);
+        setTestResult({ ok: true, tools: tools.slice(0, 8), count: tools.length });
+      } else {
+        setTestResult({ ok: false, tools: [], count: 0 });
+      }
+    } catch {
+      setTestResult({ ok: false, tools: [], count: 0 });
+    } finally {
+      setTesting(false);
+    }
   };
 
   const onSave = async () => {
@@ -112,6 +134,49 @@ export function IntegrationDialog({
                 </Badge>
               ))}
             </div>
+          </div>
+        )}
+
+        {connected && (
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void onTest()}
+              disabled={testing}
+              className="w-full"
+            >
+              {testing ? (
+                <><Loader2 className="size-3.5 animate-spin" /> Testing connection…</>
+              ) : (
+                <><Zap className="size-3.5" /> Test connection</>
+              )}
+            </Button>
+            {testResult && (
+              <div className={`rounded-lg border p-3 text-sm ${testResult.ok ? "border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400" : "border-destructive/30 bg-destructive/5 text-destructive"}`}>
+                {testResult.ok ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <Check className="size-4" />
+                      Connected — {testResult.count} tool{testResult.count !== 1 ? "s" : ""} available
+                    </div>
+                    {testResult.tools.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {testResult.tools.map((t) => (
+                          <Badge key={t} variant="outline" className="font-mono text-[10px]">{t}</Badge>
+                        ))}
+                        {testResult.count > 8 && <span className="text-xs text-muted-foreground">+{testResult.count - 8} more</span>}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <XCircle className="size-4" />
+                    Connection failed — check the server URL and your API key
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
