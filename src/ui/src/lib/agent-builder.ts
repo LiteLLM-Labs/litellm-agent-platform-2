@@ -571,15 +571,10 @@ export function createInputFromDraft(draft: AgentDraft) {
     })
     .filter((s): s is NonNullable<typeof s> => s !== null);
   const mcpServers = resolvedMcpServers.map(({ id: _id, ...rest }) => rest);
-  const existingMcpToolsetNames = new Set(
-    draft.tools
-      .filter((t) => t.type === "mcp_toolset" && t.mcp_server_name)
-      .map((t) => t.mcp_server_name),
-  );
-  const mcpToolsets = resolvedMcpServers
-    .filter(({ id }) => !existingMcpToolsetNames.has(id))
-    .map(({ id }) => ({ type: "mcp_toolset", mcp_server_name: id }));
-  const allTools = [...draft.tools, ...mcpToolsets];
+  const resolvedIds = new Set(resolvedMcpServers.map(({ id }) => id));
+  const baseTools = draft.tools.filter((t) => t.type !== "mcp_toolset");
+  const mcpToolsets = resolvedMcpServers.map(({ id }) => ({ type: "mcp_toolset", mcp_server_name: id }));
+  const allTools = [...baseTools, ...mcpToolsets];
 
   return {
     name: draft.name.trim(),
