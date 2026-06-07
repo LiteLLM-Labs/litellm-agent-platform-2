@@ -1,13 +1,10 @@
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
-
 use crate::errors::GatewayError;
 
 #[derive(Debug, Deserialize)]
-pub struct SlackAuthedUser {
-    pub id: String,
-}
+pub struct SlackAuthedUser { pub id: String }
 
 #[derive(Debug, Deserialize)]
 pub struct SlackOAuthAccessResponse {
@@ -23,21 +20,6 @@ pub struct SlackOAuthAccessResponse {
 pub struct SlackTeam {
     pub id: Option<String>,
     pub name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlackUserProfile {
-    pub display_name: Option<String>,
-    pub image_48: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SlackUser {
-    pub id: String,
-    pub name: String,
-    pub real_name: Option<String>,
-    pub profile: Option<SlackUserProfile>,
-    pub is_bot: bool,
 }
 
 #[derive(Debug, Deserialize)]

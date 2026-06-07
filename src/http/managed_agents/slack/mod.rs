@@ -16,6 +16,7 @@ mod reply_storage;
 mod reply_stream;
 mod signature;
 pub(crate) mod types;
+pub(super) mod users;
 pub(crate) mod web_api;
 
 pub use authorization::authorize_slack_invocation;

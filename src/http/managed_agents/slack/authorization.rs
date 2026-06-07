@@ -9,11 +9,8 @@ pub async fn authorize_slack_invocation(
     user_id: &str,
     team_id: &str,
 ) -> Result<(), ()> {
-    let channel = match channels_repo::get_by_kind(pool, agent_id, "slack").await {
-        Ok(Some(ch)) => ch,
-        // No channel row: agent was connected before access-gating was introduced; allow as everyone.
-        Ok(None) => return Ok(()),
-        Err(_) => return Err(()),
+    let Ok(Some(channel)) = channels_repo::get_by_kind(pool, agent_id, "slack").await else {
+        return Err(());
     };
 
     if channel.status != "enabled" {

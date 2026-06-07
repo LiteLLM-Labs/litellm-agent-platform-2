@@ -12,7 +12,7 @@ use crate::db::managed_agents::channels::{repository as channels_repo, schema::S
 
 use super::{
     config::{bot_token_key, load_agent, load_secret, slack_config},
-    web_api,
+    users,
 };
 
 pub async fn members(
@@ -25,7 +25,7 @@ pub async fn members(
     let config = slack_config(&agent)?;
     let bot_token = load_secret(&state, &bot_token_key(&agent.id, &config)).await?;
     let users =
-        web_api::list_users(&state.http, &state.config.slack.api_base_url, &bot_token).await?;
+        users::list_users(&state.http, &state.config.slack.api_base_url, &bot_token).await?;
     let access_config = channels_repo::get_by_kind(pool, &agent_id, "slack")
         .await?
         .and_then(|ch| serde_json::from_value::<SlackChannelConfig>(ch.config).ok())
