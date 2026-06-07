@@ -30,10 +30,29 @@ pub async fn get_by_name(
         r#"
         SELECT credential_values
         FROM "LiteLLM_CredentialsTable"
-        WHERE credential_name = $1
+        WHERE credential_name = $1 AND scope = 'global'
         "#,
     )
     .bind(credential_name)
+    .fetch_optional(pool)
+    .await
+    .map_err(GatewayError::Database)
+}
+
+pub async fn get_personal_by_name(
+    pool: &PgPool,
+    credential_name: &str,
+    owner_id: &str,
+) -> Result<Option<CredentialRow>, GatewayError> {
+    sqlx::query_as::<_, CredentialRow>(
+        r#"
+        SELECT credential_values
+        FROM "LiteLLM_CredentialsTable"
+        WHERE credential_name = $1 AND scope = 'personal' AND owner_id = $2
+        "#,
+    )
+    .bind(credential_name)
+    .bind(owner_id)
     .fetch_optional(pool)
     .await
     .map_err(GatewayError::Database)

@@ -111,7 +111,7 @@ async fn resolve_user_credential(
     enc_key: &str,
 ) -> Result<Option<String>, GatewayError> {
     let key_name = format!("mcp_user:{}:{}", server_id, user_id);
-    let Some(row) = credentials::get_by_name(pool, &key_name).await? else {
+    let Some(row) = credentials::get_personal_by_name(pool, &key_name, user_id).await? else {
         return Ok(None);
     };
     // credential_values is stored as { "value": "<encrypted>" }

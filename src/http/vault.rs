@@ -79,6 +79,11 @@ pub async fn save(
     require_any_gateway_key(&headers, &state)?;
 
     let scope = input.scope.as_str();
+    if scope != "personal" && scope != "global" {
+        return Err(GatewayError::InvalidJsonMessage(
+            "scope must be 'personal' or 'global'".to_owned(),
+        ));
+    }
     if scope == "global" {
         require_master_key(
             &headers,

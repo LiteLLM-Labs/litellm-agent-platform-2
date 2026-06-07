@@ -105,7 +105,7 @@ pub async fn create(
         .bind(input.byok_api_key_help_url)
         .bind(input.source_url)
         .bind(input.timeout)
-        .bind(input.approval_status)
+        .bind(input.approval_status.unwrap_or_else(|| "active".to_owned()))
         .bind(input.submitted_by)
         .bind(input.review_notes)
         .fetch_one(pool)
