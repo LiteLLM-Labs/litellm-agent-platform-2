@@ -79,3 +79,14 @@ pub async fn update_config(
     .map_err(GatewayError::Database)?;
     Ok(())
 }
+
+pub async fn exists(pool: &PgPool, agent_id: &str, kind: &str) -> Result<bool, GatewayError> {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM "LiteLLM_ManagedAgentChannelsTable" WHERE agent_id = $1 AND kind = $2)"#,
+    )
+    .bind(agent_id)
+    .bind(kind)
+    .fetch_one(pool)
+    .await
+    .map_err(GatewayError::Database)
+}

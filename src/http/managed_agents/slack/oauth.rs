@@ -116,12 +116,10 @@ async fn store_oauth_result(
     )
     .await?;
 
-    // Seed the Slack invocation channel with "only_me" default
     let channel_config = serde_json::json!({
         "team_id": team_id,
         "access": "only_me",
         "allowed_user_ids": authed_user_id.as_ref().map(|id| vec![id.clone()]).unwrap_or_default(),
-        "authed_user_id": authed_user_id,
     });
     crate::db::managed_agents::channels::repository::upsert(
         pool,

@@ -15,7 +15,6 @@ mod types;
 mod web_api;
 
 pub use authorization::authorize_slack_invocation;
-pub use authorization::SlackAuthError;
 pub use events::events;
 pub use interactivity::interactivity;
 pub use members::members as slack_members;

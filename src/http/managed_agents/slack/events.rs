@@ -14,9 +14,8 @@ use crate::{
 };
 
 use super::{
-    authorization,
     config::{load_agent, load_secret, signing_secret_key, slack_config},
-    replies::spawn_slack_prompt,
+    replies::{post_denial_ephemeral, spawn_slack_prompt},
     signature,
     types::{SlackAgentConfig, SlackIncomingMessage},
 };
@@ -53,7 +52,7 @@ pub async fn events(
             .await
             .is_err()
         {
-            authorization::deny_with_ephemeral(&state, &agent, &config, &payload, user_id).await;
+            post_denial_ephemeral(&state, &agent, &config, &payload, user_id).await;
             return Ok(StatusCode::OK.into_response());
         }
 

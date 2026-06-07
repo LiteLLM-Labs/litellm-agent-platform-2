@@ -45,6 +45,12 @@ pub async fn update_access(
         ));
     }
     let pool = crate::http::managed_agents::db(&state, &headers)?;
+    load_agent(pool, &agent_id).await?;
+    if !crate::db::managed_agents::channels::repository::exists(pool, &agent_id, "slack").await? {
+        return Err(GatewayError::NotFound(
+            "no Slack channel configured for this agent".to_owned(),
+        ));
+    }
     let patch = serde_json::json!({
         "access": body.access,
         "allowed_user_ids": body.allowed_user_ids.unwrap_or_default(),
