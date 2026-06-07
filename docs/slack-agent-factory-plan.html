@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Slack Agent Factory - One PR Plan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #16202a;
+      --muted: #596675;
+      --line: #d7dee8;
+      --soft: #f6f8fb;
+      --accent: #1264a3;
+      --ok: #0f7b47;
+      --warn: #9a5a00;
+      --risk: #b3261e;
+      --panel: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+      color: var(--ink);
+      background: var(--soft);
+    }
+
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      padding: 28px 36px 22px;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px 28px 48px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 32px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    code {
+      padding: 1px 5px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: #f9fbfd;
+      font-size: 0.93em;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      max-width: 900px;
+      font-size: 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .section {
+      grid-column: span 12;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .half {
+      grid-column: span 6;
+    }
+
+    .third {
+      grid-column: span 4;
+    }
+
+    .pill {
+      display: inline-block;
+      margin: 0 6px 6px 0;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #ffffff;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .warning {
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .risk {
+      color: var(--risk);
+      font-weight: 700;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef3f8;
+    }
+
+    ol,
+    ul {
+      margin: 8px 0 0 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .step {
+      min-height: 116px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfdff;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--accent);
+    }
+
+    .checklist {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 22px;
+    }
+
+    .checklist li {
+      list-style: none;
+      margin-left: 0;
+      padding-left: 24px;
+      position: relative;
+    }
+
+    .checklist li::before {
+      content: "□";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .mono-block {
+      overflow: auto;
+      white-space: pre;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f1720;
+      color: #d7e3f0;
+      padding: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    @media (max-width: 840px) {
+      header {
+        padding: 24px 20px 18px;
+      }
+
+      main {
+        padding: 20px;
+      }
+
+      .half,
+      .third {
+        grid-column: span 12;
+      }
+
+      .flow,
+      .checklist {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Slack Agent Factory - One PR Plan</h1>
+    <p class="subtitle">
+      Ship a platform-level Slack flow where a user can ask the platform bot to create a Claude Managed Agent,
+      configure it for the workspace, and start using it in Slack without manually creating a per-agent Slack app.
+    </p>
+    <div>
+      <span class="pill">Scope: one PR</span>
+      <span class="pill">Runtime: Claude Managed Agents</span>
+      <span class="pill">Channel: Slack</span>
+      <span class="pill">Primary proof: real Slack E2E</span>
+      <span class="pill">Build on PR #49 platform MCPs</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="section">
+      <h2>Goal</h2>
+      <p>
+        A Slack user should be able to DM or mention the platform bot with a request like
+        <code>make me an agent to monitor support escalations</code>. The platform bot should collect missing details,
+        create a Claude Managed Agent, bind it to the correct Slack place, and confirm how to use it.
+      </p>
+      <p>
+        This PR should not require each new agent to own a separate Slack app. Existing per-agent Slack OAuth can remain
+        supported, but the new flow should use one installed platform Slack app as the broker.
+      </p>
+    </section>
+
+    <div class="grid">
+      <section class="section half">
+        <h2>Current State</h2>
+        <ul>
+          <li>Agents already exist in <code>LiteLLM_ManagedAgentsTable</code>.</li>
+          <li>Claude Managed Agents runtime is supported through <code>claude_managed_agents</code>.</li>
+          <li>Slack event handling exists under <code>src/http/managed_agents/slack/</code>.</li>
+          <li>Slack replies can stream runtime output, react with eyes, and keep thread sessions.</li>
+          <li>Current Slack config is stored per-agent under <code>agent.config.slack</code>.</li>
+          <li>PR #49 adds platform MCP infrastructure at <code>/api/platform-mcps</code> and <code>/mcp/platform/{agent_id}</code>.</li>
+          <li>PR #49 exposes built-in MCP tools <code>read_platform_session</code> and <code>agent_memory</code>.</li>
+        </ul>
+      </section>
+
+      <section class="section half">
+        <h2>New Product Shape</h2>
+        <ul>
+          <li>Install one workspace-level platform Slack app.</li>
+          <li>Route Slack events through a platform broker.</li>
+          <li>Use a platform factory agent for creation requests.</li>
+          <li>Persist bindings from Slack team/channel/user contexts to managed agents.</li>
+          <li>Dispatch normal Slack messages to the bound managed agent.</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="section">
+      <h2>User Flow</h2>
+      <div class="flow">
+        <div class="step">
+          <strong>1. Request</strong>
+          User messages the platform bot: <code>make me an agent to do X</code>.
+        </div>
+        <div class="step">
+          <strong>2. Clarify</strong>
+          Bot asks for missing name, channel, cadence, permissions, or instructions.
+        </div>
+        <div class="step">
+          <strong>3. Confirm</strong>
+          Bot summarizes the proposed agent and asks for explicit confirmation.
+        </div>
+        <div class="step">
+          <strong>4. Create</strong>
+          Platform tool creates a <code>claude_managed_agents</code> agent.
+        </div>
+        <div class="step">
+          <strong>5. Install</strong>
+          Platform completes Slack OAuth if needed, then binds the agent into Slack.
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Slack to Agent Landing Flow</h2>
+      <p>
+        This is the exact path from a Slack message like <code>make me an agent to do X</code> to a created
+        Claude Managed Agent that is usable from Slack.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Step</th>
+            <th>Actor</th>
+            <th>Action</th>
+            <th>System Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>Slack user</td>
+            <td>DMs or mentions the platform bot: <code>make me an agent to watch support escalations</code>.</td>
+            <td>Slack sends a signed event to <code>/api/slack/platform/events</code>.</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>Platform Slack broker</td>
+            <td>Verifies the request, records the Slack event id, detects creation intent, and opens a factory session.</td>
+            <td>A row is stored in <code>LiteLLM_SlackAgentFactorySessionsTable</code> keyed by <code>team_id</code>, <code>channel_id</code>, and <code>thread_ts</code>.</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>Factory agent</td>
+            <td>Extracts a proposed agent name, instructions, target Slack surface, and missing fields.</td>
+            <td>If required fields are missing, the bot asks a follow-up in the same Slack thread.</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>Slack user</td>
+            <td>Answers follow-ups or clicks <code>Create</code> on the confirmation message.</td>
+            <td>The interactivity callback hits <code>/api/slack/platform/interactivity</code> and resumes the same factory session.</td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td>Factory agent via platform MCP</td>
+            <td>Calls <code>create_managed_agent</code> with the normalized draft.</td>
+            <td>A new row is written to <code>LiteLLM_ManagedAgentsTable</code> with <code>harness = claude_managed_agents</code>.</td>
+          </tr>
+          <tr>
+            <td>6</td>
+            <td>Factory agent via platform MCP</td>
+            <td>Calls <code>connect_agent_to_slack</code> with the new <code>agent_id</code>, Slack target, and requester context.</td>
+            <td>If the workspace app is already installed, a row is written to <code>LiteLLM_SlackAgentBindingsTable</code>. If not, the tool returns a Slack OAuth install URL and stores a pending install.</td>
+          </tr>
+          <tr>
+            <td>7</td>
+            <td>Slack user</td>
+            <td>Clicks the install URL only when the platform Slack app is not installed for that workspace yet.</td>
+            <td>Slack OAuth redirects to the platform callback, bot token is stored in vault, and the pending agent binding is finalized.</td>
+          </tr>
+          <tr>
+            <td>8</td>
+            <td>Platform bot</td>
+            <td>Posts a confirmation in Slack with the created agent name and usage instructions.</td>
+            <td>The agent has landed in Slack: users can now message the same channel/DM and hit the binding.</td>
+          </tr>
+          <tr>
+            <td>9</td>
+            <td>Slack user</td>
+            <td>Sends a normal top-level prompt where the agent is bound.</td>
+            <td>The broker reacts with eyes, creates a Claude runtime session, streams the reply, and maps the Slack timestamp to that session.</td>
+          </tr>
+          <tr>
+            <td>10</td>
+            <td>Slack user</td>
+            <td>Sends a follow-up in the Slack thread.</td>
+            <td>The broker reuses the parent session and posts the response in the same thread.</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3>Slack Conversation Example</h3>
+      <div class="mono-block">User: @Lite Agents make me an agent to watch #support for urgent customer escalations
+
+Platform bot: I can create that. Proposed agent:
+  Name: Support Escalation Watcher
+  Runtime: Claude Managed Agents
+  Slack target: #support
+  Instructions: Watch for urgent customer escalation messages and summarize them.
+Create it?
+
+User clicks: Create
+
+Platform bot: Created Support Escalation Watcher.
+Install it to Slack to finish setup:
+https://slack.com/oauth/v2/authorize?...
+
+User completes Slack OAuth.
+
+Platform bot: Support Escalation Watcher is installed and connected to #support.
+Try: "what escalations need attention today?"
+
+User in #support: what escalations need attention today?
+Support Escalation Watcher: eyes reaction
+Support Escalation Watcher: Here are the current urgent escalations...</div>
+    </section>
+
+    <section class="section">
+      <h2>Data Model</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Fields</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>LiteLLM_SlackWorkspaceInstallationsTable</code></td>
+            <td><code>team_id</code>, <code>team_name</code>, <code>bot_user_id</code>, <code>bot_token_key</code>, <code>installed_by</code>, timestamps</td>
+            <td>One platform Slack app install per workspace. Stores secret references, not token values.</td>
+          </tr>
+          <tr>
+            <td><code>LiteLLM_SlackAgentBindingsTable</code></td>
+            <td><code>agent_id</code>, <code>team_id</code>, <code>channel_id</code>, <code>dm_user_id</code>, <code>created_by</code>, <code>status</code>, timestamps</td>
+            <td>Maps Slack surfaces to managed agents. This is the router table.</td>
+          </tr>
+          <tr>
+            <td><code>LiteLLM_SlackAgentFactorySessionsTable</code></td>
+            <td><code>team_id</code>, <code>channel_id</code>, <code>thread_ts</code>, <code>user_id</code>, <code>draft_json</code>, <code>status</code>, timestamps</td>
+            <td>Tracks multi-turn creation conversations before an agent exists.</td>
+          </tr>
+          <tr>
+            <td><code>LiteLLM_SlackPendingInstallsTable</code></td>
+            <td><code>state</code>, <code>agent_id</code>, <code>requested_by</code>, <code>target_channel_id</code>, <code>target_dm_user_id</code>, <code>expires_at</code>, timestamps</td>
+            <td>Remembers the agent and Slack target while the user completes OAuth. Consumed exactly once by the OAuth callback.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Platform MCPs</h2>
+      <p>
+        This plan should build directly on PR #49. The agent factory should not introduce a second bespoke tool protocol.
+        It should extend the platform MCP catalog and JSON-RPC endpoint already introduced there.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Existing MCP from PR #49</th>
+            <th>Tool name</th>
+            <th>How the Slack factory uses it</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Read platform session</td>
+            <td><code>read_platform_session</code></td>
+            <td>Lets an agent inspect platform session messages for handoff, debugging, and explaining what happened during creation.</td>
+          </tr>
+          <tr>
+            <td>Read/Write agent memory</td>
+            <td><code>agent_memory</code></td>
+            <td>Stores durable agent preferences, Slack onboarding facts, channel policies, and user-provided operating instructions.</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3>New MCPs to expose in this PR</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>MCP id</th>
+            <th>Input</th>
+            <th>Output</th>
+            <th>Guardrail</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>create_managed_agent</code></td>
+            <td>Name, instructions, owner Slack user, model, optional channel/cadence.</td>
+            <td>Agent id and summary.</td>
+            <td>Always creates <code>harness = claude_managed_agents</code>.</td>
+          </tr>
+          <tr>
+            <td><code>connect_agent_to_slack</code></td>
+            <td>Agent id, requested Slack workspace, channel id or user id, requester Slack user.</td>
+            <td>Either <code>status = connected</code> with binding id, or <code>status = install_required</code> with Slack OAuth URL.</td>
+            <td>Creates a pending install state when OAuth is needed; consumes it once after callback.</td>
+          </tr>
+          <tr>
+            <td><code>list_slack_agent_bindings</code></td>
+            <td>Team id, optional channel/user filter.</td>
+            <td>Agents visible in that Slack surface.</td>
+            <td>Only returns agents bound to the caller's workspace/surface.</td>
+          </tr>
+          <tr>
+            <td><code>update_agent_instructions</code></td>
+            <td>Agent id, revised instructions.</td>
+            <td>Updated agent summary.</td>
+            <td>Requires creator/admin or channel-level manager permission.</td>
+          </tr>
+          <tr>
+            <td><code>test_agent_in_slack</code></td>
+            <td>Agent id, channel/user target, test prompt.</td>
+            <td>Test session id, Slack ts, success/failure.</td>
+            <td>Must not expose token values or raw secrets.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        All MCP definitions should appear in <code>platform_mcps()</code> and <code>tool_defs()</code>, with execution in
+        <code>tools/call</code> under <code>/mcp/platform/{agent_id}</code>. The Agents UI should list these tools via
+        <code>/api/platform-mcps</code> and attach them through <code>config.platform_mcp_ids</code>.
+      </p>
+    </section>
+
+    <section class="section">
+      <h2>Slack Routing</h2>
+      <div class="mono-block">Slack event
+  -> verify platform signing secret
+  -> ignore bot/subtype duplicates
+  -> record Slack event id for idempotency
+  -> if thread is an active factory session:
+       continue agent creation conversation
+     else if message intent is create-agent:
+       start factory session
+     else if channel/dm has binding:
+       route to bound managed agent
+     else:
+       reply with "No agent is connected here yet. Say 'make me an agent to ...'"</div>
+    </section>
+
+    <section class="section">
+      <h2>OAuth Install Behavior</h2>
+      <p>
+        Creating the platform agent does not require a browser. Installing the platform Slack app into a workspace uses the
+        normal Slack OAuth screen, because Slack requires a human workspace admin/user authorization step.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Workspace state</th>
+            <th><code>connect_agent_to_slack</code> behavior</th>
+            <th>User experience</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Platform Slack app is already installed.</td>
+            <td>Creates the binding immediately and returns <code>status = connected</code>.</td>
+            <td>User sees confirmation in Slack and can use the agent right away.</td>
+          </tr>
+          <tr>
+            <td>Platform Slack app is not installed.</td>
+            <td>Creates a pending install row, returns <code>status = install_required</code>, and includes a Slack OAuth URL with a signed <code>state</code>.</td>
+            <td>User clicks the install URL, completes Slack OAuth, returns to the platform callback, and then receives a Slack confirmation.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        The OAuth callback must store the bot token in vault, store the workspace installation row, consume the pending install,
+        create the agent binding, and post a final Slack confirmation when possible.
+      </p>
+    </section>
+
+    <div class="grid">
+      <section class="section third">
+        <h2>Creation Intent</h2>
+        <ul>
+          <li>Detect phrases like <code>make me an agent</code>, <code>create an agent</code>, <code>add an agent</code>.</li>
+          <li>Use deterministic phrase matching first.</li>
+          <li>Only call Claude for extraction after the intent is likely.</li>
+        </ul>
+      </section>
+
+      <section class="section third">
+        <h2>Confirmation</h2>
+        <ul>
+          <li>Do not create on vague input without confirmation.</li>
+          <li>Show name, instructions, Slack surface, and runtime.</li>
+          <li>Buttons: Create, Edit instructions, Cancel.</li>
+        </ul>
+      </section>
+
+      <section class="section third">
+        <h2>Dispatch</h2>
+        <ul>
+          <li>React with eyes on accepted messages.</li>
+          <li>Each top-level message creates a new runtime session.</li>
+          <li>Thread replies reuse the parent session and reply in-thread.</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="section">
+      <h2>One PR Work Breakdown</h2>
+      <ol>
+        <li>Add migrations and repositories for workspace installations, bindings, and factory sessions.</li>
+        <li>Add platform Slack config loading separate from per-agent Slack config.</li>
+        <li>Add factory service that creates Claude Managed Agents and bindings.</li>
+        <li>Extend PR #49's platform MCP catalog with Slack factory MCPs.</li>
+        <li>Expose the new tools through <code>/mcp/platform/{agent_id}</code> using MCP <code>tools/list</code> and <code>tools/call</code>.</li>
+        <li>Add Slack broker route, for example <code>/api/slack/platform/events</code>.</li>
+        <li>Add creation-intent parser and confirmation state machine.</li>
+        <li>Reuse existing Slack reply stream rendering for bound managed agents.</li>
+        <li>Add UI/admin surface only if needed to view bindings; keep creation UX Slack-first.</li>
+        <li>Add integration tests with mocked Slack and mocked Claude runtime.</li>
+        <li>Verify against real Slack before merging.</li>
+      </ol>
+    </section>
+
+    <section class="section">
+      <h2>API Surface</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Route</th>
+            <th>Method</th>
+            <th>Use</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/api/slack/platform/events</code></td>
+            <td>POST</td>
+            <td>Workspace-level Slack Events API callback.</td>
+          </tr>
+          <tr>
+            <td><code>/api/slack/platform/interactivity</code></td>
+            <td>POST</td>
+            <td>Buttons for create/edit/cancel and approval actions.</td>
+          </tr>
+          <tr>
+            <td><code>/api/platform-mcps</code></td>
+            <td>GET</td>
+            <td>Catalog endpoint from PR #49. Must include existing MCPs plus new Slack factory MCPs.</td>
+          </tr>
+          <tr>
+            <td><code>/mcp/platform/{agent_id}</code></td>
+            <td>POST</td>
+            <td>JSON-RPC endpoint from PR #49. Must serve <code>tools/list</code> and <code>tools/call</code> for factory MCPs.</td>
+          </tr>
+          <tr>
+            <td><code>/api/slack/bindings</code></td>
+            <td>GET/POST</td>
+            <td>Optional admin/test route. The primary creation path should be MCP-backed.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Test Plan</h2>
+      <ul class="checklist">
+        <li>Factory creates a <code>claude_managed_agents</code> agent.</li>
+        <li><code>/api/platform-mcps</code> includes <code>read_platform_session</code>, <code>agent_memory</code>, and factory MCPs.</li>
+        <li><code>/mcp/platform/{agent_id}</code> lists and calls factory MCP tools.</li>
+        <li><code>create_managed_agent</code> MCP persists the created agent.</li>
+        <li><code>connect_agent_to_slack</code> MCP persists the Slack binding.</li>
+        <li>Factory stores a Slack binding for the target channel or DM.</li>
+        <li>Duplicate Slack event ids do not create duplicate agents.</li>
+        <li>Threaded factory follow-up updates the same draft.</li>
+        <li>Confirm button creates the agent and binding.</li>
+        <li>Cancel button closes the draft without creating an agent.</li>
+        <li>Message in a bound channel routes to the bound agent.</li>
+        <li>Top-level messages create new runtime sessions.</li>
+        <li>Thread replies reuse the parent runtime session.</li>
+        <li>Bot reacts with eyes before processing accepted messages.</li>
+        <li>Slack mrkdwn rendering is readable.</li>
+        <li>Missing workspace install returns a clear setup message.</li>
+        <li>Unbound channel returns a clear create-agent prompt.</li>
+        <li>Secrets are stored in vault and never returned by list endpoints.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>Real Slack Proof Required Before Merge</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Requirement</th>
+            <th>Evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>User asks platform bot to create an agent.</td>
+            <td>Slack parent message ts and factory thread transcript.</td>
+          </tr>
+          <tr>
+            <td>Agent is Claude Managed Agent.</td>
+            <td>DB/API readback showing <code>harness = claude_managed_agents</code>.</td>
+          </tr>
+          <tr>
+            <td>Agent is added to Slack.</td>
+            <td>Binding row plus Slack channel/DM where bot confirms setup.</td>
+          </tr>
+          <tr>
+            <td>Agent responds in Slack.</td>
+            <td>Slack thread showing user prompt, eyes reaction, and bot reply.</td>
+          </tr>
+          <tr>
+            <td>Follow-up replies in same thread.</td>
+            <td>Slack thread showing follow-up and bot response in-thread.</td>
+          </tr>
+          <tr>
+            <td>New top-level messages create new sessions.</td>
+            <td>DB/API readback mapping distinct top-level Slack timestamps to distinct runtime sessions.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="section">
+      <h2>Risks</h2>
+      <ul>
+        <li><span class="risk">Slack app identity:</span> a single platform bot means agents may speak as the platform app unless Slack custom bot identities or clear message prefixes are used.</li>
+        <li><span class="risk">Permissions:</span> channel binding should require the requester to have access to that channel and should not silently add agents to private spaces.</li>
+        <li><span class="warning">Ambiguous requests:</span> the factory must ask follow-ups instead of creating low-quality agents from vague prompts.</li>
+        <li><span class="warning">Token scope drift:</span> new workspace app scopes must be documented and covered by setup checks.</li>
+        <li><span class="warning">One PR size:</span> this is still shippable as one PR, but it should be organized as small modules with focused tests.</li>
+      </ul>
+    </section>
+
+    <section class="section">
+      <h2>PR Acceptance Criteria</h2>
+      <ul>
+        <li><span class="status">Passes CI:</span> format, check, clippy, tests, and code-size gate.</li>
+        <li><span class="status">One workspace Slack app can create multiple agents.</span></li>
+        <li><span class="status">Agents created from Slack are Claude Managed Agents.</span></li>
+        <li><span class="status">Slack messages route through persisted bindings.</span></li>
+        <li><span class="status">Real Slack proof is included in the PR body.</span></li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

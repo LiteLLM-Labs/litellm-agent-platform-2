@@ -8,7 +8,7 @@ use super::{
     claude_runtime::save_anthropic_credentials,
     slack_helpers::{
         assert_slack_api_call_count, assert_slack_api_called, now_seconds, percent_encode,
-        provider_id_for, signed_json_request, signed_request,
+        provider_id_for, signed_json_request, signed_request, slack_api_call_count,
     },
 };
 
@@ -19,15 +19,17 @@ pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
     assert_oauth_callback(fixture, agent_id).await;
     assert_url_verification(fixture, agent_id).await;
     assert_thread_session_race(fixture, agent_id).await;
+    let reaction_baseline = slack_api_call_count(fixture, "/reactions.add").await;
+    let post_baseline = slack_api_call_count(fixture, "/chat.postMessage").await;
     let session_id = send_app_mention(fixture, agent_id).await;
     assert_runtime_session(fixture, &session_id).await;
-    assert_slack_api_call_count(fixture, "/reactions.add", 1).await;
-    assert_slack_api_call_count(fixture, "/chat.postMessage", 1).await;
+    assert_slack_api_call_count(fixture, "/reactions.add", reaction_baseline + 1).await;
+    assert_slack_api_call_count(fixture, "/chat.postMessage", post_baseline + 1).await;
     assert_slack_api_called(fixture, "/chat.update").await;
     send_channel_thread_reply(fixture, agent_id).await;
-    assert_slack_api_call_count(fixture, "/reactions.add", 2).await;
-    assert_slack_api_call_count(fixture, "/chat.postMessage", 2).await;
     super::slack_mcp::enable_and_assert_slack_messages(fixture, agent_id).await;
+    assert_slack_api_call_count(fixture, "/reactions.add", reaction_baseline + 2).await;
+    assert_slack_api_call_count(fixture, "/chat.postMessage", post_baseline + 2).await;
     assert_interactivity_accepts_approval(fixture, agent_id).await;
 }
 

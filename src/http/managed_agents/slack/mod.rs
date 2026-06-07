@@ -1,4 +1,5 @@
 pub(crate) mod config;
+mod dispatch;
 mod events;
 mod form;
 mod interactivity;
@@ -9,7 +10,7 @@ mod reply_lock;
 mod reply_storage;
 mod reply_stream;
 mod signature;
-mod types;
+pub(crate) mod types;
 pub(crate) mod web_api;
 
 pub use events::events;

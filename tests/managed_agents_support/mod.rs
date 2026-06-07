@@ -62,6 +62,7 @@ fn build_state(pool: PgPool, e2b_api_base: String, slack_api_base_url: String) -
         mcp_servers: HashMap::new(),
         general_settings: GeneralSettings {
             master_key: Some("sk-local".to_owned()),
+            public_base_url: Some("http://localhost".to_owned()),
             database_url: Some("postgres://test".to_owned()),
             sandbox_choice: Some("e2b".to_owned()),
             e2b_sandbox_params: E2bSandboxParams {

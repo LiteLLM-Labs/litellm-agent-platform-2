@@ -56,6 +56,8 @@ async fn handle_event_callback(
     let Some(message) = incoming_message(payload) else {
         return Ok(());
     };
+    let (agent, config) =
+        super::dispatch::route_agent(&pool, agent, config, payload, &message).await?;
     let event_key = slack_event_key(payload, &message);
     if !slack::repository::record_event(&pool, &agent.id, &event_key).await? {
         return Ok(());

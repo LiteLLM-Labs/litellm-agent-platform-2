@@ -15,6 +15,8 @@ use crate::{
 };
 
 mod definitions;
+mod factory;
+mod factory_slack;
 mod session_management;
 mod slack;
 mod tools;
@@ -24,6 +26,9 @@ pub const SEND_PLATFORM_SESSION_MESSAGE_MCP_ID: &str = "send_platform_session_me
 pub const AGENT_MEMORY_MCP_ID: &str = "agent_memory";
 pub const SEND_SLACK_MESSAGE_MCP_ID: &str = "send_slack_message";
 pub const PLATFORM_MCP_SERVER_NAME: &str = "platform";
+pub const CREATE_MANAGED_AGENT_MCP_ID: &str = "create_managed_agent";
+pub const CONNECT_AGENT_TO_SLACK_MCP_ID: &str = "connect_agent_to_slack";
+pub const LIST_SLACK_AGENT_BINDINGS_MCP_ID: &str = "list_slack_agent_bindings";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlatformMcp {
@@ -53,6 +58,21 @@ pub fn platform_mcps() -> Vec<PlatformMcp> {
             id: SEND_SLACK_MESSAGE_MCP_ID,
             name: "Send Slack message",
             description: "Send a channel message or DM from this agent's connected Slack bot.",
+        },
+        PlatformMcp {
+            id: CREATE_MANAGED_AGENT_MCP_ID,
+            name: "Create managed agent",
+            description: "Create a Claude managed agent from a Slack or platform request.",
+        },
+        PlatformMcp {
+            id: CONNECT_AGENT_TO_SLACK_MCP_ID,
+            name: "Connect agent to Slack",
+            description: "Bind a managed agent to the factory Slack app or return an install URL.",
+        },
+        PlatformMcp {
+            id: LIST_SLACK_AGENT_BINDINGS_MCP_ID,
+            name: "List Slack agent bindings",
+            description: "List channel bindings created by this platform agent factory.",
         },
     ]
 }
@@ -141,15 +161,7 @@ pub async fn serve(
     require_any_gateway_key(&headers, &state)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let response = match request.method.as_str() {
-        "initialize" => json!({
-            "jsonrpc": "2.0",
-            "id": request.id,
-            "result": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "litellm-platform", "version": env!("CARGO_PKG_VERSION") }
-            }
-        }),
+        "initialize" => initialize_response(request.id),
         "tools/list" => json!({
             "jsonrpc": "2.0",
             "id": request.id,
@@ -179,6 +191,9 @@ fn is_platform_mcp(id: &str) -> bool {
             | SEND_PLATFORM_SESSION_MESSAGE_MCP_ID
             | AGENT_MEMORY_MCP_ID
             | SEND_SLACK_MESSAGE_MCP_ID
+            | CREATE_MANAGED_AGENT_MCP_ID
+            | CONNECT_AGENT_TO_SLACK_MCP_ID
+            | LIST_SLACK_AGENT_BINDINGS_MCP_ID
     )
 }
 
@@ -212,6 +227,13 @@ async fn call_tool(
         SEND_SLACK_MESSAGE_MCP_ID => {
             slack::send_message(state.as_ref(), pool, agent_id, arguments).await?
         }
+        CREATE_MANAGED_AGENT_MCP_ID => factory::create_managed_agent(pool, arguments).await?,
+        CONNECT_AGENT_TO_SLACK_MCP_ID => {
+            factory_slack::connect_agent_to_slack(state.as_ref(), pool, agent_id, arguments).await?
+        }
+        LIST_SLACK_AGENT_BINDINGS_MCP_ID => {
+            factory_slack::list_slack_bindings(pool, agent_id).await?
+        }
         _ => {
             return Ok(json!({
                 "isError": true,
@@ -233,11 +255,39 @@ pub(crate) fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str,
         .ok_or_else(|| GatewayError::InvalidJsonMessage(format!("{field} is required")))
 }
 
+pub(super) fn public_base_url(state: &AppState) -> Result<String, GatewayError> {
+    state
+        .config
+        .general_settings
+        .public_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            GatewayError::InvalidConfig(
+                "general_settings.public_base_url is required for platform MCPs".to_owned(),
+            )
+        })
+}
+
 fn rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "error": { "code": code, "message": message }
+    })
+}
+
+fn initialize_response(id: Option<Value>) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "litellm-platform", "version": env!("CARGO_PKG_VERSION") }
+        }
     })
 }
 
