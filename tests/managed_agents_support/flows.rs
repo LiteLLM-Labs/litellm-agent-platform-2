@@ -10,6 +10,7 @@ mod platform_factory;
 mod platform_factory_oauth;
 mod platform_factory_payloads;
 mod platform_mcps;
+mod routines;
 mod rules;
 mod sessions;
 mod slack;
@@ -20,6 +21,7 @@ mod slack_url_verification;
 pub use claude_runtime::exercise_claude_runtime_session_storage;
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use platform_mcps::exercise_platform_mcps;
+pub use routines::exercise_routines;
 pub use rules::exercise_rules;
 pub use sessions::exercise_sessions;
 pub use slack::exercise_slack;
@@ -102,6 +104,18 @@ pub async fn exercise_agent_lifecycle(fixture: &AppFixture, agent_id: &str) {
     )
     .await;
     assert_eq!(resumed["status"], "active");
+}
+
+pub async fn exercise_agent_runtime_update(fixture: &AppFixture, agent_id: &str) {
+    let updated = request_json(
+        fixture.app.clone(),
+        "PATCH",
+        &format!("/api/agents/{agent_id}"),
+        Some(json!({ "runtime": "opencode" })),
+    )
+    .await;
+    assert_eq!(updated["config"]["runtime"], "opencode");
+    assert_eq!(updated["name"], "ops-agent");
 }
 
 pub async fn exercise_memory(fixture: &AppFixture, agent_id: &str) {

@@ -12,16 +12,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ModelSelect } from "@/components/model-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ScheduleEditor } from "@/components/schedule-editor";
-import { getAgent, updateAgent, listAgents, listModels } from "@/lib/api";
+import { getAgent, updateAgent, listAgents, listModels, listAgentRuntimes } from "@/lib/api";
 import { DEFAULT_TIMEZONE } from "@/lib/schedule";
-import type { Agent } from "@/lib/types";
+import type { Agent, AgentRuntime, AgentRuntimeId } from "@/lib/types";
 
 interface FormState {
   name: string;
   description: string;
   prompt: string;
   model: string;
+  runtime: AgentRuntimeId;
   cron: string;
   timezone: string;
   subAgentIds: string[];
@@ -71,6 +79,7 @@ function AgentEdit() {
     description: "",
     prompt: "",
     model: "",
+    runtime: "claude_managed_agents",
     cron: "",
     timezone: DEFAULT_TIMEZONE,
     subAgentIds: [],
@@ -78,6 +87,7 @@ function AgentEdit() {
   });
   const [models, setModels] = useState<string[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,13 +97,19 @@ function AgentEdit() {
     if (!id) return;
     (async () => {
       try {
-        const [ag, modelList, agentList] = await Promise.all([getAgent(id), listModels(), listAgents()]);
+        const [ag, modelList, agentList, runtimeList] = await Promise.all([
+          getAgent(id),
+          listModels(),
+          listAgents(),
+          listAgentRuntimes(),
+        ]);
         const config = objectValue(ag.config);
         setForm({
           name: ag.name ?? "",
           description: ag.description ?? "",
           prompt: ag.prompt ?? "",
           model: ag.model ?? "",
+          runtime: runtimeFromAgent(ag),
           cron: ag.cron ?? "",
           timezone: ag.timezone ?? DEFAULT_TIMEZONE,
           subAgentIds: subAgentIdsFromConfig(config),
@@ -101,6 +117,7 @@ function AgentEdit() {
         });
         setModels(modelList);
         setAgents(agentList.filter((agent) => agent.id !== id));
+        setRuntimes(runtimeList);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -120,6 +137,7 @@ function AgentEdit() {
         description: form.description,
         prompt: form.prompt,
         system: form.prompt,
+        runtime: form.runtime,
         cron: cron || null,
         timezone: form.timezone.trim() || "UTC",
         config: configWithSubAgents(form.config, form.subAgentIds),
@@ -167,6 +185,26 @@ function AgentEdit() {
                   <div className="grid gap-1.5">
                     <Label>Model</Label>
                     <ModelSelect value={form.model} models={models} onValueChange={(v) => setForm({ ...form, model: v })} />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>Default runtime</Label>
+                    <Select
+                      value={form.runtime}
+                      onValueChange={(value) => {
+                        if (isAgentRuntimeId(value)) setForm({ ...form, runtime: value });
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {runtimeOptions(runtimes).map((runtime) => (
+                          <SelectItem key={runtime.id} value={runtime.id}>
+                            {runtime.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="grid gap-1.5">
                     <Label htmlFor="ag-prompt">System prompt</Label>
@@ -292,4 +330,51 @@ function AgentEdit() {
 
 export default function AgentEditPage() {
   return <Suspense><AgentEdit /></Suspense>;
+}
+
+function isAgentRuntimeId(value: unknown): value is AgentRuntimeId {
+  return value === "claude_managed_agents" || value === "cursor" || value === "opencode";
+}
+
+function runtimeFromAgent(agent: Agent): AgentRuntimeId {
+  const config = agent.config;
+  if (config && typeof config === "object" && !Array.isArray(config)) {
+    const runtime = (config as { runtime?: unknown }).runtime;
+    if (isAgentRuntimeId(runtime)) return runtime;
+  }
+  if (isAgentRuntimeId(agent.harness)) return agent.harness;
+  return "claude_managed_agents";
+}
+
+function runtimeOptions(runtimes: AgentRuntime[]): AgentRuntime[] {
+  if (runtimes.length > 0) return runtimes;
+  return [
+    {
+      id: "claude_managed_agents",
+      name: "Claude Managed Agents",
+      default_api_base: "",
+      credential_provider_id: "anthropic",
+      credential_provider_name: "Anthropic",
+      tools: [],
+      connected: false,
+    },
+    {
+      id: "cursor",
+      name: "Cursor",
+      default_api_base: "",
+      credential_provider_id: "cursor",
+      credential_provider_name: "Cursor",
+      tools: [],
+      connected: false,
+    },
+    {
+      id: "opencode",
+      name: "OpenCode",
+      default_api_base: "",
+      credential_provider_id: "opencode",
+      credential_provider_name: "OpenCode",
+      tools: [],
+      connected: false,
+    },
+  ];
 }

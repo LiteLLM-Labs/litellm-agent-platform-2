@@ -37,7 +37,7 @@ import {
   storeMemory,
 } from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
-import type { Agent, AgentFile, Memory, OpencodeSession } from "@/lib/types";
+import type { Agent, AgentFile, AgentRuntimeId, Memory, OpencodeSession } from "@/lib/types";
 
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms;
@@ -77,6 +77,20 @@ function formatBytes(bytes: number): string {
     value /= 1024;
   }
   return `${bytes} B`;
+}
+
+function isAgentRuntimeId(value: unknown): value is AgentRuntimeId {
+  return value === "claude_managed_agents" || value === "cursor" || value === "opencode";
+}
+
+function runtimeFromAgent(agent: Agent): string {
+  const config = agent.config;
+  if (config && typeof config === "object" && !Array.isArray(config)) {
+    const runtime = (config as { runtime?: unknown }).runtime;
+    if (isAgentRuntimeId(runtime)) return runtime;
+  }
+  if (isAgentRuntimeId(agent.harness)) return agent.harness;
+  return "claude_managed_agents";
 }
 
 function fileNameFromPath(filePath: string): string {
@@ -417,6 +431,9 @@ function AgentDetail() {
                           <dd className="font-mono text-xs">{String(agent.owner_id)}</dd>
                         </>
                       )}
+
+                      <dt className="font-medium text-muted-foreground">Default runtime</dt>
+                      <dd className="font-mono text-xs">{runtimeFromAgent(agent)}</dd>
 
                       <dt className="font-medium text-muted-foreground">Run schedule</dt>
                       <dd className="flex flex-col gap-1">

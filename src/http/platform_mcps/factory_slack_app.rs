@@ -216,6 +216,7 @@ async fn save_child_slack_app(
         UpdateManagedAgent {
             name: None,
             model: None,
+            runtime: None,
             system: None,
             prompt: None,
             cron: None,

@@ -19,9 +19,17 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ScheduleEditor } from "@/components/schedule-editor";
 import {
   listAgents,
+  listAgentRuntimes,
   updateAgent,
   deleteAgent,
   listRules,
@@ -35,7 +43,16 @@ import {
   deleteMemory,
 } from "@/lib/api";
 import { DEFAULT_TIMEZONE, scheduleLabel } from "@/lib/schedule";
-import type { Agent, Rule, Skill, Memory, VaultKeyEntry, PlatformMcp } from "@/lib/types";
+import type {
+  Agent,
+  AgentRuntime,
+  AgentRuntimeId,
+  Rule,
+  Skill,
+  Memory,
+  VaultKeyEntry,
+  PlatformMcp,
+} from "@/lib/types";
 import {
   slackActionClass,
   slackActionLabel,
@@ -49,6 +66,7 @@ interface FormState {
   prompt: string;
   rule_ids: string[];
   skill_ids: string[];
+  runtime: AgentRuntimeId;
   cron: string;
   timezone: string;
   vault_keys: string[];
@@ -62,6 +80,7 @@ const EMPTY: FormState = {
   prompt: "",
   rule_ids: [],
   skill_ids: [],
+  runtime: "claude_managed_agents",
   cron: "",
   timezone: DEFAULT_TIMEZONE,
   vault_keys: [],
@@ -105,6 +124,7 @@ export default function AgentsPage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [platformMcps, setPlatformMcps] = useState<PlatformMcp[]>([]);
+  const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -132,6 +152,7 @@ export default function AgentsPage() {
     listRules().then(setRules).catch(() => setRules([]));
     listSkills().then(setSkills).catch(() => setSkills([]));
     listPlatformMcps().then(setPlatformMcps).catch(() => setPlatformMcps([]));
+    listAgentRuntimes().then(setRuntimes).catch(() => setRuntimes([]));
     listVaultKeys().then(setStoredKeyEntries).catch(() => setStoredKeyEntries([]));
   }, []);
 
@@ -204,6 +225,7 @@ export default function AgentsPage() {
   const ruleName = (id: string) => rules.find((rule) => rule.id === id)?.name ?? id;
   const platformMcpName = (id: string) =>
     platformMcps.find((mcp) => mcp.id === id)?.name ?? id;
+  const runtimeName = (id: string) => runtimes.find((runtime) => runtime.id === id)?.name ?? id;
 
   const loadMemory = async (agentId: string) => {
     setMemories(null);
@@ -243,6 +265,7 @@ export default function AgentsPage() {
       prompt: ag.prompt ?? "",
       rule_ids: Array.isArray(ag.rule_ids) ? ag.rule_ids : [],
       skill_ids: Array.isArray(ag.skill_ids) ? ag.skill_ids : [],
+      runtime: runtimeFromAgent(ag),
       cron: ag.cron ?? "",
       timezone: ag.timezone ?? DEFAULT_TIMEZONE,
       vault_keys: Array.isArray(ag.vault_keys) ? ag.vault_keys : [],
@@ -278,6 +301,7 @@ export default function AgentsPage() {
         prompt: form.prompt,
         rule_ids: form.rule_ids,
         skill_ids: form.skill_ids,
+        runtime: form.runtime,
         cron: cron || null,
         timezone,
         vault_keys: form.vault_keys,
@@ -352,6 +376,9 @@ export default function AgentsPage() {
                     {Boolean(ag.model) && (
                       <span className="font-mono text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5">{String(ag.model)}</span>
                     )}
+                    <span className="font-mono text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5">
+                      {runtimeName(runtimeFromAgent(ag))}
+                    </span>
                   </div>
                   {Boolean(ag.description) && (
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{String(ag.description)}</p>
@@ -448,6 +475,26 @@ export default function AgentsPage() {
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
                 placeholder="What this agent does"
               />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Default runtime</Label>
+              <Select
+                value={form.runtime}
+                onValueChange={(value) => {
+                  if (isAgentRuntimeId(value)) setForm({ ...form, runtime: value });
+                }}
+              >
+                <SelectTrigger className="h-8 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runtimeOptions(runtimes).map((runtime) => (
+                    <SelectItem key={runtime.id} value={runtime.id}>
+                      {runtime.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="ag-prompt">System prompt</Label>
@@ -778,4 +825,51 @@ export default function AgentsPage() {
       {slackFlow.dialog}
     </div>
   );
+}
+
+function isAgentRuntimeId(value: unknown): value is AgentRuntimeId {
+  return value === "claude_managed_agents" || value === "cursor" || value === "opencode";
+}
+
+function runtimeFromAgent(agent: Agent): AgentRuntimeId {
+  const config = agent.config;
+  if (config && typeof config === "object" && !Array.isArray(config)) {
+    const runtime = (config as { runtime?: unknown }).runtime;
+    if (isAgentRuntimeId(runtime)) return runtime;
+  }
+  if (isAgentRuntimeId(agent.harness)) return agent.harness;
+  return "claude_managed_agents";
+}
+
+function runtimeOptions(runtimes: AgentRuntime[]): AgentRuntime[] {
+  if (runtimes.length > 0) return runtimes;
+  return [
+    {
+      id: "claude_managed_agents",
+      name: "Claude Managed Agents",
+      default_api_base: "",
+      credential_provider_id: "anthropic",
+      credential_provider_name: "Anthropic",
+      tools: [],
+      connected: false,
+    },
+    {
+      id: "cursor",
+      name: "Cursor",
+      default_api_base: "",
+      credential_provider_id: "cursor",
+      credential_provider_name: "Cursor",
+      tools: [],
+      connected: false,
+    },
+    {
+      id: "opencode",
+      name: "OpenCode",
+      default_api_base: "",
+      credential_provider_id: "opencode",
+      credential_provider_name: "OpenCode",
+      tools: [],
+      connected: false,
+    },
+  ];
 }

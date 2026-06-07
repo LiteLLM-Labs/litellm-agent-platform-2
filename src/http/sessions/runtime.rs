@@ -71,6 +71,10 @@ pub(crate) async fn create_runtime_session_for_agent(
     prompt: String,
     environment: Value,
 ) -> Result<String, GatewayError> {
+    let runtime = registry::repository::get(pool, &agent_id)
+        .await?
+        .and_then(|agent| runtime_from_agent_config(&agent))
+        .unwrap_or(runtime);
     let response = create_runtime_session(
         state,
         pool,
@@ -88,6 +92,16 @@ pub(crate) async fn create_runtime_session_for_agent(
     )
     .await?;
     Ok(response.id().to_owned())
+}
+
+fn runtime_from_agent_config(agent: &ManagedAgentRow) -> Option<String> {
+    agent
+        .config
+        .get("runtime")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 async fn create_runtime_session_row(
