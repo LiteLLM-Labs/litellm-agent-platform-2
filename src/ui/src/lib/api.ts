@@ -5,6 +5,7 @@ import type {
   AgentRuntime,
   AgentRuntimeId,
   HarnessMessage,
+  McpServer,
   Memory,
   OpencodeSession,
   PlatformMcp,
@@ -814,6 +815,88 @@ export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
   return [...byKey.values()];
 }
 
+// ── MCP Server Registry ───────────────────────────────────────────────────────
+
+/** List all MCP servers (admin). */
+export async function listMcpServers(): Promise<McpServer[]> {
+  const res = await req("/v1/mcp/server");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+/** Get public MCP hub (no auth needed). */
+export async function listPublicMcpServers(): Promise<McpServer[]> {
+  const res = await fetch(BASE + "/public/mcp_hub", { cache: "no-store" });
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+/** Create an MCP server (admin). */
+export async function createMcpServer(input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Update an MCP server (admin). */
+export async function updateMcpServer(server_id: string, input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, server_id }),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Delete an MCP server (admin). */
+export async function deleteMcpServer(server_id: string): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}`, { method: "DELETE" }),
+  );
+}
+
+/** Store a user credential for a BYOK MCP server. */
+export async function storeMcpUserCredential(
+  server_id: string,
+  credential: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": user_id },
+      body: JSON.stringify({ credential }),
+    }),
+  );
+}
+
+/** Delete a user credential for an MCP server. */
+export async function deleteMcpUserCredential(
+  server_id: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "DELETE",
+      headers: { "x-user-id": user_id },
+    }),
+  );
+}
+
+/** List the user's connected MCP servers. */
+export async function listMcpUserCredentials(
+  user_id = "default",
+): Promise<{ server_id: string; updated_at?: number }[]> {
+  const res = await req("/v1/mcp/user-credentials", {
+    headers: { "x-user-id": user_id },
+  });
+  const data = await jsonOrThrow<{ data: { server_id: string; updated_at?: number }[] }>(res);
+  return data.data ?? [];
+}
+
 // ── Skills CRUD (DB-backed, /api/skills) ──────────────────────────────────────
 // Skills are reusable capability docs persisted in the harness DB and attached
 // to agents via agents.skill_ids.
@@ -1133,3 +1216,4 @@ export async function deleteMemory(agentId: string, key: string): Promise<void> 
     { method: "DELETE" },
   );
 }
+

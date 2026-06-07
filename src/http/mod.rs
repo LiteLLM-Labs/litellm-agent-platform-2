@@ -8,6 +8,7 @@ pub mod health;
 pub mod llm;
 pub mod managed_agents;
 pub mod management;
+pub mod mcp_registry;
 pub mod messages;
 pub mod models;
 pub mod observability;

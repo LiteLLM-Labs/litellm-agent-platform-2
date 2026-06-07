@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    routing::{any, delete, get, post, put},
+    routing::{any, delete, get, patch, post, put},
     Router,
 };
 
@@ -28,6 +28,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .merge(crate::http::management::routes::router())
         .merge(crate::http::managed_agents::routes::router())
         .merge(mcp_routes())
+        .merge(mcp_registry_routes())
         .fallback_service(ui::static_files())
         .with_state(state)
 }
@@ -114,6 +115,33 @@ fn mcp_routes() -> Router<Arc<AppState>> {
         .route(
             "/mcp/platform/{agent_id}",
             post(crate::http::platform_mcps::serve),
+        )
+}
+
+fn mcp_registry_routes() -> Router<Arc<AppState>> {
+    use crate::http::mcp_registry::{admin, proxy, public, user_credentials};
+    Router::new()
+        // Public (no auth)
+        .route("/public/mcp_hub", get(public::mcp_hub))
+        // Discovery (soft auth)
+        .route("/v1/mcp/discover", get(public::discover))
+        // Admin CRUD
+        .route("/v1/mcp/server", get(admin::list).post(admin::create).put(admin::update))
+        .route("/v1/mcp/server/{server_id}", get(admin::get_one).delete(admin::delete_one))
+        // User credentials (BYOK)
+        .route(
+            "/v1/mcp/server/{server_id}/user-credential",
+            post(user_credentials::store).delete(user_credentials::delete_credential),
+        )
+        .route("/v1/mcp/user-credentials", get(user_credentials::list))
+        // Dynamic proxy — must be LAST (catch-all)
+        .route(
+            "/{mcp_server_name}/mcp",
+            get(proxy::dynamic_mcp)
+                .post(proxy::dynamic_mcp)
+                .put(proxy::dynamic_mcp)
+                .delete(proxy::dynamic_mcp)
+                .patch(proxy::dynamic_mcp),
         )
 }
 
