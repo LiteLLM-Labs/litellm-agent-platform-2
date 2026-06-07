@@ -111,7 +111,9 @@ async fn fetch_tools(req: reqwest::RequestBuilder) -> Result<Vec<Value>, Gateway
         let text = res.text().await.map_err(GatewayError::Upstream)?;
         Ok(extract_tools_from_response(&text, &ct))
     } else {
-        Ok(vec![])
+        let status = res.status().as_u16();
+        let body = res.text().await.unwrap_or_default();
+        Err(GatewayError::UpstreamHttp(status, body))
     }
 }
 
