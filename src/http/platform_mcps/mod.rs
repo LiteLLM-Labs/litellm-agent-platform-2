@@ -10,13 +10,16 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
-    db::managed_agents::{memory, messages, registry, sessions},
     errors::GatewayError,
     proxy::{auth::master_key::require_any_gateway_key, state::AppState},
 };
 
+mod slack;
+mod tools;
+
 pub const PLATFORM_SESSION_MCP_ID: &str = "read_platform_session";
 pub const AGENT_MEMORY_MCP_ID: &str = "agent_memory";
+pub const SEND_SLACK_MESSAGE_MCP_ID: &str = "send_slack_message";
 pub const PLATFORM_MCP_SERVER_NAME: &str = "platform";
 
 #[derive(Debug, Clone, Serialize)]
@@ -26,8 +29,8 @@ pub struct PlatformMcp {
     pub description: &'static str,
 }
 
-pub fn platform_mcps() -> [PlatformMcp; 2] {
-    [
+pub fn platform_mcps() -> Vec<PlatformMcp> {
+    vec![
         PlatformMcp {
             id: PLATFORM_SESSION_MCP_ID,
             name: "Read platform session",
@@ -37,6 +40,11 @@ pub fn platform_mcps() -> [PlatformMcp; 2] {
             id: AGENT_MEMORY_MCP_ID,
             name: "Read/Write agent memory",
             description: "List, read, and update DB-backed memory for a platform agent.",
+        },
+        PlatformMcp {
+            id: SEND_SLACK_MESSAGE_MCP_ID,
+            name: "Send Slack message",
+            description: "Send a channel message or DM from this agent's connected Slack bot.",
         },
     ]
 }
@@ -143,7 +151,7 @@ pub async fn serve(
             let Some(params) = request.params else {
                 return Ok(Json(rpc_error(request.id, -32602, "params are required")));
             };
-            let result = call_tool(pool, &agent_id, params).await?;
+            let result = call_tool(&state, pool, &agent_id, params).await?;
             json!({ "jsonrpc": "2.0", "id": request.id, "result": result })
         }
         "notifications/initialized" => json!({
@@ -157,7 +165,10 @@ pub async fn serve(
 }
 
 fn is_platform_mcp(id: &str) -> bool {
-    matches!(id, PLATFORM_SESSION_MCP_ID | AGENT_MEMORY_MCP_ID)
+    matches!(
+        id,
+        PLATFORM_SESSION_MCP_ID | AGENT_MEMORY_MCP_ID | SEND_SLACK_MESSAGE_MCP_ID
+    )
 }
 
 fn tool_defs() -> Vec<Value> {
@@ -187,10 +198,38 @@ fn tool_defs() -> Vec<Value> {
                 "required": ["action"]
             }
         }),
+        json!({
+            "name": SEND_SLACK_MESSAGE_MCP_ID,
+            "description": "Send a Slack channel message or DM using this agent's connected Slack bot.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "channel_id": {
+                        "type": "string",
+                        "description": "Slack channel ID, such as C123. When omitted, sends a DM."
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "Slack user ID, such as U123. Used for DMs only."
+                    },
+                    "email": {
+                        "type": "string",
+                        "description": "Slack user email. Used for DMs when user_id is omitted."
+                    },
+                    "text": { "type": "string" }
+                },
+                "required": ["text"]
+            }
+        }),
     ]
 }
 
-async fn call_tool(pool: &PgPool, agent_id: &str, params: Value) -> Result<Value, GatewayError> {
+async fn call_tool(
+    state: &AppState,
+    pool: &PgPool,
+    agent_id: &str,
+    params: Value,
+) -> Result<Value, GatewayError> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
@@ -200,8 +239,9 @@ async fn call_tool(pool: &PgPool, agent_id: &str, params: Value) -> Result<Value
         .cloned()
         .unwrap_or_else(|| json!({}));
     let payload = match name {
-        PLATFORM_SESSION_MCP_ID => read_platform_session(pool, arguments).await?,
-        AGENT_MEMORY_MCP_ID => agent_memory(pool, agent_id, arguments).await?,
+        PLATFORM_SESSION_MCP_ID => tools::read_platform_session(pool, arguments).await?,
+        AGENT_MEMORY_MCP_ID => tools::agent_memory(pool, agent_id, arguments).await?,
+        SEND_SLACK_MESSAGE_MCP_ID => slack::send_message(state, pool, agent_id, arguments).await?,
         _ => {
             return Ok(json!({
                 "isError": true,
@@ -214,58 +254,7 @@ async fn call_tool(pool: &PgPool, agent_id: &str, params: Value) -> Result<Value
     }))
 }
 
-async fn read_platform_session(pool: &PgPool, arguments: Value) -> Result<Value, GatewayError> {
-    let session_id = required_str(&arguments, "session_id")?;
-    let session = sessions::repository::get(pool, session_id)
-        .await?
-        .ok_or_else(|| GatewayError::NotFound("session not found".to_owned()))?;
-    let rows = messages::repository::list(pool, session_id).await?;
-    Ok(json!({
-        "session": session,
-        "messages": rows.into_iter().map(|row| {
-            json!({
-                "id": row.id,
-                "seq": row.seq,
-                "info": serde_json::from_str::<Value>(&row.info_json).unwrap_or(Value::String(row.info_json)),
-                "parts": serde_json::from_str::<Value>(&row.parts_json).unwrap_or(Value::String(row.parts_json))
-            })
-        }).collect::<Vec<_>>()
-    }))
-}
-
-async fn agent_memory(
-    pool: &PgPool,
-    agent_id: &str,
-    arguments: Value,
-) -> Result<Value, GatewayError> {
-    if registry::repository::get(pool, agent_id).await?.is_none() {
-        return Err(GatewayError::UnknownAgent(agent_id.to_owned()));
-    }
-    match required_str(&arguments, "action")? {
-        "list" => Ok(json!({ "memories": memory::repository::list(pool, agent_id).await? })),
-        "get" => {
-            let key = required_str(&arguments, "key")?;
-            let row = memory::repository::list(pool, agent_id)
-                .await?
-                .into_iter()
-                .find(|row| row.key == key);
-            Ok(json!({ "memory": row }))
-        }
-        "set" => {
-            let key = required_str(&arguments, "key")?.to_owned();
-            let value = required_str(&arguments, "value")?.to_owned();
-            let always_on = arguments.get("always_on").and_then(Value::as_bool);
-            Ok(
-                json!({ "memory": memory::repository::store(pool, agent_id, key, value, always_on).await? }),
-            )
-        }
-        action => Err(GatewayError::InvalidJsonMessage(format!(
-            "unsupported memory action: {action}"
-        ))),
-    }
-}
-
-fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str, GatewayError> {
+pub(crate) fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str, GatewayError> {
     value
         .get(field)
         .and_then(Value::as_str)

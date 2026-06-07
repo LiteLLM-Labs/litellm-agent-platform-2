@@ -22,7 +22,7 @@ pub(super) async fn load_agent(
         .ok_or_else(|| GatewayError::NotFound("agent not found".to_owned()))
 }
 
-pub(super) fn slack_config(agent: &ManagedAgentRow) -> Result<SlackAgentConfig, GatewayError> {
+pub(crate) fn slack_config(agent: &ManagedAgentRow) -> Result<SlackAgentConfig, GatewayError> {
     serde_json::from_value(
         agent
             .config
@@ -33,7 +33,7 @@ pub(super) fn slack_config(agent: &ManagedAgentRow) -> Result<SlackAgentConfig, 
     .map_err(GatewayError::InvalidJson)
 }
 
-pub(super) async fn load_secret(state: &AppState, key: &str) -> Result<String, GatewayError> {
+pub(crate) async fn load_secret(state: &AppState, key: &str) -> Result<String, GatewayError> {
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     vault::load(pool, &state.config, DEFAULT_VAULT_USER, key)
         .await?
@@ -54,7 +54,7 @@ pub(super) fn client_secret_key(agent_id: &str, config: &SlackAgentConfig) -> St
         .unwrap_or_else(|| format!("SLACK_{agent_id}_CLIENT_SECRET"))
 }
 
-pub(super) fn bot_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+pub(crate) fn bot_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
     config
         .bot_token_key
         .clone()

@@ -25,8 +25,10 @@ use wiremock::{
 
 mod db;
 pub mod flows;
+mod slack_mock;
 
 use db::reset_tables;
+use slack_mock::mock_slack;
 
 pub struct AppFixture {
     pub app: axum::Router,
@@ -109,14 +111,16 @@ pub async fn request_json(
         "application/json",
     )
     .await;
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(
-        response.status().is_success(),
-        "{} {} returned {}",
+        status.is_success(),
+        "{} {} returned {}: {}",
         method,
         uri,
-        response.status()
+        status,
+        String::from_utf8_lossy(&body)
     );
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&body).unwrap_or_else(|_| json!({}))
 }
 
@@ -226,40 +230,6 @@ async fn mock_e2b() -> MockServer {
         .mount(&server)
         .await;
 
-    server
-}
-
-async fn mock_slack() -> MockServer {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/chat.postMessage"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ok": true,
-            "channel": "C123",
-            "ts": "200.000001"
-        })))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/chat.update"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/reactions.add"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/oauth.v2.access"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "ok": true,
-            "access_token": "xoxb-oauth-token",
-            "bot_user_id": "B123",
-            "team": { "name": "LiteLLM" }
-        })))
-        .mount(&server)
-        .await;
     server
 }
 

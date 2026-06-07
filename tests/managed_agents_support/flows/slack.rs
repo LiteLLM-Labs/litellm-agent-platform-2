@@ -27,6 +27,7 @@ pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
     send_channel_thread_reply(fixture, agent_id).await;
     assert_slack_api_call_count(fixture, "/reactions.add", 2).await;
     assert_slack_api_call_count(fixture, "/chat.postMessage", 2).await;
+    super::slack_mcp::enable_and_assert_slack_messages(fixture, agent_id).await;
     assert_interactivity_accepts_approval(fixture, agent_id).await;
 }
 
