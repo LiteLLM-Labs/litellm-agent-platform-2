@@ -50,6 +50,11 @@ pub(super) async fn create_runtime_session(
             return Err(error);
         }
     };
+    if row.provider_run_id.is_none() {
+        if let Some(prompt) = created.initial_user_prompt.as_deref() {
+            execute_runtime_prompt(state.clone(), pool, row.clone(), prompt.to_owned()).await?;
+        }
+    }
     state.agent_runs.track_run(&created.agent.id, &row.id);
     Ok(SessionResponse::from(row))
 }

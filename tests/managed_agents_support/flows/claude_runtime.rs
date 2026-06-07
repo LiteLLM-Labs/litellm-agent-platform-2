@@ -1,6 +1,6 @@
 use serde_json::json;
 use wiremock::{
-    matchers::{header, method, path},
+    matchers::{body_json, header, method, path},
     Mock, MockServer, ResponseTemplate,
 };
 
@@ -23,12 +23,13 @@ pub async fn save_anthropic_credentials(fixture: &AppFixture) -> MockServer {
 }
 
 pub async fn exercise_claude_runtime_session_storage(fixture: &AppFixture, agent_id: &str) {
-    let _anthropic = save_anthropic_credentials(fixture).await;
+    let anthropic = save_anthropic_credentials(fixture).await;
     let session = create_claude_runtime_session(fixture, agent_id).await;
     let session_id = session["id"].as_str().unwrap();
     assert_claude_session_response(&session);
     assert_claude_session_stored(fixture, session_id).await;
     assert_claude_runtime_events_stored(fixture, session_id).await;
+    anthropic.verify().await;
 }
 
 async fn create_claude_runtime_session(fixture: &AppFixture, agent_id: &str) -> serde_json::Value {
@@ -125,10 +126,29 @@ async fn mount_claude_runtime(anthropic: &MockServer) {
         })))
         .mount(anthropic)
         .await;
+    mount_claude_session_events(anthropic).await;
+}
+
+async fn mount_claude_session_events(anthropic: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/v1/sessions/sesn_111111111111111111111111/events"))
+        .and(header("x-api-key", "anthropic-test"))
+        .and(body_json(json!({
+            "events": [{
+                "type": "user.message",
+                "content": [{ "type": "text", "text": "say hello" }]
+            }]
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
+        .expect(1..)
+        .with_priority(1)
+        .mount(anthropic)
+        .await;
     Mock::given(method("POST"))
         .and(path("/v1/sessions/sesn_111111111111111111111111/events"))
         .and(header("x-api-key", "anthropic-test"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
+        .with_priority(2)
         .mount(anthropic)
         .await;
     Mock::given(method("GET"))
