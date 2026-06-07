@@ -114,19 +114,39 @@ async fn store_oauth_result(
     })?;
     let key = bot_token_key(&agent.id, config);
     vault::save(pool, &state.config, DEFAULT_VAULT_USER, &key, &access_token).await?;
+
+    let authed_user_id = oauth.authed_user.as_ref().map(|u| u.id.clone());
+    let team_id = oauth.team.as_ref().and_then(|t| t.id.clone());
+
     update_slack_config(
         pool,
         agent,
         json!({
             "status": "connected",
             "bot_token_key": key,
-            "slack_team_name": oauth.team.and_then(|team| team.name),
+            "slack_team_name": oauth.team.as_ref().and_then(|t| t.name.clone()),
+            "team_id": team_id,
             "bot_user_id": oauth.bot_user_id,
+            "authed_user_id": authed_user_id,
             "oauth_error": Value::Null,
         }),
     )
     .await?;
+
+    let channel_config = serde_json::json!({
+        "team_id": team_id,
+        "access": "only_me",
+        "allowed_user_ids": authed_user_id.as_ref().map(|id| vec![id.clone()]).unwrap_or_default(),
+    });
+    crate::db::managed_agents::channels::repository::upsert(
+        pool,
+        &agent.id,
+        "slack",
+        channel_config,
+    )
+    .await?;
     finish_pending_install(pool, agent, &oauth_state).await?;
+
     Ok(Redirect::to("/agents/?slack=connected"))
 }
 

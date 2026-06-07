@@ -259,3 +259,34 @@ async fn enqueue_or_report(
     }
     Ok(())
 }
+
+pub(super) async fn post_denial_ephemeral(
+    state: &AppState,
+    agent: &ManagedAgentRow,
+    config: &SlackAgentConfig,
+    payload: &serde_json::Value,
+    user_id: &str,
+) {
+    if user_id.is_empty() {
+        return;
+    }
+    let Ok(bot_token) = load_secret(state, &bot_token_key(&agent.id, config)).await else {
+        return;
+    };
+    let channel_id = payload
+        .get("event")
+        .and_then(|e| e.get("channel"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if !channel_id.is_empty() {
+        let _ = web_api::post_ephemeral(
+            &state.http,
+            &state.config.slack.api_base_url,
+            &bot_token,
+            channel_id,
+            user_id,
+            "You don't have permission to use this agent.",
+        )
+        .await;
+    }
+}

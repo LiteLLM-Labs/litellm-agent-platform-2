@@ -97,7 +97,7 @@ async fn test_pool() -> Option<PgPool> {
         .ok()
         .filter(|url| !url.trim().is_empty())?;
     let pool = managed_agents_pool::connect(&database_url).await.unwrap();
-    managed_agents_pool::migrate(&pool).await.unwrap();
+    managed_agents_pool::migrate_fresh(&pool).await.unwrap();
     sqlx::query(
         r#"DELETE FROM "LiteLLM_CredentialsTable" WHERE credential_name = 'provider:openai'"#,
     )

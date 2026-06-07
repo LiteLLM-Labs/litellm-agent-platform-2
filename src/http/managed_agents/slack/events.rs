@@ -16,7 +16,7 @@ use crate::{
 use super::{
     config::{load_agent, load_secret, signing_secret_key, slack_config},
     message::{incoming_message, session_prompt},
-    replies::spawn_slack_prompt,
+    replies::{post_denial_ephemeral, spawn_slack_prompt},
     signature,
     types::{SlackAgentConfig, SlackIncomingMessage},
 };
@@ -43,6 +43,21 @@ pub async fn events(
     signature::verify(&headers, &body, &secret)?;
 
     if payload.get("type").and_then(Value::as_str) == Some("event_callback") {
+        let team_id = payload.get("team_id").and_then(Value::as_str).unwrap_or("");
+        let user_id = payload
+            .get("event")
+            .and_then(|e| e.get("user"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+
+        if super::authorize_slack_invocation(&pool, &agent_id, user_id, team_id)
+            .await
+            .is_err()
+        {
+            post_denial_ephemeral(&state, &agent, &config, &payload, user_id).await;
+            return Ok(StatusCode::OK.into_response());
+        }
+
         handle_event_callback(state, pool, agent, config, &payload).await?;
     }
     Ok(StatusCode::OK.into_response())

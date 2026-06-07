@@ -1,8 +1,13 @@
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::errors::GatewayError;
+
+#[derive(Debug, Deserialize)]
+pub struct SlackAuthedUser {
+    pub id: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct SlackOAuthAccessResponse {
@@ -10,12 +15,29 @@ pub struct SlackOAuthAccessResponse {
     pub access_token: Option<String>,
     pub bot_user_id: Option<String>,
     pub team: Option<SlackTeam>,
+    pub authed_user: Option<SlackAuthedUser>,
     pub error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SlackTeam {
+    pub id: Option<String>,
     pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackUserProfile {
+    pub display_name: Option<String>,
+    pub image_48: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlackUser {
+    pub id: String,
+    pub name: String,
+    pub real_name: Option<String>,
+    pub profile: Option<SlackUserProfile>,
+    pub is_bot: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,6 +51,19 @@ struct SlackMessageResponse {
 struct SlackOkResponse {
     ok: bool,
     error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackUsersListResponse {
+    ok: bool,
+    members: Option<Vec<SlackUser>>,
+    error: Option<String>,
+    response_metadata: Option<SlackResponseMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackResponseMetadata {
+    next_cursor: Option<String>,
 }
 
 pub async fn post_message_as(
@@ -186,6 +221,64 @@ pub async fn oauth_access(
         .json()
         .await
         .map_err(GatewayError::Upstream)
+}
+
+pub async fn post_ephemeral(
+    client: &Client,
+    api_base_url: &str,
+    bot_token: &str,
+    channel: &str,
+    user: &str,
+    text: &str,
+) -> Result<(), GatewayError> {
+    let response: SlackOkResponse = client
+        .post(method_url(api_base_url, "chat.postEphemeral"))
+        .bearer_auth(bot_token)
+        .json(&json!({
+            "channel": channel,
+            "user": user,
+            "text": text,
+        }))
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?
+        .json()
+        .await
+        .map_err(GatewayError::Upstream)?;
+    if !response.ok {
+        tracing::warn!(
+            "slack chat.postEphemeral failed: {}",
+            response.error.unwrap_or_else(|| "unknown_error".to_owned())
+        );
+    }
+    Ok(())
+}
+
+pub async fn list_users(
+    client: &Client,
+    api_base_url: &str,
+    bot_token: &str,
+) -> Result<Vec<SlackUser>, GatewayError> {
+    let response: SlackUsersListResponse = client
+        .get(method_url(api_base_url, "users.list"))
+        .bearer_auth(bot_token)
+        .query(&[("limit", "200")])
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?
+        .json()
+        .await
+        .map_err(GatewayError::Upstream)?;
+    if !response.ok {
+        return Err(slack_api_error("users.list", response.error));
+    }
+    let members = response
+        .members
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|u| !u.is_bot && u.id != "USLACKBOT")
+        .collect();
+    Ok(members)
 }
 
 fn method_url(api_base_url: &str, method: &str) -> String {

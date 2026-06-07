@@ -52,7 +52,8 @@ async fn mount_factory_methods(server: &MockServer) {
             "ok": true,
             "access_token": "xoxb-oauth-token",
             "bot_user_id": "B123",
-            "team": { "name": "LiteLLM" }
+            "team": { "id": "T123", "name": "LiteLLM" },
+            "authed_user": { "id": "U123" }
         }),
     )
     .await;
@@ -72,6 +73,20 @@ async fn mount_factory_methods(server: &MockServer) {
         }),
     )
     .await;
+    mount(
+        server,
+        "/users.list",
+        json!({
+            "ok": true,
+            "members": [
+                { "id": "U123", "name": "installer", "is_bot": false },
+                { "id": "U456", "name": "other", "is_bot": false }
+            ],
+            "response_metadata": { "next_cursor": "" }
+        }),
+    )
+    .await;
+    mount(server, "/chat.postEphemeral", json!({ "ok": true })).await;
 }
 
 async fn mount(server: &MockServer, url_path: &'static str, body: Value) {
