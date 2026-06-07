@@ -41,7 +41,7 @@ pub(super) async fn provision_runtime_session(
 ) -> Result<SessionRow, GatewayError> {
     let sdk_rt = super::runtime_sdk::sdk_runtime(&created.runtime)?;
     let client = runtime_client(state, sdk_rt, created);
-    let provider_agent = create_provider_agent(&client, sdk_rt, created).await?;
+    let provider_agent = create_provider_agent(state, &client, sdk_rt, created).await?;
     let provider_env = create_provider_environment(&client, sdk_rt, created).await?;
     let provider_session = client
         .beta()
@@ -96,6 +96,7 @@ fn runtime_client(state: &AppState, runtime: AgentRuntime, created: &CreatedRunt
 }
 
 async fn create_provider_agent(
+    state: &AppState,
     client: &Lap,
     runtime: AgentRuntime,
     created: &CreatedRuntimeSession,
@@ -114,7 +115,7 @@ async fn create_provider_agent(
             system: provider_system(runtime, created),
             description: created.agent.description.clone(),
             tools: vec![serde_json::json!({ "type": "agent_toolset_20260401" })],
-            mcp_servers: mcp_servers(&created.agent),
+            mcp_servers: mcp_servers(state, &created.agent)?,
             workspace: workspace_from_env(&created.environment)?,
             env_vars: None,
             metadata: Some(agent_metadata(&created.agent)),

@@ -99,6 +99,12 @@ export interface Agent {
   [k: string]: unknown;
 }
 
+export interface PlatformMcp {
+  id: string;
+  name: string;
+  description: string;
+}
+
 export interface AgentFile {
   agent_id: string;
   path: string;

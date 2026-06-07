@@ -7,6 +7,7 @@ import type {
   HarnessMessage,
   Memory,
   OpencodeSession,
+  PlatformMcp,
   Skill,
   SpendLog,
 } from "./types";
@@ -220,6 +221,12 @@ export async function listAgentRuntimes(): Promise<AgentRuntime[]> {
   const res = await req("/api/agent-runtimes");
   const data = await jsonOrThrow<{ runtimes: AgentRuntime[] }>(res);
   return data.runtimes;
+}
+
+export async function listPlatformMcps(): Promise<PlatformMcp[]> {
+  const res = await req("/api/platform-mcps");
+  const data = await jsonOrThrow<{ platform_mcps: PlatformMcp[] }>(res);
+  return data.platform_mcps ?? [];
 }
 
 export async function saveAgentRuntimeCredential(input: {

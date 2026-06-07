@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Plus, Play, Pencil, Trash2, X, Brain } from "lucide-react";
+import { Clock, Plus, Play, Pencil, Trash2, X, Brain, Plug } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandIcon } from "@/components/brand-icons";
@@ -26,6 +26,7 @@ import {
   deleteAgent,
   listSkills,
   listIntegrationKeys,
+  listPlatformMcps,
   saveIntegrationKey,
   deleteIntegrationKey,
   listMemory,
@@ -33,7 +34,7 @@ import {
   deleteMemory,
 } from "@/lib/api";
 import { DEFAULT_TIMEZONE, scheduleLabel } from "@/lib/schedule";
-import type { Agent, Skill, Memory } from "@/lib/types";
+import type { Agent, Skill, Memory, PlatformMcp } from "@/lib/types";
 import {
   slackActionClass,
   slackActionLabel,
@@ -49,6 +50,7 @@ interface FormState {
   cron: string;
   timezone: string;
   vault_keys: string[];
+  platform_mcp_ids: string[];
 }
 
 const EMPTY: FormState = {
@@ -59,12 +61,26 @@ const EMPTY: FormState = {
   cron: "",
   timezone: DEFAULT_TIMEZONE,
   vault_keys: [],
+  platform_mcp_ids: [],
 };
+
+function agentConfig(agent: Agent): Record<string, unknown> {
+  return agent.config && typeof agent.config === "object" && !Array.isArray(agent.config)
+    ? (agent.config as Record<string, unknown>)
+    : {};
+}
+
+function platformMcpIds(agent: Agent): string[] {
+  const config = agentConfig(agent);
+  const value = config.platform_mcp_ids ?? config.platformMcpIds;
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+}
 
 export default function AgentsPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [platformMcps, setPlatformMcps] = useState<PlatformMcp[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -90,6 +106,7 @@ export default function AgentsPage() {
   useEffect(() => {
     load();
     listSkills().then(setSkills).catch(() => setSkills([]));
+    listPlatformMcps().then(setPlatformMcps).catch(() => setPlatformMcps([]));
     listIntegrationKeys().then(setStoredKeys).catch(() => setStoredKeys([]));
   }, []);
 
@@ -124,7 +141,17 @@ export default function AgentsPage() {
         : [...f.skill_ids, id],
     }));
 
+  const togglePlatformMcp = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      platform_mcp_ids: f.platform_mcp_ids.includes(id)
+        ? f.platform_mcp_ids.filter((mcpId) => mcpId !== id)
+        : [...f.platform_mcp_ids, id],
+    }));
+
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
+  const platformMcpName = (id: string) =>
+    platformMcps.find((mcp) => mcp.id === id)?.name ?? id;
 
   const loadMemory = async (agentId: string) => {
     setMemories(null);
@@ -166,6 +193,7 @@ export default function AgentsPage() {
       cron: ag.cron ?? "",
       timezone: ag.timezone ?? DEFAULT_TIMEZONE,
       vault_keys: Array.isArray(ag.vault_keys) ? ag.vault_keys : [],
+      platform_mcp_ids: platformMcpIds(ag),
     });
     setFormError(null);
     setVaultKeyInput("");
@@ -184,6 +212,11 @@ export default function AgentsPage() {
       if (!editingId) throw new Error("Agent ID is required");
       const cron = form.cron.trim();
       const timezone = form.timezone.trim() || "UTC";
+      const currentAgent = agents?.find((agent) => agent.id === editingId);
+      const config = {
+        ...(currentAgent ? agentConfig(currentAgent) : {}),
+        platform_mcp_ids: form.platform_mcp_ids,
+      };
       await updateAgent(editingId, {
         name: form.name,
         description: form.description,
@@ -192,6 +225,7 @@ export default function AgentsPage() {
         cron: cron || null,
         timezone,
         vault_keys: form.vault_keys,
+        config,
       });
       setOpen(false);
       await load();
@@ -249,6 +283,7 @@ export default function AgentsPage() {
             )}
             {agents?.map((ag) => {
               const slack = slackConfig(ag);
+              const attachedPlatformMcps = platformMcpIds(ag);
               return (
                 <Card
                   key={String(ag.id)}
@@ -277,6 +312,16 @@ export default function AgentsPage() {
                       {ag.skill_ids.map((id) => (
                         <Badge key={id} variant="secondary" className="text-[10px]">
                           {skillName(id)}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {attachedPlatformMcps.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {attachedPlatformMcps.map((id) => (
+                        <Badge key={id} variant="outline" className="text-[10px] gap-1">
+                          <Plug className="size-3" />
+                          {platformMcpName(id)}
                         </Badge>
                       ))}
                     </div>
@@ -391,6 +436,48 @@ export default function AgentsPage() {
               {form.skill_ids.length > 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   {form.skill_ids.length} skill{form.skill_ids.length === 1 ? "" : "s"} attached
+                </p>
+              )}
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="flex items-center gap-1.5">
+                <Plug className="size-3.5" />
+                Platform MCPs
+              </Label>
+              {platformMcps.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No platform MCPs available on this server.
+                </p>
+              ) : (
+                <div className="rounded-md border border-border divide-y divide-border">
+                  {platformMcps.map((mcp) => {
+                    const checked = form.platform_mcp_ids.includes(mcp.id);
+                    return (
+                      <label
+                        key={mcp.id}
+                        className="flex items-start gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={() => togglePlatformMcp(mcp.id)}
+                        />
+                        <span className="min-w-0 flex flex-col">
+                          <span className="text-xs font-medium">{mcp.name}</span>
+                          <span className="text-[11px] text-muted-foreground line-clamp-2">
+                            {mcp.description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {form.platform_mcp_ids.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  {form.platform_mcp_ids.length} platform MCP
+                  {form.platform_mcp_ids.length === 1 ? "" : "s"} attached
                 </p>
               )}
             </div>
