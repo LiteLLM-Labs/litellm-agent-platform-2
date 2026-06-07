@@ -72,6 +72,14 @@ async fn connect_child_agent(fixture: &AppFixture, platform_agent_id: &str, chil
         connected["agent_url"].as_str().unwrap(),
         format!("http://localhost/agents/detail/?id={child_id}")
     );
+    assert!(connected["reinstall_url"]
+        .as_str()
+        .unwrap()
+        .contains("chat%3Awrite.customize"));
+    assert!(connected["slack_display"]
+        .as_str()
+        .unwrap()
+        .contains("agent name"));
     assert!(listed_bindings(fixture, platform_agent_id)
         .await
         .contains("C-factory"));
@@ -172,6 +180,7 @@ async fn assert_pending_install_url(
     );
     let install_url = install["install_url"].as_str().unwrap();
     assert!(install_url.starts_with("https://slack.com/oauth/v2/authorize?"));
+    assert!(install_url.contains("chat%3Awrite.customize"));
     assert!(install_url.contains("redirect_uri=http%3A%2F%2Flocalhost%2Fhost-oauth-callback"));
 }
 

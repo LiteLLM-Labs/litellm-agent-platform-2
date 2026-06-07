@@ -14,7 +14,7 @@ use super::{
     config::{bot_token_key, load_secret},
     reply_lock::SlackPromptLock,
     reply_storage::last_message_seq,
-    reply_stream::SlackReply,
+    reply_stream::{SlackReply, SlackReplyParams},
     types::{SlackAgentConfig, SlackIncomingMessage},
     web_api,
 };
@@ -73,16 +73,17 @@ async fn run_locked_slack_prompt(
         .await
         .ok();
     let event_stream = state.agent_runs.event_stream();
-    let placeholder = post_placeholder(&state, &bot_token, &message).await;
-    let mut reply = SlackReply::new(
-        &state,
+    let placeholder = post_placeholder(&state, &bot_token, &message, &agent.name).await;
+    let mut reply = SlackReply::new(SlackReplyParams {
+        state: &state,
         pool,
-        &bot_token,
-        &message,
-        placeholder,
-        &session_id,
+        bot_token: &bot_token,
+        message: &message,
+        username: &agent.name,
+        ts: placeholder,
+        session_id: &session_id,
         baseline_seq,
-    );
+    });
     enqueue_or_report(&state, pool, &message, &mut reply, &session_id, &agent).await?;
     if let Some(stream) = runtime_stream {
         return match reply.run_runtime(stream).await {
@@ -112,14 +113,16 @@ async fn post_placeholder(
     state: &AppState,
     bot_token: &str,
     message: &SlackIncomingMessage,
+    username: &str,
 ) -> Option<String> {
-    match web_api::post_message(
+    match web_api::post_message_as(
         &state.http,
         &state.config.slack.api_base_url,
         bot_token,
         &message.channel,
         &message.reply_thread_ts,
         "_Thinking..._",
+        Some(username),
     )
     .await
     {

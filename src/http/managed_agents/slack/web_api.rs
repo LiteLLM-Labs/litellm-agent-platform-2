@@ -55,35 +55,79 @@ struct SlackUser {
     id: String,
 }
 
-pub async fn post_message(
+pub async fn post_message_as(
     client: &Client,
     api_base_url: &str,
     bot_token: &str,
     channel: &str,
     thread_ts: &str,
     text: &str,
+    username: Option<&str>,
 ) -> Result<String, GatewayError> {
+    let response = post_message_raw(
+        client,
+        api_base_url,
+        bot_token,
+        channel,
+        thread_ts,
+        text,
+        username,
+    )
+    .await?;
+    if response.ok {
+        return response.ts.ok_or_else(|| {
+            GatewayError::SandboxError("slack chat.postMessage omitted ts".to_owned())
+        });
+    }
+    if username.is_some() && response.error.as_deref() == Some("missing_scope") {
+        let fallback = post_message_raw(
+            client,
+            api_base_url,
+            bot_token,
+            channel,
+            thread_ts,
+            text,
+            None,
+        )
+        .await?;
+        return match fallback.ok {
+            true => fallback.ts.ok_or_else(|| {
+                GatewayError::SandboxError("slack chat.postMessage omitted ts".to_owned())
+            }),
+            false => Err(slack_api_error("chat.postMessage", fallback.error)),
+        };
+    }
+    Err(slack_api_error("chat.postMessage", response.error))
+}
+
+async fn post_message_raw(
+    client: &Client,
+    api_base_url: &str,
+    bot_token: &str,
+    channel: &str,
+    thread_ts: &str,
+    text: &str,
+    username: Option<&str>,
+) -> Result<SlackMessageResponse, GatewayError> {
+    let mut body = json!({
+        "channel": channel,
+        "thread_ts": thread_ts,
+        "text": truncate(text),
+    });
+    if let Some(username) = username.map(str::trim).filter(|value| !value.is_empty()) {
+        body["username"] = username.into();
+    }
     let response: SlackMessageResponse = client
         .post(method_url(api_base_url, "chat.postMessage"))
         .bearer_auth(bot_token)
-        .json(&json!({
-            "channel": channel,
-            "thread_ts": thread_ts,
-            "text": truncate(text),
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(GatewayError::Upstream)?
         .json()
         .await
         .map_err(GatewayError::Upstream)?;
-    if response.ok {
-        response.ts.ok_or_else(|| {
-            GatewayError::SandboxError("slack chat.postMessage omitted ts".to_owned())
-        })
-    } else {
-        Err(slack_api_error("chat.postMessage", response.error))
-    }
+    Ok(response)
 }
 
 pub async fn open_dm(

@@ -22,7 +22,7 @@ use super::{
     public_base_url, required_str,
 };
 
-const SLACK_SCOPES: &str = "app_mentions:read,channels:history,channels:read,chat:write,groups:history,groups:read,im:history,im:read,im:write,mpim:history,mpim:read,reactions:write,team:read,users:read";
+const SLACK_SCOPES: &str = "app_mentions:read,channels:history,channels:read,chat:write,chat:write.customize,groups:history,groups:read,im:history,im:read,im:write,mpim:history,mpim:read,reactions:write,team:read,users:read";
 
 pub async fn connect_agent_to_slack(
     state: &AppState,
@@ -42,6 +42,7 @@ pub async fn connect_agent_to_slack(
             platform_agent_id,
             child,
             &platform.config,
+            &config,
             &arguments,
         )
         .await;
@@ -72,6 +73,7 @@ async fn connect_existing(
     platform_agent_id: &str,
     child: ManagedAgentRow,
     platform_config: &Value,
+    config: &SlackAgentConfig,
     arguments: &Value,
 ) -> Result<Value, GatewayError> {
     copy_slack_config(pool, &child, platform_config).await?;
@@ -88,9 +90,26 @@ async fn connect_existing(
     Ok(json!({
         "status": "connected",
         "agent_url": agent_url(state, &child.id)?,
+        "reinstall_url": reinstall_url(state, pool, platform_agent_id, config).await?,
+        "slack_display": "Replies are posted through the installed Slack app and use the agent name when chat:write.customize is granted.",
         "binding": binding,
         "agent": child
     }))
+}
+
+async fn reinstall_url(
+    state: &AppState,
+    pool: &PgPool,
+    platform_agent_id: &str,
+    config: &SlackAgentConfig,
+) -> Result<String, GatewayError> {
+    let client_id = config.client_id.as_deref().ok_or_else(|| {
+        GatewayError::InvalidConfig("slack client_id is not configured".to_owned())
+    })?;
+    let provider_id = provider_id_for(platform_agent_id);
+    let oauth_state =
+        slack::repository::create_oauth_state(pool, platform_agent_id, &provider_id).await?;
+    install_url(state, client_id, &provider_id, &oauth_state)
 }
 
 async fn create_install(
