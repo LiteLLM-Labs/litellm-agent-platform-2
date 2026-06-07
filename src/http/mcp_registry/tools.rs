@@ -148,9 +148,7 @@ fn apply_static_headers(
 }
 
 /// Send a `tools/list` JSON-RPC request and extract the tools array.
-async fn fetch_tools(
-    req: reqwest::RequestBuilder,
-) -> Result<Vec<Value>, GatewayError> {
+async fn fetch_tools(req: reqwest::RequestBuilder) -> Result<Vec<Value>, GatewayError> {
     let res = req
         .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
         .send()
@@ -306,10 +304,7 @@ pub async fn test_tools(
 }
 
 /// Build instance-scoped variables from server credentials (used by test_tools).
-fn build_instance_vars(
-    server: &McpServerRow,
-    enc_key: Option<&str>,
-) -> HashMap<String, String> {
+fn build_instance_vars(server: &McpServerRow, enc_key: Option<&str>) -> HashMap<String, String> {
     let mut m = HashMap::new();
     let Some(key) = enc_key else { return m };
     let Some(vars_def) = server.mcp_info.get("variables").and_then(|v| v.as_array()) else {
@@ -322,8 +317,8 @@ fn build_instance_vars(
         };
         if var.get("scope").and_then(|v| v.as_str()) != Some("per_user") {
             if let Some(raw) = server.credentials.get(name).and_then(|v| v.as_str()) {
-                let val = credential_crypto::decrypt_value(raw, key)
-                    .unwrap_or_else(|_| raw.to_owned());
+                let val =
+                    credential_crypto::decrypt_value(raw, key).unwrap_or_else(|_| raw.to_owned());
                 m.insert(name.to_owned(), val);
             }
         }
