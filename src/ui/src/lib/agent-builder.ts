@@ -571,7 +571,6 @@ export function createInputFromDraft(draft: AgentDraft) {
     })
     .filter((s): s is NonNullable<typeof s> => s !== null);
   const mcpServers = resolvedMcpServers.map(({ id: _id, ...rest }) => rest);
-  const resolvedIds = new Set(resolvedMcpServers.map(({ id }) => id));
   const baseTools = draft.tools.filter((t) => t.type !== "mcp_toolset");
   const mcpToolsets = resolvedMcpServers.map(({ id }) => ({ type: "mcp_toolset", mcp_server_name: id }));
   const allTools = [...baseTools, ...mcpToolsets];
