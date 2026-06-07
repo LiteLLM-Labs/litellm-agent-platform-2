@@ -143,12 +143,15 @@ async fn finish_pending_install(
     copy_slack_config(pool, &child, &platform.config).await?;
     slack::bindings::upsert_binding(
         pool,
-        &pending.platform_agent_id,
-        &pending.agent_id,
-        pending.team_id.as_deref(),
-        &pending.channel_id,
-        pending.dm_user_id.as_deref(),
-        pending.requested_by.as_deref(),
+        slack::bindings::UpsertBindingInput {
+            platform_agent_id: &pending.platform_agent_id,
+            agent_id: &pending.agent_id,
+            team_id: pending.team_id.as_deref(),
+            channel_id: &pending.channel_id,
+            thread_ts: pending.thread_ts.as_deref().unwrap_or(&pending.channel_id),
+            dm_user_id: pending.dm_user_id.as_deref(),
+            created_by: pending.requested_by.as_deref(),
+        },
     )
     .await?;
     Ok(())

@@ -17,6 +17,8 @@ use crate::{
 mod definitions;
 mod factory;
 mod factory_slack;
+mod factory_slack_app;
+mod factory_slack_manifest;
 mod session_management;
 mod slack;
 mod tools;
@@ -67,7 +69,8 @@ pub fn platform_mcps() -> Vec<PlatformMcp> {
         PlatformMcp {
             id: CONNECT_AGENT_TO_SLACK_MCP_ID,
             name: "Connect agent to Slack",
-            description: "Bind a managed agent to the factory Slack app or return an install URL.",
+            description:
+                "Create a dedicated Slack app for a managed agent and return its install URL.",
         },
         PlatformMcp {
             id: LIST_SLACK_AGENT_BINDINGS_MCP_ID,

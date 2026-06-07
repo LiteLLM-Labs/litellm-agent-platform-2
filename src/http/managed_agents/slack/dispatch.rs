@@ -19,8 +19,14 @@ pub async fn route_agent(
     if is_factory_prompt(&message.prompt) {
         return Ok((agent, config));
     }
-    let Some(binding) =
-        slack::bindings::get_binding(pool, &agent.id, team_id(payload), &message.channel).await?
+    let Some(binding) = slack::bindings::get_binding(
+        pool,
+        &agent.id,
+        team_id(payload),
+        &message.channel,
+        &message.thread_ts,
+    )
+    .await?
     else {
         return Ok((agent, config));
     };

@@ -47,6 +47,22 @@ pub async fn mock_slack() -> MockServer {
         }),
     )
     .await;
+    mount(
+        &server,
+        "/apps.manifest.create",
+        json!({
+            "ok": true,
+            "app_id": "A-child-agent",
+            "credentials": {
+                "client_id": "child-client-id",
+                "client_secret": "child-client-secret",
+                "verification_token": "verification-token",
+                "signing_secret": "child-signing-secret"
+            },
+            "oauth_authorize_url": "https://slack.com/oauth/v2/authorize?client_id=child-client-id"
+        }),
+    )
+    .await;
     server
 }
 

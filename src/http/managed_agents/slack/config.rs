@@ -54,6 +54,13 @@ pub(crate) fn client_secret_key(agent_id: &str, config: &SlackAgentConfig) -> St
         .unwrap_or_else(|| format!("SLACK_{agent_id}_CLIENT_SECRET"))
 }
 
+pub(crate) fn app_config_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+    config
+        .app_config_token_key
+        .clone()
+        .unwrap_or_else(|| format!("SLACK_{agent_id}_APP_CONFIG_TOKEN"))
+}
+
 pub(crate) fn bot_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
     config
         .bot_token_key

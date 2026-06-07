@@ -36,17 +36,18 @@ pub fn tool_defs() -> Vec<Value> {
         }),
         json!({
             "name": CONNECT_AGENT_TO_SLACK_MCP_ID,
-            "description": "Install or bind a managed agent to the current Slack workspace/channel. Use the Slack context values provided in the prompt for team_id, channel_id, dm_user_id, and requested_by instead of asking the user.",
+            "description": "Install or bind a managed agent to the current Slack thread. Use the Slack context values provided in the prompt for team_id, channel_id, thread_ts, dm_user_id, and requested_by instead of asking the user.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "agent_id": { "type": "string" },
                     "channel_id": { "type": "string" },
+                    "thread_ts": { "type": "string" },
                     "team_id": { "type": "string" },
                     "dm_user_id": { "type": "string" },
                     "requested_by": { "type": "string" }
                 },
-                "required": ["agent_id", "channel_id"]
+                "required": ["agent_id", "channel_id", "thread_ts"]
             }
         }),
         json!({

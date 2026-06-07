@@ -2,8 +2,14 @@ use serde_json::{json, Value};
 
 use crate::support::{request_json, AppFixture};
 
-use super::slack_helpers::{
-    assert_slack_api_call_count, now_seconds, signed_json_request, slack_api_call_count,
+use super::{
+    platform_factory_payloads::{
+        child_message_body, install_call, slack_config, unrelated_message_body,
+    },
+    slack_helpers::{
+        assert_slack_api_call_count, assert_slack_api_called, signed_json_request,
+        slack_api_call_count,
+    },
 };
 
 pub async fn assert_agent_factory(fixture: &AppFixture, platform_agent_id: &str) {
@@ -11,6 +17,8 @@ pub async fn assert_agent_factory(fixture: &AppFixture, platform_agent_id: &str)
     save_platform_slack(fixture, platform_agent_id, "connected").await;
     let child_id = create_child_agent(fixture, platform_agent_id).await;
     connect_child_agent(fixture, platform_agent_id, &child_id).await;
+    assert_child_slack_app(fixture, &child_id).await;
+    mark_child_slack_connected(fixture, &child_id).await;
     assert_factory_slack_dispatch(fixture, platform_agent_id, &child_id).await;
     assert_pending_install_url(fixture, platform_agent_id, &child_id).await;
 }
@@ -61,6 +69,7 @@ async fn connect_child_agent(fixture: &AppFixture, platform_agent_id: &str, chil
                     "agent_id": child_id,
                     "team_id": "T123",
                     "channel_id": "C-factory",
+                    "thread_ts": "1712345679.000100",
                     "requested_by": "U123"
                 }
             }
@@ -68,38 +77,49 @@ async fn connect_child_agent(fixture: &AppFixture, platform_agent_id: &str, chil
     )
     .await;
     let connected = content_json(&connected);
-    assert_eq!(connected["status"], "connected");
-    assert_eq!(connected["binding"]["agent_id"], child_id);
+    assert_eq!(connected["status"], "slack_app_created");
+    assert_eq!(
+        connected["agent"]["config"]["slack"]["app_id"],
+        "A-child-agent"
+    );
+    assert_eq!(
+        connected["agent"]["config"]["slack"]["client_id"],
+        "child-client-id"
+    );
     assert_eq!(
         connected["agent_url"].as_str().unwrap(),
         format!("http://localhost/agents/detail/?id={child_id}")
     );
-    assert!(connected["reinstall_url"]
+    assert!(connected["install_url"]
         .as_str()
         .unwrap()
-        .contains("chat%3Awrite.customize"));
+        .contains("client_id=child-client-id"));
     assert!(connected["slack_display"]
         .as_str()
         .unwrap()
-        .contains("agent name"));
-    assert!(listed_bindings(fixture, platform_agent_id)
-        .await
-        .contains("C-factory"));
+        .contains("dedicated Slack app"));
+    assert_slack_api_called(fixture, "/apps.manifest.create").await;
 }
 
-async fn listed_bindings(fixture: &AppFixture, platform_agent_id: &str) -> String {
-    let listed = rpc(
-        fixture,
-        platform_agent_id,
-        json!({
-            "jsonrpc": "2.0",
-            "id": 6,
-            "method": "tools/call",
-            "params": { "name": "list_slack_agent_bindings", "arguments": {} }
-        }),
+async fn assert_child_slack_app(fixture: &AppFixture, child_id: &str) {
+    let child = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/api/agents/{child_id}"),
+        None,
     )
     .await;
-    content_text(&listed).to_owned()
+    assert_eq!(child["config"]["slack"]["app_id"], "A-child-agent");
+    assert_eq!(child["config"]["slack"]["client_id"], "child-client-id");
+    assert_eq!(child["config"]["slack"]["status"], "credentials_saved");
+    assert_eq!(
+        child["config"]["slack"]["client_secret_key"],
+        format!("SLACK_{child_id}_CLIENT_SECRET")
+    );
+    assert_eq!(
+        child["config"]["slack"]["signing_secret_key"],
+        format!("SLACK_{child_id}_SIGNING_SECRET")
+    );
 }
 
 async fn save_platform_slack(fixture: &AppFixture, agent_id: &str, status: &str) {
@@ -107,6 +127,10 @@ async fn save_platform_slack(fixture: &AppFixture, agent_id: &str, status: &str)
         (format!("SLACK_{agent_id}_SIGNING_SECRET"), "slack-secret"),
         (format!("SLACK_{agent_id}_CLIENT_SECRET"), "client-secret"),
         (format!("SLACK_{agent_id}_BOT_TOKEN"), "xoxb-test"),
+        (
+            format!("SLACK_{agent_id}_APP_CONFIG_TOKEN"),
+            "xapp-config-token",
+        ),
     ] {
         request_json(
             fixture.app.clone(),
@@ -125,12 +149,41 @@ async fn save_platform_slack(fixture: &AppFixture, agent_id: &str, status: &str)
     .await;
 }
 
+async fn mark_child_slack_connected(fixture: &AppFixture, child_id: &str) {
+    let bot_token_key = format!("SLACK_{child_id}_BOT_TOKEN");
+    request_json(
+        fixture.app.clone(),
+        "POST",
+        "/api/vault/default",
+        Some(json!({ "key": bot_token_key, "value": "xoxb-child-test" })),
+    )
+    .await;
+    let child = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/api/agents/{child_id}"),
+        None,
+    )
+    .await;
+    let mut config = child["config"].clone();
+    config["slack"]["status"] = json!("connected");
+    config["slack"]["bot_token_key"] = json!(format!("SLACK_{child_id}_BOT_TOKEN"));
+    request_json(
+        fixture.app.clone(),
+        "PATCH",
+        &format!("/api/agents/{child_id}"),
+        Some(json!({ "config": config })),
+    )
+    .await;
+}
+
 async fn assert_factory_slack_dispatch(
     fixture: &AppFixture,
     platform_agent_id: &str,
     child_agent_id: &str,
 ) {
     let update_baseline = slack_api_call_count(fixture, "/chat.update").await;
+    create_thread_binding(fixture, platform_agent_id, child_agent_id).await;
     signed_json_request(
         fixture,
         &format!("/api/agents/{platform_agent_id}/slack/events"),
@@ -140,6 +193,33 @@ async fn assert_factory_slack_dispatch(
     .await;
     wait_for_child_thread(fixture, child_agent_id).await;
     assert_slack_api_call_count(fixture, "/chat.update", update_baseline + 1).await;
+    signed_json_request(
+        fixture,
+        &format!("/api/agents/{platform_agent_id}/slack/events"),
+        unrelated_message_body(),
+        axum::http::StatusCode::OK,
+    )
+    .await;
+    assert_no_child_thread(fixture, child_agent_id, "1712345688.000100").await;
+}
+
+async fn create_thread_binding(
+    fixture: &AppFixture,
+    platform_agent_id: &str,
+    child_agent_id: &str,
+) {
+    sqlx::query(
+        r#"
+        INSERT INTO "LiteLLM_SlackAgentBindingsTable"
+          (id, platform_agent_id, agent_id, team_id, channel_id, thread_ts, status, created_at, updated_at)
+        VALUES ('slack_binding_test', $1, $2, 'T123', 'C-factory', '1712345679.000100', 'connected', 1, 1)
+        "#,
+    )
+    .bind(platform_agent_id)
+    .bind(child_agent_id)
+    .execute(&fixture.pool)
+    .await
+    .unwrap();
 }
 
 async fn wait_for_child_thread(fixture: &AppFixture, child_agent_id: &str) -> String {
@@ -163,6 +243,23 @@ async fn wait_for_child_thread(fixture: &AppFixture, child_agent_id: &str) -> St
     panic!("factory Slack event did not dispatch to child agent");
 }
 
+async fn assert_no_child_thread(fixture: &AppFixture, child_agent_id: &str, thread_ts: &str) {
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let session_id: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT session_id
+        FROM "LiteLLM_ManagedAgentSlackThreadSessionsTable"
+        WHERE agent_id = $1 AND channel_id = 'C-factory' AND thread_ts = $2
+        "#,
+    )
+    .bind(child_agent_id)
+    .bind(thread_ts)
+    .fetch_optional(&fixture.pool)
+    .await
+    .unwrap();
+    assert_eq!(session_id, None);
+}
+
 async fn assert_pending_install_url(
     fixture: &AppFixture,
     platform_agent_id: &str,
@@ -171,14 +268,14 @@ async fn assert_pending_install_url(
     save_platform_slack(fixture, platform_agent_id, "needs_install").await;
     let install = rpc(fixture, platform_agent_id, install_call(child_agent_id)).await;
     let install = content_json(&install);
-    assert_eq!(install["status"], "install_required");
+    assert_eq!(install["status"], "slack_app_created");
     assert_eq!(
         install["agent_url"].as_str().unwrap(),
         format!("http://localhost/agents/detail/?id={child_agent_id}")
     );
     let install_url = install["install_url"].as_str().unwrap();
     assert!(install_url.starts_with("https://slack.com/oauth/v2/authorize?"));
-    assert!(install_url.contains("chat%3Awrite.customize"));
+    assert!(install_url.contains("client_id=child-client-id"));
     assert!(install_url.contains("redirect_uri=http%3A%2F%2Flocalhost%2Fhost-oauth-callback"));
 }
 
@@ -190,56 +287,6 @@ async fn rpc(fixture: &AppFixture, agent_id: &str, body: Value) -> Value {
         Some(body),
     )
     .await
-}
-
-fn slack_config(agent_id: &str, status: &str) -> Value {
-    json!({
-        "config": {
-            "slack": {
-                "status": status,
-                "client_id": "client-id",
-                "client_secret_key": format!("SLACK_{agent_id}_CLIENT_SECRET"),
-                "signing_secret_key": format!("SLACK_{agent_id}_SIGNING_SECRET"),
-                "bot_token_key": format!("SLACK_{agent_id}_BOT_TOKEN")
-            }
-        }
-    })
-}
-
-fn child_message_body() -> String {
-    json!({
-        "type": "event_callback",
-        "team_id": "T123",
-        "api_app_id": "A123",
-        "event_id": "Ev-factory-child",
-        "event_time": now_seconds(),
-        "event": {
-            "type": "app_mention",
-            "user": "U123",
-            "text": "<@B123> what should I ship?",
-            "ts": "1712345679.000100",
-            "channel": "C-factory",
-            "event_ts": "1712345679.000100"
-        }
-    })
-    .to_string()
-}
-
-fn install_call(child_agent_id: &str) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": 7,
-        "method": "tools/call",
-        "params": {
-            "name": "connect_agent_to_slack",
-            "arguments": {
-                "agent_id": child_agent_id,
-                "team_id": "T999",
-                "channel_id": "C-install",
-                "requested_by": "U999"
-            }
-        }
-    })
 }
 
 fn content_text(value: &Value) -> &str {

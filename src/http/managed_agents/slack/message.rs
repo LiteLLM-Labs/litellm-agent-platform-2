@@ -45,7 +45,7 @@ pub(super) fn session_prompt(message: &SlackIncomingMessage) -> String {
             "- thread_ts: {thread_ts}\n\n",
             "If the user asks to add, install, connect, or place an agent in this Slack DM/channel, ",
             "create the agent and then immediately call connect_agent_to_slack with the created agent_id, ",
-            "team_id, channel_id, and requested_by above. ",
+            "team_id, channel_id, thread_ts, and requested_by above. ",
             "Do not call list_slack_agent_bindings before connecting. ",
             "When replying, include the connected status, agent_url, and reinstall_url if returned. ",
             "Explain that the reinstall_url grants Slack permission to show replies with the agent name. ",

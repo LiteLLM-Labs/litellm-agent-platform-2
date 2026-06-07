@@ -9,38 +9,26 @@ use super::schema::{SlackAgentBindingRow, SlackPendingInstallRow};
 
 pub async fn upsert_binding(
     pool: &PgPool,
-    platform_agent_id: &str,
-    agent_id: &str,
-    team_id: Option<&str>,
-    channel_id: &str,
-    dm_user_id: Option<&str>,
-    created_by: Option<&str>,
+    input: UpsertBindingInput<'_>,
 ) -> Result<SlackAgentBindingRow, GatewayError> {
     let now = now_ms();
-    let input = BindingInput {
-        agent_id,
-        team_id,
-        channel_id,
-        dm_user_id,
-        created_by,
-        now,
-    };
-    if let Some(row) = update_binding(pool, platform_agent_id, &input).await? {
+    if let Some(row) = update_binding(pool, &input, now).await? {
         return Ok(row);
     }
     sqlx::query_as::<_, SlackAgentBindingRow>(
         r#"
         INSERT INTO "LiteLLM_SlackAgentBindingsTable"
-          (id, platform_agent_id, agent_id, team_id, channel_id, dm_user_id, created_by, status, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'connected', $8, $8)
+          (id, platform_agent_id, agent_id, team_id, channel_id, thread_ts, dm_user_id, created_by, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'connected', $9, $9)
         RETURNING *
         "#,
     )
     .bind(id("slack_binding"))
-    .bind(platform_agent_id)
+    .bind(input.platform_agent_id)
     .bind(input.agent_id)
     .bind(input.team_id)
     .bind(input.channel_id)
+    .bind(input.thread_ts)
     .bind(input.dm_user_id)
     .bind(input.created_by)
     .bind(now)
@@ -49,41 +37,44 @@ pub async fn upsert_binding(
     .map_err(GatewayError::Database)
 }
 
-struct BindingInput<'a> {
-    agent_id: &'a str,
-    team_id: Option<&'a str>,
-    channel_id: &'a str,
-    dm_user_id: Option<&'a str>,
-    created_by: Option<&'a str>,
-    now: i64,
+pub struct UpsertBindingInput<'a> {
+    pub platform_agent_id: &'a str,
+    pub agent_id: &'a str,
+    pub team_id: Option<&'a str>,
+    pub channel_id: &'a str,
+    pub thread_ts: &'a str,
+    pub dm_user_id: Option<&'a str>,
+    pub created_by: Option<&'a str>,
 }
 
 async fn update_binding(
     pool: &PgPool,
-    platform_agent_id: &str,
-    input: &BindingInput<'_>,
+    input: &UpsertBindingInput<'_>,
+    now: i64,
 ) -> Result<Option<SlackAgentBindingRow>, GatewayError> {
     sqlx::query_as::<_, SlackAgentBindingRow>(
         r#"
         UPDATE "LiteLLM_SlackAgentBindingsTable"
-        SET agent_id = $4,
-            dm_user_id = $5,
-            created_by = COALESCE($6, created_by),
+        SET agent_id = $5,
+            dm_user_id = $6,
+            created_by = COALESCE($7, created_by),
             status = 'connected',
-            updated_at = $7
+            updated_at = $8
         WHERE platform_agent_id = $1
           AND channel_id = $2
           AND team_id IS NOT DISTINCT FROM $3
+          AND thread_ts IS NOT DISTINCT FROM $4
         RETURNING *
         "#,
     )
-    .bind(platform_agent_id)
+    .bind(input.platform_agent_id)
     .bind(input.channel_id)
     .bind(input.team_id)
+    .bind(input.thread_ts)
     .bind(input.agent_id)
     .bind(input.dm_user_id)
     .bind(input.created_by)
-    .bind(input.now)
+    .bind(now)
     .fetch_optional(pool)
     .await
     .map_err(GatewayError::Database)
@@ -94,6 +85,7 @@ pub async fn get_binding(
     platform_agent_id: &str,
     team_id: Option<&str>,
     channel_id: &str,
+    thread_ts: &str,
 ) -> Result<Option<SlackAgentBindingRow>, GatewayError> {
     sqlx::query_as::<_, SlackAgentBindingRow>(
         r#"
@@ -102,12 +94,14 @@ pub async fn get_binding(
         WHERE platform_agent_id = $1
           AND channel_id = $2
           AND team_id IS NOT DISTINCT FROM $3
+          AND thread_ts IS NOT DISTINCT FROM $4
           AND status = 'connected'
         "#,
     )
     .bind(platform_agent_id)
     .bind(channel_id)
     .bind(team_id)
+    .bind(thread_ts)
     .fetch_optional(pool)
     .await
     .map_err(GatewayError::Database)
@@ -139,8 +133,8 @@ pub async fn create_pending_install(
     sqlx::query_as::<_, SlackPendingInstallRow>(
         r#"
         INSERT INTO "LiteLLM_SlackPendingInstallsTable"
-          (state, platform_agent_id, agent_id, team_id, channel_id, dm_user_id, requested_by, created_at, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          (state, platform_agent_id, agent_id, team_id, channel_id, thread_ts, dm_user_id, requested_by, created_at, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
         "#,
     )
@@ -149,6 +143,7 @@ pub async fn create_pending_install(
     .bind(input.agent_id)
     .bind(input.team_id)
     .bind(input.channel_id)
+    .bind(input.thread_ts)
     .bind(input.dm_user_id)
     .bind(input.requested_by)
     .bind(now)
@@ -164,6 +159,7 @@ pub struct PendingInstallInput<'a> {
     pub agent_id: &'a str,
     pub team_id: Option<&'a str>,
     pub channel_id: &'a str,
+    pub thread_ts: &'a str,
     pub dm_user_id: Option<&'a str>,
     pub requested_by: Option<&'a str>,
 }
