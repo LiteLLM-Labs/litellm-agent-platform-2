@@ -26,6 +26,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ModelSelect } from "@/components/model-select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AGENT_TEMPLATES,
@@ -37,9 +38,10 @@ import {
   withRuntimeDefaultTools,
 } from "@/lib/agent-builder";
 import type { AgentDraft, AgentTemplate } from "@/lib/agent-builder";
-import { createAgent, draftAgentConfigWithModel, listAgentRuntimes } from "@/lib/api";
+import { createAgent, draftAgentConfigWithModel, listAgentRuntimes, listModelOptions } from "@/lib/api";
+import { defaultModelForRuntime, modelIdsForRuntime } from "@/lib/runtime-models";
 import { scheduleLabel } from "@/lib/schedule";
-import type { AgentRuntime } from "@/lib/types";
+import type { AgentRuntime, ModelOption } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type BuilderStep = "create" | "config";
@@ -65,6 +67,7 @@ export default function NewAgentPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("blank");
   const [configText, setConfigText] = useState(INITIAL_CONFIG);
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
+  const [models, setModels] = useState<ModelOption[]>([]);
   const [view, setView] = useState<BuilderView>("config");
   const [drafting, setDrafting] = useState(false);
   const [lastRequest, setLastRequest] = useState("");
@@ -78,16 +81,23 @@ export default function NewAgentPage() {
   const canCreate = !saving && !parsed.error && draft.name.trim().length > 0;
 
   useEffect(() => {
-    listAgentRuntimes()
-      .then((values) => {
-        setRuntimes(values);
+    Promise.all([listAgentRuntimes(), listModelOptions()])
+      .then(([runtimeValues, modelValues]) => {
+        setRuntimes(runtimeValues);
+        setModels(modelValues);
         setConfigText((current) =>
           current === INITIAL_CONFIG
-            ? stringifyAgentDraft(withRuntimeDefaultTools(AGENT_TEMPLATES[0].draft, values))
+            ? stringifyAgentDraft({
+                ...withRuntimeDefaultTools(AGENT_TEMPLATES[0].draft, runtimeValues),
+                model: defaultModelForRuntime(modelValues, AGENT_TEMPLATES[0].draft.runtime, AGENT_TEMPLATES[0].draft.model),
+              })
             : current,
         );
       })
-      .catch(() => setRuntimes([]));
+      .catch(() => {
+        setRuntimes([]);
+        setModels([]);
+      });
   }, []);
 
   const openConfig = (
@@ -95,9 +105,13 @@ export default function NewAgentPage() {
     templateId: string,
     options?: { request?: string; notice?: string | null },
   ) => {
+    const normalized = {
+      ...next,
+      model: defaultModelForRuntime(models, next.runtime, next.model),
+    };
     setSelectedTemplateId(templateId);
-    setConfigText(stringifyAgentDraft(next));
-    setLastRequest(options?.request ?? next.name);
+    setConfigText(stringifyAgentDraft(normalized));
+    setLastRequest(options?.request ?? normalized.name);
     setDraftNotice(options?.notice ?? null);
     setView("config");
     setStep("config");
@@ -220,8 +234,10 @@ export default function NewAgentPage() {
               drafting={drafting}
               error={error}
               lastRequest={lastRequest}
+              models={models}
               parsedError={parsed.error}
               prompt={prompt}
+              runtimes={runtimes}
               saving={saving}
               view={view}
               onConfigChange={(next) => {
@@ -230,6 +246,10 @@ export default function NewAgentPage() {
               }}
               onCopy={() => void copyConfig()}
               onCreate={() => void create()}
+              onDraftChange={(next) => {
+                setConfigText(stringifyAgentDraft(next));
+                setError(null);
+              }}
               onPromptChange={setPrompt}
               onRefine={draftFromPrompt}
               onViewChange={setView}
@@ -374,13 +394,16 @@ function ConfigStep({
   drafting,
   error,
   lastRequest,
+  models,
   parsedError,
   prompt,
+  runtimes,
   saving,
   view,
   onConfigChange,
   onCopy,
   onCreate,
+  onDraftChange,
   onPromptChange,
   onRefine,
   onViewChange,
@@ -393,17 +416,23 @@ function ConfigStep({
   drafting: boolean;
   error: string | null;
   lastRequest: string;
+  models: ModelOption[];
   parsedError: string | null;
   prompt: string;
+  runtimes: AgentRuntime[];
   saving: boolean;
   view: BuilderView;
   onConfigChange: (next: string) => void;
   onCopy: () => void;
   onCreate: () => void;
+  onDraftChange: (next: AgentDraft) => void;
   onPromptChange: (next: string) => void;
   onRefine: () => void;
   onViewChange: (next: BuilderView) => void;
 }) {
+  const runtimeModels = modelIdsForRuntime(models, draft.runtime, draft.model);
+  const selectedRuntime = runtimes.find((runtime) => runtime.id === draft.runtime);
+
   return (
     <div className="grid min-h-[calc(100vh-6.5rem)] gap-6 px-4 py-6 lg:grid-cols-[minmax(360px,0.82fr)_minmax(560px,1.18fr)]">
       <section className="flex min-h-[560px] flex-col">
@@ -434,6 +463,39 @@ function ConfigStep({
                 {error ?? parsedError}
               </div>
             )}
+            <div className="mt-6 grid max-w-xl gap-4 rounded-lg border border-border bg-card p-4">
+              <div className="grid gap-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="agent-runtime">
+                  Runtime
+                </label>
+                <select
+                  id="agent-runtime"
+                  value={draft.runtime}
+                  onChange={(event) => {
+                    const runtime = event.target.value;
+                    const withRuntime = withRuntimeDefaultTools({ ...draft, runtime }, runtimes);
+                    onDraftChange({
+                      ...withRuntime,
+                      model: defaultModelForRuntime(models, runtime, draft.model),
+                    });
+                  }}
+                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring dark:bg-input/30"
+                >
+                  {runtimes.map((runtime) => (
+                    <option key={runtime.id} value={runtime.id}>{runtime.name}</option>
+                  ))}
+                  {!selectedRuntime && draft.runtime && <option value={draft.runtime}>{draft.runtime}</option>}
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Model</span>
+                <ModelSelect
+                  value={draft.model}
+                  models={runtimeModels}
+                  onValueChange={(model) => onDraftChange({ ...draft, model })}
+                />
+              </div>
+            </div>
           </div>
         </div>
 

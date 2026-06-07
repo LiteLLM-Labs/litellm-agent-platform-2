@@ -13,14 +13,18 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ModelSelect } from "@/components/model-select";
 import { ScheduleEditor } from "@/components/schedule-editor";
-import { getAgent, updateAgent, listModels } from "@/lib/api";
+import { getAgent, updateAgent, listAgentRuntimes, listModelOptions } from "@/lib/api";
+import { modelIdsForRuntime } from "@/lib/runtime-models";
 import { DEFAULT_TIMEZONE } from "@/lib/schedule";
+import type { AgentRuntime, AgentRuntimeId, ModelOption } from "@/lib/types";
 
 interface FormState {
   name: string;
   description: string;
   prompt: string;
   model: string;
+  runtime: string;
+  config: Record<string, unknown>;
   cron: string;
   timezone: string;
 }
@@ -35,10 +39,13 @@ function AgentEdit() {
     description: "",
     prompt: "",
     model: "",
+    runtime: "claude_managed_agents",
+    config: {},
     cron: "",
     timezone: DEFAULT_TIMEZONE,
   });
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,16 +55,21 @@ function AgentEdit() {
     if (!id) return;
     (async () => {
       try {
-        const [ag, modelList] = await Promise.all([getAgent(id), listModels()]);
+        const [ag, modelList, runtimeList] = await Promise.all([getAgent(id), listModelOptions(), listAgentRuntimes()]);
+        const config = (ag.config ?? {}) as { runtime?: string };
+        const runtime = ag.runtime ?? (config.runtime as AgentRuntimeId | undefined) ?? "claude_managed_agents";
         setForm({
           name: ag.name ?? "",
           description: ag.description ?? "",
           prompt: ag.prompt ?? "",
           model: ag.model ?? "",
+          runtime,
+          config,
           cron: ag.cron ?? "",
           timezone: ag.timezone ?? DEFAULT_TIMEZONE,
         });
         setModels(modelList);
+        setRuntimes(runtimeList);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -76,6 +88,7 @@ function AgentEdit() {
         name: form.name,
         description: form.description,
         prompt: form.prompt,
+        config: { ...form.config, runtime: form.runtime },
         cron: cron || null,
         timezone: form.timezone.trim() || "UTC",
         ...(form.model ? { model: form.model } : {}),
@@ -120,8 +133,35 @@ function AgentEdit() {
                     <Input id="ag-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What this agent does" />
                   </div>
                   <div className="grid gap-1.5">
+                    <Label htmlFor="ag-runtime">Runtime</Label>
+                    <select
+                      id="ag-runtime"
+                      value={form.runtime}
+                      onChange={(e) => {
+                        const runtime = e.target.value;
+                        setForm({
+                          ...form,
+                          runtime,
+                          model: modelIdsForRuntime(models, runtime, form.model)[0] ?? form.model,
+                        });
+                      }}
+                      className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring dark:bg-input/30"
+                    >
+                      {runtimes.map((runtime) => (
+                        <option key={runtime.id} value={runtime.id}>{runtime.name}</option>
+                      ))}
+                      {!runtimes.some((runtime) => runtime.id === form.runtime) && form.runtime && (
+                        <option value={form.runtime}>{form.runtime}</option>
+                      )}
+                    </select>
+                  </div>
+                  <div className="grid gap-1.5">
                     <Label>Model</Label>
-                    <ModelSelect value={form.model} models={models} onValueChange={(v) => setForm({ ...form, model: v })} />
+                    <ModelSelect
+                      value={form.model}
+                      models={modelIdsForRuntime(models, form.runtime, form.model)}
+                      onValueChange={(v) => setForm({ ...form, model: v })}
+                    />
                   </div>
                   <div className="grid gap-1.5">
                     <Label htmlFor="ag-prompt">System prompt</Label>

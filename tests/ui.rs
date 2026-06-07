@@ -28,6 +28,21 @@ async fn serves_static_ui() {
     assert_serves_sessions_html(app).await;
 }
 
+#[tokio::test]
+async fn models_include_upstream_provider_metadata() {
+    let app = router(build_state(&test_config()));
+    let response = get_with_key(app, "/v1/models").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let model = &payload["data"][0];
+    assert_eq!(model["id"], "claude");
+    assert_eq!(model["owned_by"], "anthropic");
+    assert_eq!(model["provider"], "anthropic");
+    assert_eq!(model["upstream_model"], "anthropic/claude-sonnet-4-5");
+}
+
 fn write_ui_fixture() -> TempDir {
     let ui_dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(ui_dir.path().join("sessions")).unwrap();
@@ -61,6 +76,19 @@ async fn get(app: axum::Router, uri: &str) -> axum::response::Response {
         Request::builder()
             .method("GET")
             .uri(uri)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+async fn get_with_key(app: axum::Router, uri: &str) -> axum::response::Response {
+    app.oneshot(
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("authorization", "Bearer sk-local")
             .body(Body::empty())
             .unwrap(),
     )

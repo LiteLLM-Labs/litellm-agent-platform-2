@@ -19,10 +19,17 @@ pub async fn models(
         .model_list
         .iter()
         .map(|entry| {
+            let provider = entry
+                .litellm_params
+                .model
+                .split_once('/')
+                .map(|(provider, _)| provider);
             json!({
-                "id": entry.model_name,
+                "id": entry.model_name.as_str(),
                 "object": "model",
-                "owned_by": "litellm",
+                "owned_by": provider.unwrap_or("litellm"),
+                "provider": provider,
+                "upstream_model": entry.litellm_params.model.as_str(),
             })
         })
         .collect();
