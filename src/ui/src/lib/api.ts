@@ -891,24 +891,24 @@ export async function testMcpServerTools(
   return data.tools ?? [];
 }
 
-/** Discover tools from an arbitrary MCP server URL (new-server flow). */
-export async function discoverMcpToolsFromUrl(url: string): Promise<McpToolDef[]> {
-  const base = url.replace(/\/+$/, "");
-  const res = await fetch(`${base}/tools/list`, {
+/** Discover tools from an arbitrary MCP server URL via the server-side proxy.
+ *
+ * The server performs variable substitution in the URL and header values before
+ * calling the upstream MCP server, so CORS and private API keys are never
+ * exposed to the browser.
+ */
+export async function discoverMcpToolsFromUrl(
+  url: string,
+  staticHeaders: Record<string, string> = {},
+  variables: Record<string, string> = {},
+): Promise<McpToolDef[]> {
+  const res = await req("/v1/mcp/discover", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
-    cache: "no-store",
+    body: JSON.stringify({ url, static_headers: staticHeaders, variables }),
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new ApiError(res.status, body);
-  }
-  const data = (await res.json()) as {
-    result?: { tools?: McpToolDef[] };
-    tools?: McpToolDef[];
-  };
-  return data?.result?.tools ?? data?.tools ?? [];
+  const data = await jsonOrThrow<{ tools?: McpToolDef[] }>(res);
+  return data.tools ?? [];
 }
 
 /** Store a user credential for a BYOK MCP server. */

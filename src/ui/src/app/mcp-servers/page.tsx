@@ -916,7 +916,20 @@ function McpServerEditor({
           setDiscoverError("Enter a URL before discovering tools.");
           return;
         }
-        tools = await discoverMcpToolsFromUrl(url);
+        // Build static_headers record from the form
+        const staticHeaders: Record<string, string> = {};
+        for (const h of form.static_headers) {
+          if (h.name.trim()) staticHeaders[h.name.trim()] = h.value;
+        }
+        // Merge instance variable values + any per-user test values as variables
+        const variables: Record<string, string> = {};
+        for (const v of form.variables) {
+          if (v.scope === "instance" && v.value.trim()) {
+            variables[v.name] = v.value.trim();
+          }
+        }
+        Object.assign(variables, testVarValues);
+        tools = await discoverMcpToolsFromUrl(url, staticHeaders, variables);
       }
       setDiscoveredTools(tools);
       // Pre-select tools that were already in allowed_tools

@@ -30,6 +30,24 @@ pub struct TestToolsRequest {
     pub variables: HashMap<String, String>,
 }
 
+/// Request body for `POST /v1/mcp/discover`.
+#[derive(Debug, Deserialize)]
+pub struct DiscoverRequest {
+    /// The MCP server URL. May contain `${VAR_NAME}` placeholders.
+    pub url: String,
+    /// Static headers to send. Values may contain `${VAR_NAME}` placeholders.
+    #[serde(default)]
+    pub static_headers: HashMap<String, String>,
+    /// Variable values used to substitute placeholders in `url` and `static_headers`.
+    #[serde(default)]
+    pub variables: HashMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiscoverResponse {
+    pub tools: Vec<Value>,
+}
+
 pub fn extract_tools_from_response(text: &str, content_type: &str) -> Vec<Value> {
     let tools_from_value = |v: &Value| {
         v.pointer("/result/tools")
@@ -258,4 +276,50 @@ fn build_instance_vars(server: &McpServerRow, enc_key: Option<&str>) -> HashMap<
         }
     }
     m
+}
+
+/// POST /v1/mcp/discover — discover tools from an arbitrary MCP server URL.
+///
+/// The caller provides the URL, optional static headers, and optional variable
+/// values. All `${VAR_NAME}` placeholders in the URL and header values are
+/// substituted before the upstream request is made.  This runs server-side so
+/// that CORS restrictions and private API keys are never exposed to the browser.
+pub async fn discover_tools(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<DiscoverRequest>,
+) -> Result<Json<DiscoverResponse>, GatewayError> {
+    require_any_gateway_key(&headers, &state)?;
+
+    let url = body.url.trim();
+    if url.is_empty() {
+        return Err(GatewayError::InvalidConfig(
+            "discover: url is required".to_owned(),
+        ));
+    }
+
+    // Substitute variables in the URL (trim trailing slash after substitution).
+    let resolved_url = substitute_vars(url, &body.variables);
+    let resolved_url = resolved_url.trim_end_matches('/');
+
+    // Build the upstream request.
+    let mut req = state
+        .http
+        .post(resolved_url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream");
+
+    // Apply static headers with variable substitution.
+    for (name, val_template) in &body.static_headers {
+        let resolved_val = substitute_vars(val_template, &body.variables);
+        if let (Ok(n), Ok(hv)) = (
+            axum::http::HeaderName::from_bytes(name.as_bytes()),
+            axum::http::HeaderValue::from_str(&resolved_val),
+        ) {
+            req = req.header(n, hv);
+        }
+    }
+
+    let tools = fetch_tools(req).await?;
+    Ok(Json(DiscoverResponse { tools }))
 }
