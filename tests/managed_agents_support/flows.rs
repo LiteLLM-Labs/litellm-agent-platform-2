@@ -6,11 +6,13 @@ use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
 mod claude_runtime;
 mod cursor_runtime;
+mod platform_mcps;
 mod sessions;
 mod slack;
 mod slack_helpers;
 
 pub use cursor_runtime::exercise_cursor_runtime_stream;
+pub use platform_mcps::exercise_platform_mcps;
 pub use sessions::exercise_sessions;
 pub use slack::exercise_slack;
 

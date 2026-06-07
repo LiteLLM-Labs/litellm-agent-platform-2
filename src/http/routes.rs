@@ -59,6 +59,7 @@ fn api_routes() -> Router<Arc<AppState>> {
             any(crate::http::harness_proxy::proxy),
         )
         .route("/api/capabilities", get(capabilities))
+        .route("/api/platform-mcps", get(crate::http::platform_mcps::list))
         .route(
             "/api/agent-runtimes",
             get(crate::http::agent_runtimes::list),
@@ -99,6 +100,10 @@ fn mcp_routes() -> Router<Arc<AppState>> {
             get(streamable_http_server)
                 .post(streamable_http_server)
                 .delete(streamable_http_server),
+        )
+        .route(
+            "/mcp/platform/{agent_id}",
+            post(crate::http::platform_mcps::serve),
         )
 }
 

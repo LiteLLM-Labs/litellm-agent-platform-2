@@ -32,6 +32,7 @@ pub struct GatewayConfig {
 pub struct GeneralSettings {
     pub master_key: Option<String>,
     pub database_url: Option<String>,
+    pub public_base_url: Option<String>,
     #[serde(default)]
     pub store_prompts_in_spend_logs: bool,
     #[serde(default)]
@@ -52,6 +53,7 @@ impl Default for GeneralSettings {
         Self {
             master_key: None,
             database_url: None,
+            public_base_url: None,
             store_prompts_in_spend_logs: false,
             disable_spend_logs: false,
             spend_logs_batch_interval_seconds: default_spend_logs_batch_interval_seconds(),
@@ -146,6 +148,17 @@ fn expand_env(config: &mut GatewayConfig) -> Result<(), GatewayError> {
     }
     if let Some(database_url) = config.general_settings.database_url.as_deref() {
         config.general_settings.database_url = Some(expand_env_value(database_url)?);
+    }
+    if let Some(public_base_url) = config.general_settings.public_base_url.as_deref() {
+        config.general_settings.public_base_url = Some(expand_env_value(public_base_url)?);
+    } else if let Ok(public_base_url) = std::env::var("LITELLM_PUBLIC_BASE_URL") {
+        if !public_base_url.trim().is_empty() {
+            config.general_settings.public_base_url = Some(public_base_url);
+        }
+    } else if let Ok(public_base_url) = std::env::var("RENDER_EXTERNAL_URL") {
+        if !public_base_url.trim().is_empty() {
+            config.general_settings.public_base_url = Some(public_base_url);
+        }
     }
     config.slack.api_base_url = expand_env_value(&config.slack.api_base_url)?;
 

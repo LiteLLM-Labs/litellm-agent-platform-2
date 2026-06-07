@@ -30,7 +30,7 @@ use db::reset_tables;
 
 pub struct AppFixture {
     pub app: axum::Router,
-    pool: PgPool,
+    pub(crate) pool: PgPool,
     _e2b: MockServer,
     pub slack: MockServer,
 }

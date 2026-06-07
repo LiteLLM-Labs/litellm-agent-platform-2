@@ -3,6 +3,7 @@ use serde_json::Value;
 use crate::{
     db::managed_agents::registry::schema::ManagedAgentRow,
     errors::GatewayError,
+    proxy::state::AppState,
     sdk::agents::{AgentRuntime, AgentWorkspace},
 };
 
@@ -34,32 +35,42 @@ pub(super) fn agent_model(agent: &ManagedAgentRow, environment: &Value) -> Strin
         .to_owned()
 }
 
-pub(super) fn mcp_servers(agent: &ManagedAgentRow) -> Vec<Value> {
+pub(super) fn mcp_servers(
+    state: &AppState,
+    agent: &ManagedAgentRow,
+) -> Result<Vec<Value>, GatewayError> {
     let Some(value) = agent
         .config
         .get("mcp_servers")
         .or_else(|| agent.config.get("mcpServers"))
     else {
-        return Vec::new();
+        return crate::http::platform_mcps::platform_mcp_servers(state, &agent.id, &agent.config);
     };
-    if let Some(servers) = value.as_array() {
-        return servers.clone();
-    }
-    value
-        .as_object()
-        .map(|servers| {
-            servers
-                .iter()
-                .filter_map(|(name, server)| {
-                    let mut server = server.as_object()?.clone();
-                    server
-                        .entry("name".to_owned())
-                        .or_insert_with(|| Value::String(name.clone()));
-                    Some(Value::Object(server))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let mut servers = if let Some(servers) = value.as_array() {
+        servers.clone()
+    } else {
+        value
+            .as_object()
+            .map(|servers| {
+                servers
+                    .iter()
+                    .filter_map(|(name, server)| {
+                        let mut server = server.as_object()?.clone();
+                        server
+                            .entry("name".to_owned())
+                            .or_insert_with(|| Value::String(name.clone()));
+                        Some(Value::Object(server))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    servers.extend(crate::http::platform_mcps::platform_mcp_servers(
+        state,
+        &agent.id,
+        &agent.config,
+    )?);
+    Ok(servers)
 }
 
 pub(super) fn workspace_from_env(

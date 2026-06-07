@@ -12,6 +12,7 @@ pub mod messages;
 pub mod models;
 pub mod observability;
 pub mod openapi;
+pub mod platform_mcps;
 pub mod provider_credentials;
 pub mod responses;
 pub mod routes;
