@@ -4,5 +4,5 @@
 //! can access cursor utilities without knowing the provider module layout.
 
 pub(super) use crate::sdk::providers::cursor::runtime::{
-    agent_id_from_context, prompt_from_events, run_id,
+    agent_id_from_context, run_id,
 };

@@ -2,12 +2,12 @@ use reqwest::Method;
 use serde_json::{json, Value};
 
 use super::{
-    client::{Lap, SessionContext},
+    client::Lap,
     cursor,
     events::AgentEventStream,
     opencode,
     opencode_stream::normalize_opencode_stream,
-    response_fields::nested_string_field,
+
     responses::response_json,
     types::{AgentRuntime, AgentSdkError, SendEventsParams, SendEventsResponse},
 };
@@ -69,20 +69,11 @@ impl SessionEvents<'_> {
         session_id: &str,
         params: SendEventsParams,
     ) -> Result<SendEventsResponse, AgentSdkError> {
-        let agent_id = self.cursor_agent_id(session_id)?;
-        let body = json!({ "prompt": cursor::prompt_from_events(&params.events)? });
-        let raw = self
-            .client
-            .post(
-                AgentRuntime::Cursor,
-                &format!("/v1/agents/{agent_id}/runs"),
-                &body,
-            )
-            .await?;
-        let run_id = nested_string_field(&raw, "run", "id")?;
+        let runtime = self.client.runtime_for_session(session_id)?;
         self.client
-            .remember_session_context(session_id, SessionContext::cursor(agent_id, Some(run_id)))?;
-        Ok(SendEventsResponse { raw })
+            .adapter(runtime)?
+            .send_events(self.client, session_id, params)
+            .await
     }
 
     async fn send_opencode_events(

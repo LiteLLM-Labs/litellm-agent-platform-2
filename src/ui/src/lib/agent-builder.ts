@@ -1,4 +1,5 @@
 import { DEFAULT_TIMEZONE } from "@/lib/schedule";
+import { INTEGRATIONS } from "@/lib/integrations";
 import type { AgentRuntime } from "@/lib/types";
 
 export interface AgentDraft {
@@ -13,6 +14,8 @@ export interface AgentDraft {
   timezone: string;
   vault_keys: string[];
   skill_ids: string[];
+  /** IDs of integrations from INTEGRATIONS catalog to attach as MCP servers. */
+  mcp_server_ids: string[];
   max_runtime_minutes: number;
   on_failure: string;
 }
@@ -61,13 +64,14 @@ function baseDraft(): AgentDraft {
     timezone: DEFAULT_TIMEZONE,
     vault_keys: [],
     skill_ids: [],
+    mcp_server_ids: [],
     max_runtime_minutes: 30,
     on_failure: DEFAULT_FAILURE,
   };
 }
 
 export function blankAgentDraft(): AgentDraft {
-  return { ...baseDraft(), tools: DEFAULT_TOOLS.map((tool) => ({ ...tool })), vault_keys: [], skill_ids: [] };
+  return { ...baseDraft(), tools: DEFAULT_TOOLS.map((tool) => ({ ...tool })), vault_keys: [], skill_ids: [], mcp_server_ids: [] };
 }
 
 export function defaultToolsForRuntime(runtime: string, runtimes: AgentRuntime[]): AgentTool[] {
@@ -89,6 +93,7 @@ function withDraft(patch: Partial<AgentDraft>): AgentDraft {
     tools: (patch.tools ?? DEFAULT_TOOLS).map((tool) => ({ ...tool })),
     vault_keys: [...(patch.vault_keys ?? [])],
     skill_ids: [...(patch.skill_ids ?? [])],
+    mcp_server_ids: [...(patch.mcp_server_ids ?? [])],
   };
 }
 
@@ -362,6 +367,7 @@ export function stringifyAgentDraft(draft: AgentDraft): string {
   }
   if (draft.vault_keys.length > 0) lines.push(`vault_keys: ${listBlock(draft.vault_keys)}`);
   if (draft.skill_ids.length > 0) lines.push(`skill_ids: ${listBlock(draft.skill_ids)}`);
+  if (draft.mcp_server_ids.length > 0) lines.push(`mcp_servers: ${listBlock(draft.mcp_server_ids)}`);
   if (draft.max_runtime_minutes !== 30) lines.push(`max_runtime_minutes: ${draft.max_runtime_minutes}`);
   if (draft.on_failure !== DEFAULT_FAILURE) lines.push(`on_failure: ${scalar(draft.on_failure)}`);
   return lines.join("\n");
@@ -518,7 +524,7 @@ export function parseAgentDraftConfig(source: string): ParsedAgentDraft {
       continue;
     }
 
-    if (key === "vault_keys" || key === "skill_ids") {
+    if (key === "vault_keys" || key === "skill_ids" || key === "mcp_servers") {
       const values = value ? inlineList(value) : [];
       if (!value) {
         i += 1;
@@ -537,7 +543,11 @@ export function parseAgentDraftConfig(source: string): ParsedAgentDraft {
           i += 1;
         }
       }
-      draft[key] = unique(values);
+      if (key === "mcp_servers") {
+        draft.mcp_server_ids = unique(values);
+      } else {
+        draft[key] = unique(values);
+      }
       continue;
     }
 
@@ -553,6 +563,20 @@ export function parseAgentDraftConfig(source: string): ParsedAgentDraft {
 export function createInputFromDraft(draft: AgentDraft) {
   const cron = draft.cron.trim();
   const runtime = draft.runtime.trim() || DEFAULT_RUNTIME;
+
+  // Resolve mcp_server_ids → mcp_servers array + mcp_toolset tool entries
+  const mcpServers = draft.mcp_server_ids
+    .map((id) => {
+      const integration = INTEGRATIONS.find((i) => i.id === id);
+      return integration ? { type: "url", name: id, url: integration.mcpUrl } : null;
+    })
+    .filter(Boolean);
+  const mcpToolsets = draft.mcp_server_ids.map((id) => ({
+    type: "mcp_toolset",
+    mcp_server_name: id,
+  }));
+  const allTools = [...draft.tools, ...mcpToolsets];
+
   return {
     name: draft.name.trim(),
     owner_id: draft.owner_id.trim() || DEFAULT_OWNER,
@@ -561,7 +585,8 @@ export function createInputFromDraft(draft: AgentDraft) {
     runtime,
     system: draft.system,
     prompt: draft.system,
-    tools: draft.tools,
+    tools: allTools,
+    mcp_servers: mcpServers,
     schedule: cron ? { cron, timezone: draft.timezone.trim() || "UTC" } : null,
     vault_keys: draft.vault_keys,
     skill_ids: draft.skill_ids,
@@ -569,7 +594,8 @@ export function createInputFromDraft(draft: AgentDraft) {
     on_failure: draft.on_failure.trim() || DEFAULT_FAILURE,
     config: {
       runtime,
-      tools: draft.tools,
+      tools: allTools,
+      mcp_servers: mcpServers,
     },
   };
 }
