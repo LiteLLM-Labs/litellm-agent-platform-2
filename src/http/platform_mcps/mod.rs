@@ -88,7 +88,7 @@ pub fn selected_platform_mcp_ids(config: &Value) -> Vec<String> {
         .map(|ids| {
             ids.iter()
                 .filter_map(Value::as_str)
-                .filter(|id| is_platform_mcp(id))
+                .filter(|id| platform_mcps().iter().any(|mcp| mcp.id == *id))
                 .map(str::to_owned)
                 .collect()
         })
@@ -185,19 +185,6 @@ pub async fn serve(
         _ => rpc_error(request.id, -32601, "method not found"),
     };
     Ok(Json(response))
-}
-
-fn is_platform_mcp(id: &str) -> bool {
-    matches!(
-        id,
-        PLATFORM_SESSION_MCP_ID
-            | SEND_PLATFORM_SESSION_MESSAGE_MCP_ID
-            | AGENT_MEMORY_MCP_ID
-            | SEND_SLACK_MESSAGE_MCP_ID
-            | CREATE_MANAGED_AGENT_MCP_ID
-            | CONNECT_AGENT_TO_SLACK_MCP_ID
-            | LIST_SLACK_AGENT_BINDINGS_MCP_ID
-    )
 }
 
 async fn call_tool(

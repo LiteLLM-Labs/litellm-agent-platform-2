@@ -15,8 +15,8 @@ use crate::{
             app_config_token_key, client_secret_key, load_secret, provider_id_for,
             signing_secret_key,
         },
+        manifest_api,
         types::{SlackAgentConfig, DEFAULT_VAULT_USER},
-        web_api,
     },
     proxy::{state::AppState, vault},
 };
@@ -76,9 +76,9 @@ async fn create_slack_manifest(
     provider_id: &str,
     app_name: &str,
     team_id: Option<&str>,
-) -> Result<web_api::SlackManifestCreateResponse, GatewayError> {
+) -> Result<manifest_api::SlackManifestCreateResponse, GatewayError> {
     let manifest = build_child_manifest(state, child, provider_id, app_name)?;
-    let created = web_api::manifest_create(
+    let created = manifest_api::manifest_create(
         &state.http,
         &state.config.slack.api_base_url,
         app_config_token,
@@ -106,7 +106,7 @@ fn created_child_app(
     child: &ManagedAgentRow,
     provider_id: &str,
     app_name: String,
-    created: &web_api::SlackManifestCreateResponse,
+    created: &manifest_api::SlackManifestCreateResponse,
 ) -> Result<CreatedChildApp, GatewayError> {
     let credentials = created.credentials.as_ref().ok_or_else(|| {
         GatewayError::SandboxError("slack apps.manifest.create omitted credentials".to_owned())

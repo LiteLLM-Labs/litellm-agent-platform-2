@@ -1,8 +1,10 @@
 pub(crate) mod config;
 mod dispatch;
+pub(crate) mod dm_api;
 mod events;
 mod form;
 mod interactivity;
+pub(crate) mod manifest_api;
 mod message;
 mod oauth;
 mod replies;

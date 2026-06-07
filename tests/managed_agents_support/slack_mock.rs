@@ -6,8 +6,14 @@ use wiremock::{
 
 pub async fn mock_slack() -> MockServer {
     let server = MockServer::start().await;
+    mount_standard_methods(&server).await;
+    mount_factory_methods(&server).await;
+    server
+}
+
+async fn mount_standard_methods(server: &MockServer) {
     mount(
-        &server,
+        server,
         "/chat.postMessage",
         json!({
             "ok": true,
@@ -16,9 +22,9 @@ pub async fn mock_slack() -> MockServer {
         }),
     )
     .await;
-    mount(&server, "/chat.update", json!({ "ok": true })).await;
+    mount(server, "/chat.update", json!({ "ok": true })).await;
     mount(
-        &server,
+        server,
         "/conversations.open",
         json!({
             "ok": true,
@@ -27,7 +33,7 @@ pub async fn mock_slack() -> MockServer {
     )
     .await;
     mount(
-        &server,
+        server,
         "/users.lookupByEmail",
         json!({
             "ok": true,
@@ -35,9 +41,12 @@ pub async fn mock_slack() -> MockServer {
         }),
     )
     .await;
-    mount(&server, "/reactions.add", json!({ "ok": true })).await;
+    mount(server, "/reactions.add", json!({ "ok": true })).await;
+}
+
+async fn mount_factory_methods(server: &MockServer) {
     mount(
-        &server,
+        server,
         "/oauth.v2.access",
         json!({
             "ok": true,
@@ -48,7 +57,7 @@ pub async fn mock_slack() -> MockServer {
     )
     .await;
     mount(
-        &server,
+        server,
         "/apps.manifest.create",
         json!({
             "ok": true,
@@ -63,7 +72,6 @@ pub async fn mock_slack() -> MockServer {
         }),
     )
     .await;
-    server
 }
 
 async fn mount(server: &MockServer, url_path: &'static str, body: Value) {
