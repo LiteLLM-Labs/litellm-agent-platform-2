@@ -5,8 +5,8 @@ use std::{
 
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
-    AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
-    Lap, LapConfig, SendEventsParams,
+    AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams, Lap,
+    LapConfig, SendEventsParams,
 };
 use serde_json::json;
 
@@ -166,7 +166,10 @@ async fn mcp_deepwiki_tool_use_across_providers() -> Result<(), Box<dyn Error>> 
             }
         }
 
-        assert!(saw_tool_use, "[{label}] expected agent.mcp_tool_use or agent.tool_use");
+        assert!(
+            saw_tool_use,
+            "[{label}] expected agent.mcp_tool_use or agent.tool_use"
+        );
 
         eprintln!("[{label}] ok");
     }

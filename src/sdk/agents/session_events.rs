@@ -1,7 +1,9 @@
 use reqwest::Method;
 use serde_json::{json, Value};
 
-use crate::sdk::providers::cursor::runtime::{agent_id_from_context as cursor_agent_id_from_context, run_id as cursor_run_id};
+use crate::sdk::providers::cursor::runtime::{
+    agent_id_from_context as cursor_agent_id_from_context, run_id as cursor_run_id,
+};
 
 use super::{
     client::Lap,
