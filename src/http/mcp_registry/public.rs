@@ -185,7 +185,7 @@ pub async fn list_tools(
     };
 
     // Call tools/list on the MCP server
-    let tools_url = url.trim_end_matches('/').to_owned();
+    let tools_url = substitute_vars(url.trim_end_matches('/'), &vars);
     let mut req = state
         .http
         .post(&tools_url)
@@ -319,7 +319,7 @@ pub async fn test_tools(
     // Test values override everything
     vars.extend(body.variables);
 
-    let tools_url = url.trim_end_matches('/').to_owned();
+    let tools_url = substitute_vars(url.trim_end_matches('/'), &vars);
     let mut req = state.http.post(&tools_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream");
@@ -414,15 +414,7 @@ async fn build_vars_map(
     map
 }
 
-/// Replace all `${VAR_NAME}` occurrences in `template` with values from `vars`.
-fn substitute_vars(template: &str, vars: &HashMap<String, String>) -> String {
-    let mut result = template.to_owned();
-    for (name, value) in vars {
-        let placeholder = format!("${{{}}}", name);
-        result = result.replace(&placeholder, value);
-    }
-    result
-}
+use super::substitute_vars;
 
 fn extract_tools_from_response(text: &str, content_type: &str) -> Vec<Value> {
     // SSE (text/event-stream): parse data: lines

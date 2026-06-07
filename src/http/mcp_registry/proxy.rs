@@ -17,7 +17,7 @@ use crate::{
     proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
 
-use super::caller_user_id;
+use super::{caller_user_id, substitute_vars};
 
 /// `GET|POST|PUT|DELETE|PATCH /{mcp_server_name}/mcp`
 ///
@@ -48,15 +48,15 @@ pub async fn dynamic_mcp(
             GatewayError::InvalidJsonMessage("MCP server has no URL configured".to_owned())
         })?;
 
-    // Forward to the server URL as-is; the registered URL is the full endpoint.
-    let target_url = base_url.trim_end_matches('/').to_owned();
-
     // ── 3. Resolve variables ──────────────────────────────────────────────────
     let user_id = caller_user_id(&headers, &state);
     let enc_key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
 
     let vars = resolve_variables(pool, &server, &user_id, &enc_key).await?;
+
+    // Substitute ${VAR_NAME} in the URL (e.g. parameterized server IDs).
+    let target_url = substitute_vars(base_url.trim_end_matches('/'), &vars);
 
     // ── 4. Build outbound request ─────────────────────────────────────────────
     let reqwest_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
@@ -177,15 +177,6 @@ async fn resolve_variables(
     Ok(map)
 }
 
-/// Replace all `${VAR_NAME}` occurrences in `template` with values from `vars`.
-fn substitute_vars(template: &str, vars: &HashMap<String, String>) -> String {
-    let mut result = template.to_owned();
-    for (name, value) in vars {
-        let placeholder = format!("${{{}}}", name);
-        result = result.replace(&placeholder, value);
-    }
-    result
-}
 
 /// Look up the personal vault key for this (server, user) pair and decrypt it.
 /// Key format: `mcp_user:{server_id}:{user_id}`
