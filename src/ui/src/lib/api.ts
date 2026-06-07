@@ -6,6 +6,7 @@ import type {
   AgentRuntimeId,
   HarnessMessage,
   Memory,
+  ModelOption,
   OpencodeSession,
   Skill,
   SpendLog,
@@ -451,11 +452,15 @@ export async function abortSession(id: string): Promise<void> {
 }
 
 export async function listModels(): Promise<string[]> {
+  return (await listModelOptions()).map((model) => model.id);
+}
+
+export async function listModelOptions(): Promise<ModelOption[]> {
   const res = await req("/v1/models");
   if (!res.ok) return [];
   const data = await res.json().catch(() => null);
-  const items: Array<{ id: string }> = data?.data ?? [];
-  return items.map((m) => m.id).filter(Boolean);
+  const items: ModelOption[] = data?.data ?? [];
+  return items.filter((model) => model.id);
 }
 
 const DEFAULT_AGENT_DRAFT_MODEL = "claude-sonnet-4-6";

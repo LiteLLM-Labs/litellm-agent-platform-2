@@ -37,6 +37,14 @@ export interface AgentRuntime {
   masked_api_key?: string | null;
 }
 
+export interface ModelOption {
+  id: string;
+  object?: string;
+  owned_by?: string;
+  provider?: string | null;
+  upstream_model?: string;
+}
+
 export interface MessageInfo {
   id?: string;
   role: "user" | "assistant";
@@ -84,6 +92,7 @@ export interface Agent {
   id: string;
   name: string;
   model?: string;
+  runtime?: AgentRuntimeId | string;
   prompt?: string;
   system?: string;
   description?: string;
