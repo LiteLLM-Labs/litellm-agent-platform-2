@@ -178,6 +178,7 @@ async fn create_session(client: &Lap, environment_id: String) -> Session {
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: None,
             metadata: None,
+            vault_ids: None,
             resources: None,
         })
         .await

@@ -17,6 +17,7 @@ use crate::{
 
 pub const PLATFORM_SESSION_MCP_ID: &str = "read_platform_session";
 pub const AGENT_MEMORY_MCP_ID: &str = "agent_memory";
+pub const PLATFORM_MCP_SERVER_NAME: &str = "platform";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlatformMcp {
@@ -64,7 +65,30 @@ pub fn platform_mcp_servers(
     if ids.is_empty() {
         return Ok(Vec::new());
     }
+    Ok(vec![json!({
+        "name": PLATFORM_MCP_SERVER_NAME,
+        "type": "url",
+        "url": platform_mcp_url(state, agent_id)?
+    })])
+}
 
+pub fn platform_mcp_toolsets(config: &Value) -> Vec<Value> {
+    let ids = selected_platform_mcp_ids(config);
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    vec![json!({
+        "type": "mcp_toolset",
+        "mcp_server_name": PLATFORM_MCP_SERVER_NAME,
+        "default_config": {
+            "enabled": false,
+            "permission_policy": { "type": "always_allow" }
+        },
+        "configs": ids.into_iter().map(|id| json!({ "name": id, "enabled": true })).collect::<Vec<_>>()
+    })]
+}
+
+pub fn platform_mcp_url(state: &AppState, agent_id: &str) -> Result<String, GatewayError> {
     let Some(base_url) = state
         .config
         .general_settings
@@ -77,36 +101,11 @@ pub fn platform_mcp_servers(
             "general_settings.public_base_url is required for platform MCPs".to_owned(),
         ));
     };
-
-    let Some(master_key) = state
-        .config
-        .general_settings
-        .master_key
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        return Err(GatewayError::InvalidConfig(
-            "general_settings.master_key is required for platform MCPs".to_owned(),
-        ));
-    };
-
-    let url = format!(
+    Ok(format!(
         "{}/mcp/platform/{}",
         base_url.trim_end_matches('/'),
         agent_id
-    );
-
-    Ok(ids
-        .into_iter()
-        .map(|id| {
-            json!({
-                "name": id,
-                "type": "url",
-                "url": url,
-                "authorization_token": master_key
-            })
-        })
-        .collect())
+    ))
 }
 
 pub async fn list(
