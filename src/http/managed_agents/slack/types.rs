@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 pub(super) const DEFAULT_VAULT_USER: &str = "default";
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub(super) struct SlackAgentConfig {
+pub(crate) struct SlackAgentConfig {
     pub app_name: Option<String>,
     pub app_id: Option<String>,
     pub client_id: Option<String>,

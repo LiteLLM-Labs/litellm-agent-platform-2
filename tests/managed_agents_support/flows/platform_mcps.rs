@@ -18,7 +18,14 @@ async fn assert_catalog(fixture: &AppFixture) {
         .iter()
         .map(|mcp| mcp["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["read_platform_session", "agent_memory"]);
+    assert_eq!(
+        ids,
+        vec![
+            "read_platform_session",
+            "agent_memory",
+            "send_slack_message"
+        ]
+    );
 }
 
 async fn assert_tools_list(fixture: &AppFixture, agent_id: &str) {
