@@ -1,7 +1,9 @@
+mod authorization;
 mod config;
 mod events;
 mod form;
 mod interactivity;
+mod members;
 mod oauth;
 mod replies;
 mod reply_format;
@@ -12,6 +14,10 @@ mod signature;
 mod types;
 mod web_api;
 
+pub use authorization::authorize_slack_invocation;
+pub use authorization::SlackAuthError;
 pub use events::events;
 pub use interactivity::interactivity;
+pub use members::members as slack_members;
+pub use members::update_access as slack_update_access;
 pub use oauth::{oauth_callback, oauth_state};

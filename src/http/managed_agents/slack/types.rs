@@ -13,7 +13,9 @@ pub(super) struct SlackAgentConfig {
     pub signing_secret_key: Option<String>,
     pub bot_token_key: Option<String>,
     pub slack_team_name: Option<String>,
+    pub team_id: Option<String>,
     pub bot_user_id: Option<String>,
+    pub authed_user_id: Option<String>,
     pub oauth_error: Option<String>,
 }
 
