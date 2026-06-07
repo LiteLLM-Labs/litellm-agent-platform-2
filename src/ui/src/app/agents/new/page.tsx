@@ -495,24 +495,11 @@ function ConfigStep({
               <Button
                 type="button"
                 size="sm"
-                variant={view === "edit" ? "secondary" : "ghost"}
-                onClick={() => onViewChange("edit")}
-                className={cn(
-                  "h-8 text-[#c9c0b1] hover:bg-white/10 hover:text-white",
-                  view === "edit" && "bg-[#f4f1ea] text-[#1b1b1a] hover:bg-white",
-                )}
-              >
-                <Bot className="size-3.5" />
-                Edit
-              </Button>
-              <Button
-                type="button"
-                size="sm"
                 variant={view === "config" ? "secondary" : "ghost"}
                 onClick={() => onViewChange("config")}
                 className={cn(
                   "h-8 text-[#c9c0b1] hover:bg-white/10 hover:text-white",
-                  view === "config" && "bg-[#f4f1ea] text-[#1b1b1a] hover:bg-white",
+                  view === "config" && "bg-white text-[#1b1b1a] hover:bg-white",
                 )}
               >
                 <Code2 className="size-3.5" />
@@ -525,11 +512,24 @@ function ConfigStep({
                 onClick={() => onViewChange("preview")}
                 className={cn(
                   "h-8 text-[#c9c0b1] hover:bg-white/10 hover:text-white",
-                  view === "preview" && "bg-[#f4f1ea] text-[#1b1b1a] hover:bg-white",
+                  view === "preview" && "bg-white text-[#1b1b1a] hover:bg-white",
                 )}
               >
                 <FileSearch className="size-3.5" />
                 Preview
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={view === "edit" ? "secondary" : "ghost"}
+                onClick={() => onViewChange("edit")}
+                className={cn(
+                  "h-8 text-[#c9c0b1] hover:bg-white/10 hover:text-white",
+                  view === "edit" && "bg-white text-[#1b1b1a] hover:bg-white",
+                )}
+              >
+                <Bot className="size-3.5" />
+                Edit UI
               </Button>
             </div>
             <div className="flex items-center gap-2">
