@@ -107,7 +107,7 @@ export default function SettingsPage() {
           <div className="mx-auto flex max-w-5xl flex-col gap-5 px-4 py-6">
             <section className="grid gap-2">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold">Harness Server</h2>
+                <h2 className="text-lg font-semibold tracking-tight">Harness Server</h2>
                 <Badge variant={savedHarnessUrl ? "secondary" : "outline"} className="text-[10px]">
                   {savedHarnessUrl ? "Lite-Harness remote" : "LAP local"}
                 </Badge>
@@ -179,7 +179,7 @@ export default function SettingsPage() {
                       harnessStatus.tone === "error"
                         ? "text-destructive"
                         : harnessStatus.tone === "success"
-                          ? "text-emerald-600"
+                          ? "text-emerald-600 dark:text-emerald-400"
                           : "text-muted-foreground"
                     }`}
                   >
@@ -201,7 +201,7 @@ export default function SettingsPage() {
                     disabled={harnessTesting}
                   >
                     <ServerCog className="size-3.5" />
-                    {harnessTesting ? "Testing..." : "Test"}
+                    {harnessTesting ? "Testing…" : "Test"}
                   </Button>
                   <Button size="sm" onClick={saveHarness}>
                     <Check className="size-3.5" />

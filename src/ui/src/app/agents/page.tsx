@@ -87,6 +87,7 @@ export default function AgentsPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [vaultKeyInput, setVaultKeyInput] = useState("");
   const [vaultValues, setVaultValues] = useState<Record<string, string>>({});
   const [storedKeys, setStoredKeys] = useState<string[]>([]);
@@ -237,7 +238,13 @@ export default function AgentsPage() {
   };
 
   const remove = async (ag: Agent) => {
-    if (!confirm(`Delete agent "${String(ag.name)}"?`)) return;
+    setDeleteTarget(ag);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const ag = deleteTarget;
+    setDeleteTarget(null);
     setAgents((prev) => prev?.filter((x) => x.id !== ag.id) ?? null);
     try {
       await deleteAgent(ag.id);
@@ -274,11 +281,26 @@ export default function AgentsPage() {
               </Card>
             )}
             {!agents && !error && (
-              <div className="text-sm text-muted-foreground">Loading…</div>
+              <div className="flex flex-col gap-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="border border-border rounded-lg p-4 flex flex-col gap-2">
+                    <div className="h-4 w-1/3 bg-muted rounded animate-pulse motion-reduce:animate-none" />
+                    <div className="h-3 w-2/3 bg-muted rounded animate-pulse motion-reduce:animate-none" />
+                  </div>
+                ))}
+              </div>
             )}
             {agents && agents.length === 0 && (
-              <div className="text-center text-sm text-muted-foreground py-16">
-                No agents yet. Start with a template or draft one from a prompt.
+              <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                <Brain className="size-10 text-muted-foreground/40" />
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-medium">No agents yet</p>
+                  <p className="text-xs text-muted-foreground">Start with a template or draft one from a prompt.</p>
+                </div>
+                <Button size="sm" onClick={() => router.push("/agents/new/")}>
+                  <Plus className="size-4" />
+                  Create agent
+                </Button>
               </div>
             )}
             {agents?.map((ag) => {
@@ -301,7 +323,7 @@ export default function AgentsPage() {
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{String(ag.description)}</p>
                   )}
                   {Boolean(ag.prompt) && (
-                    <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-1 font-mono">{String(ag.prompt)}</p>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1 font-mono">{String(ag.prompt)}</p>
                   )}
                   <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1.5">
                     <Clock className="size-3" />
@@ -359,6 +381,21 @@ export default function AgentsPage() {
           </div>
         </main>
       </div>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete agent</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-medium text-foreground">"{String(deleteTarget?.name)}"</span>? This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={() => void confirmDelete()}>Delete</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[92vw] sm:max-w-2xl max-h-[88vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 p-0">

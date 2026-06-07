@@ -280,7 +280,7 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
                   </div>
                   <button
                     onClick={(e) => onDelete(e, s.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-background rounded"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-background rounded focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                     aria-label="Delete session"
                   >
                     <Trash2 className="size-3" />

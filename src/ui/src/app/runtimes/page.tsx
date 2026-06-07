@@ -91,11 +91,11 @@ export default function RuntimesPage() {
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto grid w-[calc(100vw-4rem)] max-w-5xl gap-5 px-4 py-6 sm:w-full">
             <div className="min-w-0">
-              <h2 className="text-lg font-semibold">Agent Runtime Credentials</h2>
+              <h2 className="text-lg font-semibold tracking-tight">Agent Runtime Credentials</h2>
               <p className="text-sm text-muted-foreground">
                 Connect SDK agent runtimes before starting runtime sessions.
               </p>
-              {loading && <p className="mt-2 text-xs text-muted-foreground">Loading runtimes...</p>}
+              {loading && <p className="mt-2 text-xs text-muted-foreground">Loading runtimes…</p>}
               {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
             </div>
 
