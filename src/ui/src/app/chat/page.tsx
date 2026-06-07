@@ -650,14 +650,16 @@ function ChatInner() {
     refetch();
     let unsub: (() => void) | undefined;
     if (sessionRuntime) {
-      unsub = subscribeRuntimeEvents({
-        sessionId: sid,
-        onEvent: handleRuntimeEvent,
-        onError: (err) => setError(err instanceof Error ? err.message : String(err)),
-      });
       listRuntimeEvents(sid)
         .then(replayRuntimeEvents)
         .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      if (sessionStatus === "busy" || autostartPrompt) {
+        unsub = subscribeRuntimeEvents({
+          sessionId: sid,
+          onEvent: handleRuntimeEvent,
+          onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+        });
+      }
     }
     if (autostartPrompt && autostartedRef.current !== sid) {
       autostartedRef.current = sid;
@@ -680,7 +682,7 @@ function ChatInner() {
     }
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, replayRuntimeEvents, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
+  }, [sid, sessionLoaded, refetch, handleRuntimeEvent, replayRuntimeEvents, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, sessionStatus]);
 
   useEffect(() => {
     if (!sid || !sessionRuntime || sessionStatus !== "busy") return;

@@ -10,6 +10,7 @@ mod sessions;
 mod slack;
 mod slack_helpers;
 
+pub use claude_runtime::exercise_claude_runtime_session_storage;
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use sessions::exercise_sessions;
 pub use slack::exercise_slack;

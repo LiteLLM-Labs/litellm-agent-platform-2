@@ -6,6 +6,7 @@ pub mod messages;
 pub mod pool;
 pub mod registry;
 pub mod runs;
+pub mod runtime_events;
 pub mod runtime_refs;
 pub mod saved;
 pub mod sessions;
