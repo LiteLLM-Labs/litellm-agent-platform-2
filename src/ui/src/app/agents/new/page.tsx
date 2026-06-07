@@ -26,7 +26,10 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ModelSelect } from "@/components/model-select";
+import { ScheduleEditor } from "@/components/schedule-editor";
 import {
   AGENT_TEMPLATES,
   agentTemplateForPrompt,
@@ -37,13 +40,13 @@ import {
   withRuntimeDefaultTools,
 } from "@/lib/agent-builder";
 import type { AgentDraft, AgentTemplate } from "@/lib/agent-builder";
-import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes } from "@/lib/api";
+import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes, listModels } from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
 import type { AgentRuntime } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type BuilderStep = "create" | "config";
-type BuilderView = "config" | "preview";
+type BuilderView = "edit" | "config" | "preview";
 
 const TEMPLATE_ICONS: Record<string, LucideIcon> = {
   blank: Bot,
@@ -65,7 +68,8 @@ export default function NewAgentPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("blank");
   const [configText, setConfigText] = useState(INITIAL_CONFIG);
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
-  const [view, setView] = useState<BuilderView>("config");
+  const [models, setModels] = useState<string[]>([]);
+  const [view, setView] = useState<BuilderView>("edit");
   const [drafting, setDrafting] = useState(false);
   const [lastRequest, setLastRequest] = useState("");
   const [draftNotice, setDraftNotice] = useState<string | null>(null);
@@ -78,16 +82,20 @@ export default function NewAgentPage() {
   const canCreate = !saving && !parsed.error && draft.name.trim().length > 0;
 
   useEffect(() => {
-    listAgentRuntimes()
-      .then((values) => {
-        setRuntimes(values);
+    Promise.all([listAgentRuntimes(), listModels()])
+      .then(([runtimeValues, modelValues]) => {
+        setRuntimes(runtimeValues);
+        setModels(modelValues);
         setConfigText((current) =>
           current === INITIAL_CONFIG
-            ? stringifyAgentDraft(withRuntimeDefaultTools(AGENT_TEMPLATES[0].draft, values))
+            ? stringifyAgentDraft(withRuntimeDefaultTools(AGENT_TEMPLATES[0].draft, runtimeValues))
             : current,
         );
       })
-      .catch(() => setRuntimes([]));
+      .catch(() => {
+        setRuntimes([]);
+        setModels([]);
+      });
   }, []);
 
   const openConfig = (
@@ -99,7 +107,7 @@ export default function NewAgentPage() {
     setConfigText(stringifyAgentDraft(next));
     setLastRequest(options?.request ?? next.name);
     setDraftNotice(options?.notice ?? null);
-    setView("config");
+    setView("edit");
     setStep("config");
     setError(null);
   };
@@ -221,8 +229,10 @@ export default function NewAgentPage() {
               drafting={drafting}
               error={error}
               lastRequest={lastRequest}
+              models={models}
               parsedError={parsed.error}
               prompt={prompt}
+              runtimes={runtimes}
               saving={saving}
               view={view}
               onConfigChange={(next) => {
@@ -231,6 +241,10 @@ export default function NewAgentPage() {
               }}
               onCopy={() => void copyConfig()}
               onCreate={() => void create()}
+              onDraftChange={(next) => {
+                setConfigText(stringifyAgentDraft(next));
+                setError(null);
+              }}
               onPromptChange={setPrompt}
               onRefine={draftFromPrompt}
               onViewChange={setView}
@@ -375,13 +389,16 @@ function ConfigStep({
   drafting,
   error,
   lastRequest,
+  models,
   parsedError,
   prompt,
+  runtimes,
   saving,
   view,
   onConfigChange,
   onCopy,
   onCreate,
+  onDraftChange,
   onPromptChange,
   onRefine,
   onViewChange,
@@ -394,13 +411,16 @@ function ConfigStep({
   drafting: boolean;
   error: string | null;
   lastRequest: string;
+  models: string[];
   parsedError: string | null;
   prompt: string;
+  runtimes: AgentRuntime[];
   saving: boolean;
   view: BuilderView;
   onConfigChange: (next: string) => void;
   onCopy: () => void;
   onCreate: () => void;
+  onDraftChange: (next: AgentDraft) => void;
   onPromptChange: (next: string) => void;
   onRefine: () => void;
   onViewChange: (next: BuilderView) => void;
@@ -475,6 +495,19 @@ function ConfigStep({
               <Button
                 type="button"
                 size="sm"
+                variant={view === "edit" ? "secondary" : "ghost"}
+                onClick={() => onViewChange("edit")}
+                className={cn(
+                  "h-8 text-[#c9c0b1] hover:bg-white/10 hover:text-white",
+                  view === "edit" && "bg-[#f4f1ea] text-[#1b1b1a] hover:bg-white",
+                )}
+              >
+                <Bot className="size-3.5" />
+                Edit
+              </Button>
+              <Button
+                type="button"
+                size="sm"
                 variant={view === "config" ? "secondary" : "ghost"}
                 onClick={() => onViewChange("config")}
                 className={cn(
@@ -525,7 +558,9 @@ function ConfigStep({
             </div>
           </div>
 
-          {view === "config" ? (
+          {view === "edit" ? (
+            <AgentDraftControls draft={draft} models={models} runtimes={runtimes} onChange={onDraftChange} />
+          ) : view === "config" ? (
             <Textarea
               value={configText}
               onChange={(event) => onConfigChange(event.target.value)}
@@ -626,6 +661,117 @@ function TemplateBrowser({
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function AgentDraftControls({
+  draft,
+  models,
+  runtimes,
+  onChange,
+}: {
+  draft: AgentDraft;
+  models: string[];
+  runtimes: AgentRuntime[];
+  onChange: (next: AgentDraft) => void;
+}) {
+  const update = (patch: Partial<AgentDraft>) => onChange({ ...draft, ...patch });
+  const availableModels = models.length > 0 ? models : [draft.model].filter(Boolean);
+  const runtime = runtimes.find((entry) => entry.id === draft.runtime);
+  const toolOptions =
+    runtime?.tools?.map((tool) => tool.id).filter(Boolean) ??
+    draft.tools.map((tool) => tool.type).filter(Boolean);
+  const selectedTools = new Set(draft.tools.map((tool) => tool.type).filter(Boolean));
+  const setTool = (toolId: string, enabled: boolean) => {
+    const next = new Set(selectedTools);
+    if (enabled) next.add(toolId);
+    else next.delete(toolId);
+    update({ tools: Array.from(next).map((type) => ({ type })) });
+  };
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto bg-[#f8f6f1] px-5 py-4 text-[#242321] dark:bg-[#262523] dark:text-[#f7f2e8]">
+      <div className="mx-auto grid max-w-3xl gap-4">
+        <div className="grid gap-1.5">
+          <Label htmlFor="draft-name" className="text-[#4b4640] dark:text-[#ddd4c7]">
+            Name
+          </Label>
+          <Input
+            id="draft-name"
+            value={draft.name}
+            onChange={(event) => update({ name: event.target.value })}
+            placeholder="security-reviewer"
+            className="bg-background text-foreground"
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="draft-description" className="text-[#4b4640] dark:text-[#ddd4c7]">
+            Description
+          </Label>
+          <Input
+            id="draft-description"
+            value={draft.description}
+            onChange={(event) => update({ description: event.target.value })}
+            placeholder="What this agent does"
+            className="bg-background text-foreground"
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label className="text-[#4b4640] dark:text-[#ddd4c7]">Model</Label>
+          <ModelSelect
+            value={draft.model}
+            models={availableModels}
+            onValueChange={(model) => update({ model })}
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="draft-system" className="text-[#4b4640] dark:text-[#ddd4c7]">
+            System prompt
+          </Label>
+          <Textarea
+            id="draft-system"
+            value={draft.system}
+            onChange={(event) => update({ system: event.target.value })}
+            className="min-h-[280px] resize-y bg-background font-mono text-xs text-foreground"
+            placeholder="You are a meticulous security reviewer..."
+          />
+        </div>
+
+        <ScheduleEditor
+          cron={draft.cron}
+          timezone={draft.timezone}
+          onChange={(schedule) => update(schedule)}
+        />
+
+        <div className="grid gap-2 rounded-md border border-border bg-background p-3 text-foreground">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-sm font-medium">Tools</Label>
+            <span className="font-mono text-xs text-muted-foreground">
+              {draft.tools.length} selected
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {toolOptions.map((toolId) => (
+              <label
+                key={toolId}
+                className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-2 text-xs hover:bg-muted/40"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedTools.has(toolId)}
+                  onChange={(event) => setTool(toolId, event.target.checked)}
+                  className="size-3.5 shrink-0"
+                />
+                <span className="min-w-0 truncate font-mono">{toolId}</span>
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
