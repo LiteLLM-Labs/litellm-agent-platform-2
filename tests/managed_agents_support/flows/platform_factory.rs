@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::support::{request_json, AppFixture};
+use crate::support::{read_events_until_completed, request_json, AppFixture};
 
 use super::slack_helpers::{now_seconds, signed_json_request};
 
@@ -127,24 +127,30 @@ async fn assert_factory_slack_dispatch(
         axum::http::StatusCode::OK,
     )
     .await;
-    wait_for_child_thread(fixture, child_agent_id).await;
+    let session_id = wait_for_child_thread(fixture, child_agent_id).await;
+    read_events_until_completed(
+        fixture.app.clone(),
+        &format!("/v1/sessions/{session_id}/events/stream"),
+        &session_id,
+    )
+    .await;
 }
 
-async fn wait_for_child_thread(fixture: &AppFixture, child_agent_id: &str) {
+async fn wait_for_child_thread(fixture: &AppFixture, child_agent_id: &str) -> String {
     for _ in 0..20 {
-        let count: i64 = sqlx::query_scalar(
+        let session_id: Option<String> = sqlx::query_scalar(
             r#"
-            SELECT COUNT(*)
+            SELECT session_id
             FROM "LiteLLM_ManagedAgentSlackThreadSessionsTable"
             WHERE agent_id = $1 AND channel_id = 'C-factory'
             "#,
         )
         .bind(child_agent_id)
-        .fetch_one(&fixture.pool)
+        .fetch_optional(&fixture.pool)
         .await
         .unwrap();
-        if count == 1 {
-            return;
+        if let Some(session_id) = session_id {
+            return session_id;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
