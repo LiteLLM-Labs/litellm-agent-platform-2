@@ -175,6 +175,7 @@ async fn create_cursor_runtime_session(client: &Lap, agent_id: String) -> Sessio
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: Some(AgentRuntime::Cursor),
             metadata: None,
+            vault_ids: None,
             resources: None,
         })
         .await

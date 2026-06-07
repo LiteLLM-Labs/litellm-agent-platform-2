@@ -229,6 +229,8 @@ pub struct CreateSessionParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub vault_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resources: Option<Value>,
 }
 
@@ -240,6 +242,7 @@ impl CreateSessionParams {
             title: title.into(),
             lap_agent_runtime: Some(AgentRuntime::OpenCode),
             metadata: None,
+            vault_ids: None,
             resources: None,
         }
     }
@@ -293,7 +296,5 @@ pub struct Session {
     pub raw: Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SendEventsResponse {
-    pub raw: Value,
-}
+#[rustfmt::skip]
+#[derive(Debug, Clone, PartialEq)] pub struct SendEventsResponse { pub raw: Value }

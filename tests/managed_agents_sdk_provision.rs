@@ -145,6 +145,7 @@ async fn create_session(
             title: format!("lap-sdk-session-{suffix}"),
             lap_agent_runtime: Some(rt.runtime),
             metadata: None,
+            vault_ids: None,
             resources: None,
         })
         .await

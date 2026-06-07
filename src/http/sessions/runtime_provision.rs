@@ -43,6 +43,7 @@ pub(super) async fn provision_runtime_session(
     let client = runtime_client(state, sdk_rt, created);
     let provider_agent = create_provider_agent(state, &client, sdk_rt, created).await?;
     let provider_env = create_provider_environment(&client, sdk_rt, created).await?;
+    let vault_ids = platform_mcp_vault_ids(state, sdk_rt, created).await?;
     let provider_session = client
         .beta()
         .sessions()
@@ -56,6 +57,7 @@ pub(super) async fn provision_runtime_session(
                 &created.row.id,
                 &created.prompt,
             )),
+            vault_ids,
             resources: None,
         })
         .await
@@ -114,7 +116,13 @@ async fn create_provider_agent(
             }),
             system: provider_system(runtime, created),
             description: created.agent.description.clone(),
-            tools: vec![serde_json::json!({ "type": "agent_toolset_20260401" })],
+            tools: {
+                let mut tools = vec![serde_json::json!({ "type": "agent_toolset_20260401" })];
+                tools.extend(crate::http::platform_mcps::platform_mcp_toolsets(
+                    &created.agent.config,
+                ));
+                tools
+            },
             mcp_servers: mcp_servers(state, &created.agent)?,
             workspace: workspace_from_env(&created.environment)?,
             env_vars: None,
@@ -122,6 +130,84 @@ async fn create_provider_agent(
         })
         .await
         .map_err(agent_sdk_error)
+}
+
+async fn platform_mcp_vault_ids(
+    state: &AppState,
+    runtime: AgentRuntime,
+    created: &CreatedRuntimeSession,
+) -> Result<Option<Vec<String>>, GatewayError> {
+    if runtime != AgentRuntime::ClaudeManagedAgents {
+        return Ok(None);
+    }
+    if crate::http::platform_mcps::selected_platform_mcp_ids(&created.agent.config).is_empty() {
+        return Ok(None);
+    }
+    let token = state
+        .config
+        .general_settings
+        .master_key
+        .as_deref()
+        .ok_or_else(|| {
+            GatewayError::InvalidConfig(
+                "master_key is required for platform MCP vault auth".to_owned(),
+            )
+        })?;
+    let url = crate::http::platform_mcps::platform_mcp_url(state, &created.agent.id)?;
+    let vault_id =
+        create_platform_mcp_vault(state, &created.credential.api_key, &url, token).await?;
+    Ok(Some(vec![vault_id]))
+}
+
+async fn create_platform_mcp_vault(
+    state: &AppState,
+    api_key: &str,
+    mcp_server_url: &str,
+    token: &str,
+) -> Result<String, GatewayError> {
+    let base = "https://api.anthropic.com/v1";
+    let vault: Value = state
+        .http
+        .post(format!("{base}/vaults?beta=true"))
+        .header("x-api-key", api_key)
+        .header("anthropic-version", crate::sdk::agents::ANTHROPIC_VERSION)
+        .header("anthropic-beta", crate::sdk::agents::MANAGED_AGENTS_BETA)
+        .json(&serde_json::json!({ "display_name": "LiteLLM platform MCP" }))
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?
+        .error_for_status()
+        .map_err(GatewayError::Upstream)?
+        .json()
+        .await
+        .map_err(GatewayError::Upstream)?;
+    let vault_id = vault.get("id").and_then(Value::as_str).ok_or_else(|| {
+        GatewayError::SandboxError("Anthropic vault response missing id".to_owned())
+    })?;
+    let credential = state
+        .http
+        .post(format!("{base}/vaults/{vault_id}/credentials?beta=true"))
+        .header("x-api-key", api_key)
+        .header("anthropic-version", crate::sdk::agents::ANTHROPIC_VERSION)
+        .header("anthropic-beta", crate::sdk::agents::MANAGED_AGENTS_BETA)
+        .json(&serde_json::json!({
+            "auth": {
+                "type": "static_bearer",
+                "mcp_server_url": mcp_server_url,
+                "token": token
+            }
+        }))
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?;
+    if !credential.status().is_success() {
+        let status = credential.status();
+        let body = credential.text().await.unwrap_or_default();
+        return Err(GatewayError::SandboxError(format!(
+            "Anthropic vault credential create failed with status {status}: {body}"
+        )));
+    }
+    Ok(vault_id.to_owned())
 }
 
 async fn create_provider_environment(
