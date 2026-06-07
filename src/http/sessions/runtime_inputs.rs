@@ -191,3 +191,32 @@ mod tests {
         assert_eq!(metadata["initial_prompt"].chars().count(), 512);
     }
 }
+
+pub fn integration_mcp_toolsets(config: &Value) -> Vec<Value> {
+    let server_names: std::collections::HashSet<&str> = config
+        .get("mcp_servers")
+        .and_then(Value::as_array)
+        .map(|servers| {
+            servers
+                .iter()
+                .filter_map(|s| s.get("name").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    config
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| {
+            tools
+                .iter()
+                .filter(|t| {
+                    t.get("type").and_then(Value::as_str) == Some("mcp_toolset")
+                        && t.get("mcp_server_name")
+                            .and_then(Value::as_str)
+                            .is_some_and(|name| server_names.contains(name))
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}

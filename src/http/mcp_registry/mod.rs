@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod discover;
 pub mod proxy;
 pub mod public;
 pub mod tools;
