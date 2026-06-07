@@ -111,6 +111,11 @@ impl<'a> SlackReply<'a> {
         self.update(message).await
     }
 
+    pub(super) async fn replace_text(&mut self, message: &str) -> Result<(), GatewayError> {
+        self.text = message.to_owned();
+        self.update(message).await
+    }
+
     async fn apply_line(&mut self, line: &str) -> Result<bool, GatewayError> {
         let Some((event_type, properties)) = event_payload(line) else {
             return Ok(false);

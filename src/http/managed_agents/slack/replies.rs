@@ -6,6 +6,7 @@ use tracing::warn;
 use crate::{
     db::managed_agents::registry::schema::ManagedAgentRow,
     errors::GatewayError,
+    http::platform_mcps::factory_slack_app,
     http::sessions::{enqueue_prompt_text, runtime_event_stream_for_session},
     proxy::state::AppState,
 };
@@ -57,13 +58,14 @@ async fn run_slack_prompt(
         warn!("slack eyes reaction failed: {error}");
     }
     let _lock = SlackPromptLock::acquire(&state.keyed_locks, &session_id).await;
-    run_locked_slack_prompt(state, &pool, agent, message, session_id, bot_token).await
+    run_locked_slack_prompt(state, &pool, agent, config, message, session_id, bot_token).await
 }
 
 async fn run_locked_slack_prompt(
     state: Arc<AppState>,
     pool: &PgPool,
     agent: ManagedAgentRow,
+    config: SlackAgentConfig,
     message: SlackIncomingMessage,
     session_id: String,
     bot_token: String,
@@ -87,7 +89,15 @@ async fn run_locked_slack_prompt(
     enqueue_or_report(&state, pool, &message, &mut reply, &session_id, &agent).await?;
     if let Some(stream) = runtime_stream {
         return match reply.run_runtime(stream).await {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                if let Some(text) =
+                    auto_connect_factory_child(&state, pool, &agent, &config, &message, &session_id)
+                        .await?
+                {
+                    reply.replace_text(&text).await?;
+                }
+                Ok(())
+            }
             Err(error) => {
                 let message = format!("Agent run failed: {error}");
                 if let Err(update_error) = reply.finish_start_error(&message).await {
@@ -98,7 +108,15 @@ async fn run_locked_slack_prompt(
         };
     }
     match reply.run(event_stream.rx).await {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            if let Some(text) =
+                auto_connect_factory_child(&state, pool, &agent, &config, &message, &session_id)
+                    .await?
+            {
+                reply.replace_text(&text).await?;
+            }
+            Ok(())
+        }
         Err(error) => {
             let message = format!("Agent run failed: {error}");
             if let Err(update_error) = reply.finish_start_error(&message).await {
@@ -107,6 +125,91 @@ async fn run_locked_slack_prompt(
             Err(error)
         }
     }
+}
+
+async fn auto_connect_factory_child(
+    state: &AppState,
+    pool: &PgPool,
+    platform: &ManagedAgentRow,
+    config: &SlackAgentConfig,
+    message: &SlackIncomingMessage,
+    session_id: &str,
+) -> Result<Option<String>, GatewayError> {
+    if config.app_config_token_key.is_none() {
+        return Ok(None);
+    }
+    let Some(child) = latest_unconnected_factory_child(pool, session_id).await? else {
+        return Ok(None);
+    };
+    let arguments = serde_json::json!({
+        "agent_id": child.id,
+        "team_id": message.team_id,
+        "channel_id": message.channel,
+        "thread_ts": message.thread_ts,
+        "requested_by": message.user_id,
+    });
+    let connected = factory_slack_app::create_child_slack_app(
+        state,
+        pool,
+        platform,
+        child,
+        config,
+        &arguments,
+        &message.thread_ts,
+    )
+    .await?;
+    Ok(Some(factory_connected_text(&connected)))
+}
+
+async fn latest_unconnected_factory_child(
+    pool: &PgPool,
+    session_id: &str,
+) -> Result<Option<ManagedAgentRow>, GatewayError> {
+    sqlx::query_as::<_, ManagedAgentRow>(
+        r#"
+        SELECT child.*
+        FROM "LiteLLM_ManagedAgentsTable" child
+        JOIN "LiteLLM_ManagedAgentSessionsTable" parent ON parent.id = $1
+        WHERE child.owner_id = 'slack-agent-factory'
+          AND child.id <> parent.agent_id
+          AND child.created_at >= parent.created_at
+          AND child.config->'slack' IS NULL
+        ORDER BY child.created_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(GatewayError::Database)
+}
+
+fn factory_connected_text(payload: &serde_json::Value) -> String {
+    let agent_name = payload
+        .get("agent")
+        .and_then(|agent| agent.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Agent");
+    let status = payload
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("slack_app_created");
+    let agent_url = payload
+        .get("agent_url")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let install_url = payload
+        .get("install_url")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    format!(
+        ":white_check_mark: *{}* is ready.\n\n\
+         - *Status:* `{}`\n\
+         - *Platform link:* <{}|Open agent>\n\
+         - *Slack install link:* <{}|Install the dedicated Slack app>\n\n\
+         Open the Slack install link to add the new bot to this workspace. ",
+        agent_name, status, agent_url, install_url
+    )
 }
 
 async fn post_placeholder(

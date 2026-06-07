@@ -17,7 +17,7 @@ use crate::{
 mod definitions;
 mod factory;
 mod factory_slack;
-mod factory_slack_app;
+pub(crate) mod factory_slack_app;
 mod factory_slack_manifest;
 mod session_management;
 mod slack;

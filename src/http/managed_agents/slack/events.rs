@@ -32,15 +32,16 @@ pub async fn events(
         .as_ref()
         .ok_or(GatewayError::MissingDatabase)?
         .clone();
+    let payload: Value = serde_json::from_slice(&body)?;
+    if payload.get("type").and_then(Value::as_str) == Some("url_verification") {
+        return Ok((StatusCode::OK, challenge(&payload)).into_response());
+    }
+
     let agent = load_agent(&pool, &agent_id).await?;
     let config = slack_config(&agent)?;
     let secret = load_secret(&state, &signing_secret_key(&agent.id, &config)).await?;
     signature::verify(&headers, &body, &secret)?;
-    let payload: Value = serde_json::from_slice(&body)?;
 
-    if payload.get("type").and_then(Value::as_str) == Some("url_verification") {
-        return Ok((StatusCode::OK, challenge(&payload)).into_response());
-    }
     if payload.get("type").and_then(Value::as_str) == Some("event_callback") {
         handle_event_callback(state, pool, agent, config, &payload).await?;
     }

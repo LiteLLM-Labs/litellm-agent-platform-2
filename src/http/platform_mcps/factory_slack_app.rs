@@ -26,7 +26,7 @@ use super::{
     factory_slack_manifest::{build_child_manifest, install_url},
 };
 
-pub(super) async fn create_child_slack_app(
+pub(crate) async fn create_child_slack_app(
     state: &AppState,
     pool: &PgPool,
     platform: &ManagedAgentRow,
