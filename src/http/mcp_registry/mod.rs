@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod proxy;
 pub mod public;
+pub mod tools;
 pub mod user_credentials;
 
 use std::collections::HashMap;

@@ -59,36 +59,20 @@ pub async fn dynamic_mcp(
     let target_url = substitute_vars(base_url.trim_end_matches('/'), &vars);
 
     // ── 4. Build outbound request ─────────────────────────────────────────────
-    let reqwest_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
-        .map_err(|_| GatewayError::InvalidJsonMessage("invalid HTTP method".to_owned()))?;
+    let mut req = build_outbound_request(
+        &state.http,
+        method,
+        &target_url,
+        &headers,
+        &server.static_headers,
+        &vars,
+    )?;
 
-    let mut req = state.http.request(reqwest_method, &target_url);
-
-    // Forward safe inbound headers.
-    for (name, value) in forward_headers(&headers) {
-        req = req.header(name, value);
-    }
-
-    // Inject static headers with variable substitution.
+    // Backwards-compat: fall back to apply_auth if no static_headers and auth_type is set.
     let has_static_headers = server
         .static_headers
         .as_object()
         .is_some_and(|o| !o.is_empty());
-    if let Some(obj) = server.static_headers.as_object() {
-        for (name, val) in obj {
-            if let Some(template) = val.as_str() {
-                let resolved = substitute_vars(template, &vars);
-                if let (Ok(n), Ok(hv)) = (
-                    HeaderName::from_bytes(name.as_bytes()),
-                    HeaderValue::from_str(&resolved),
-                ) {
-                    req = req.header(n, hv);
-                }
-            }
-        }
-    }
-
-    // Backwards-compat: fall back to apply_auth if no static_headers and auth_type is set.
     if !has_static_headers {
         let credential: Option<String> =
             resolve_user_credential(pool, &server.server_id, &user_id, &enc_key)
@@ -179,6 +163,41 @@ async fn resolve_variables(
     Ok(map)
 }
 
+/// Build a reqwest request builder with forwarded inbound and static headers applied.
+fn build_outbound_request(
+    client: &reqwest::Client,
+    method: Method,
+    target_url: &str,
+    inbound: &HeaderMap,
+    static_headers: &serde_json::Value,
+    vars: &HashMap<String, String>,
+) -> Result<reqwest::RequestBuilder, GatewayError> {
+    let reqwest_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
+        .map_err(|_| GatewayError::InvalidJsonMessage("invalid HTTP method".to_owned()))?;
+
+    let mut req = client.request(reqwest_method, target_url);
+
+    for (name, value) in forward_headers(inbound) {
+        req = req.header(name, value);
+    }
+
+    if let Some(obj) = static_headers.as_object() {
+        for (name, val) in obj {
+            if let Some(template) = val.as_str() {
+                let resolved = substitute_vars(template, vars);
+                if let (Ok(n), Ok(hv)) = (
+                    HeaderName::from_bytes(name.as_bytes()),
+                    HeaderValue::from_str(&resolved),
+                ) {
+                    req = req.header(n, hv);
+                }
+            }
+        }
+    }
+
+    Ok(req)
+}
+
 /// Look up the personal vault key for this (server, user) pair and decrypt it.
 /// Key format: `mcp_user:{server_id}:{user_id}`
 async fn resolve_user_credential(
@@ -205,10 +224,7 @@ async fn resolve_user_credential(
 }
 
 /// Fall back to the server's own `credentials` JSONB field.
-///
-/// Supports two shapes:
-/// - `{ "value": "<encrypted>" }` — decrypt with the platform key.
-/// - `{ "api_key": "<plaintext>" }` — use as-is.
+/// Supports `{ "value": "<encrypted>" }` or `{ "api_key": "<plaintext>" }`.
 fn resolve_server_credential(credentials: &serde_json::Value, enc_key: &str) -> Option<String> {
     let obj = credentials.as_object()?;
 
