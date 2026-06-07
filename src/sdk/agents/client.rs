@@ -79,9 +79,9 @@ impl Lap {
             .json(body)
             .send()
             .await?;
-        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
-            if let Some(request) = self.opencode_bearer_request(Method::POST, path)? {
-                response = request.json(body).send().await?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(fallback) = self.fallback_request(runtime, Method::POST, path)? {
+                response = fallback.json(body).send().await?;
             }
         }
         response_json(response).await
@@ -93,9 +93,9 @@ impl Lap {
         path: &str,
     ) -> Result<Value, AgentSdkError> {
         let mut response = self.request(runtime, Method::GET, path)?.send().await?;
-        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
-            if let Some(request) = self.opencode_bearer_request(Method::GET, path)? {
-                response = request.send().await?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(fallback) = self.fallback_request(runtime, Method::GET, path)? {
+                response = fallback.send().await?;
             }
         }
         response_json(response).await
@@ -111,19 +111,15 @@ impl Lap {
             .header(header::ACCEPT, "text/event-stream")
             .send()
             .await?;
-        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
-            if let Some(request) = self.opencode_bearer_request(Method::GET, path)? {
-                response = request
+        if response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(fallback) = self.fallback_request(runtime, Method::GET, path)? {
+                response = fallback
                     .header(header::ACCEPT, "text/event-stream")
                     .send()
                     .await?;
             }
         }
         let stream = stream_events(ensure_success(response).await?);
-        // OpenCode stream normalization is handled in session_events.rs; skip adapter for it.
-        if runtime == AgentRuntime::OpenCode {
-            return Ok(stream);
-        }
         Ok(self.adapter(runtime)?.normalize_stream(stream))
     }
 
@@ -146,22 +142,23 @@ impl Lap {
         Ok(config.authorize(request))
     }
 
-    fn opencode_bearer_request(
+    fn fallback_request(
         &self,
+        runtime: AgentRuntime,
         method: Method,
         path: &str,
     ) -> Result<Option<reqwest::RequestBuilder>, AgentSdkError> {
         let config = self
             .inner
             .runtimes
-            .get(&AgentRuntime::OpenCode)
-            .ok_or(AgentSdkError::RuntimeNotConfigured(AgentRuntime::OpenCode))?;
+            .get(&runtime)
+            .ok_or(AgentSdkError::RuntimeNotConfigured(runtime))?;
         let request = self
             .inner
             .http
             .request(method, format!("{}{}", config.base_url, path))
             .header(header::CONTENT_TYPE, "application/json");
-        Ok(config.authorize_opencode_bearer(request))
+        Ok(config.fallback_authorize(request))
     }
 
     pub(super) fn adapter(

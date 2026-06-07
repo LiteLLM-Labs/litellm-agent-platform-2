@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use super::types::{AgentSdkError, SendEventsParams};
+use crate::sdk::agents::{AgentSdkError, SendEventsParams};
 
 pub(super) fn session_body(title: String) -> Value {
     json!({ "title": title })

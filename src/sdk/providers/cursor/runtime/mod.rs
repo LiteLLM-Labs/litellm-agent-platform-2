@@ -21,14 +21,6 @@ pub(crate) const RUNTIME_ID: &str = "cursor";
 pub(crate) struct CursorRuntime;
 
 impl RuntimeAdapter for CursorRuntime {
-    fn configure_request(
-        &self,
-        request: reqwest::RequestBuilder,
-        api_key: &str,
-    ) -> reqwest::RequestBuilder {
-        request.bearer_auth(api_key)
-    }
-
     fn normalize_stream(&self, stream: AgentEventStream) -> AgentEventStream {
         normalize_cursor_stream(stream)
     }

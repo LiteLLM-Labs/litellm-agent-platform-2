@@ -2,7 +2,7 @@ use async_stream::try_stream;
 use futures_util::StreamExt;
 use serde_json::{json, Map, Value};
 
-use super::events::{AgentEvent, AgentEventStream};
+use crate::sdk::agents::{AgentEvent, AgentEventStream};
 
 pub(super) fn normalize_opencode_stream(
     session_id: String,

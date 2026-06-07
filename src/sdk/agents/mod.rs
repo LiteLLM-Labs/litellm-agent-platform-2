@@ -1,8 +1,5 @@
 mod client;
-mod cursor;
 mod events;
-mod opencode;
-mod opencode_stream;
 mod resources;
 pub(crate) mod response_fields;
 pub(crate) mod responses;

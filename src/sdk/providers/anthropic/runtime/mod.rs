@@ -14,17 +14,6 @@ pub(crate) const RUNTIME_ID: &str = CLAUDE_MANAGED_AGENTS;
 pub(crate) struct ClaudeManagedAgentsRuntime;
 
 impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
-    fn configure_request(
-        &self,
-        request: reqwest::RequestBuilder,
-        api_key: &str,
-    ) -> reqwest::RequestBuilder {
-        request
-            .header("x-api-key", api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("anthropic-beta", MANAGED_AGENTS_BETA)
-    }
-
     fn create_agent<'a>(
         &'a self,
         client: &'a Lap,
