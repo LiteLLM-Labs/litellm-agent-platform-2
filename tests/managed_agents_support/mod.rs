@@ -41,7 +41,24 @@ impl AppFixture {
             .ok()
             .filter(|url| !url.trim().is_empty())?;
         let pool = managed_agents_pool::connect(&database_url).await.unwrap();
-        managed_agents_pool::migrate(&pool).await.unwrap();
+        // Retry to handle concurrent test-runner migration races (VersionMismatch / duplicate key
+        // happen when two binaries try to apply the same migration simultaneously).
+        for attempt in 0u8..5 {
+            match managed_agents_pool::migrate(&pool).await {
+                Ok(()) => break,
+                Err(e) => {
+                    let msg = e.to_string();
+                    let is_race = msg.contains("VersionMismatch") || msg.contains("duplicate key");
+                    if !is_race || attempt == 4 {
+                        panic!("migration failed: {e}");
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        50 * u64::from(attempt + 1),
+                    ))
+                    .await;
+                }
+            }
+        }
         reset_tables(&pool).await;
         let e2b = mock_e2b().await;
         let slack = mock_slack().await;
