@@ -92,7 +92,10 @@ impl GatewayError {
             | Self::UnknownAgentRun(_)
             | Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::Upstream(_) | Self::Sandbox(_) | Self::SandboxError(_) | Self::UpstreamHttp(_, _) => StatusCode::BAD_GATEWAY,
+            Self::Upstream(_)
+            | Self::Sandbox(_)
+            | Self::SandboxError(_)
+            | Self::UpstreamHttp(_, _) => StatusCode::BAD_GATEWAY,
         }
     }
 }
