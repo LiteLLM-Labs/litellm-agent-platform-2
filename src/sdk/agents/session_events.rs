@@ -1,13 +1,13 @@
 use reqwest::Method;
 use serde_json::{json, Value};
 
+use crate::sdk::providers::cursor::runtime::{agent_id_from_context as cursor_agent_id_from_context, run_id as cursor_run_id};
+
 use super::{
     client::Lap,
-    cursor,
     events::AgentEventStream,
     opencode,
     opencode_stream::normalize_opencode_stream,
-
     responses::response_json,
     types::{AgentRuntime, AgentSdkError, SendEventsParams, SendEventsResponse},
 };
@@ -121,7 +121,7 @@ impl SessionEvents<'_> {
         session_id: &str,
     ) -> Result<AgentEventStream, AgentSdkError> {
         let context = self.client.context_for_session(session_id)?;
-        let agent_id = cursor::agent_id_from_context(session_id, context.as_ref());
+        let agent_id = cursor_agent_id_from_context(session_id, context.as_ref());
         let run_id = match context.and_then(|context| context.run_id) {
             Some(run_id) => run_id,
             None => self.latest_cursor_run_id(&agent_id).await?,
@@ -152,7 +152,7 @@ impl SessionEvents<'_> {
     }
 
     fn cursor_agent_id(&self, session_id: &str) -> Result<String, AgentSdkError> {
-        Ok(cursor::agent_id_from_context(
+        Ok(cursor_agent_id_from_context(
             session_id,
             self.client.context_for_session(session_id)?.as_ref(),
         ))
@@ -169,6 +169,6 @@ impl SessionEvents<'_> {
             .send()
             .await?;
         let raw = response_json(response).await?;
-        cursor::run_id(&raw).ok_or(AgentSdkError::MissingField("latestRunId"))
+        cursor_run_id(&raw).ok_or(AgentSdkError::MissingField("latestRunId"))
     }
 }
