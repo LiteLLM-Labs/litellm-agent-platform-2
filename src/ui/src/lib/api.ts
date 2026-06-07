@@ -27,6 +27,37 @@ export class ApiError extends Error {
   }
 }
 
+function responseErrorText(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: unknown } | string;
+      message?: unknown;
+      detail?: unknown;
+    };
+    if (typeof parsed.error === "string") return parsed.error;
+    if (typeof parsed.error?.message === "string") return parsed.error.message;
+    if (typeof parsed.message === "string") return parsed.message;
+    if (typeof parsed.detail === "string") return parsed.detail;
+  } catch {
+    /* use raw text */
+  }
+  return trimmed.replace(/\s+/g, " ");
+}
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const message = responseErrorText(error.body);
+    return message ? `HTTP ${error.status}: ${message}` : `HTTP ${error.status}: ${fallback}`;
+  }
+  if (error instanceof TypeError) {
+    return `Network error while contacting the gateway: ${error.message}`;
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}
+
 export function getStoredMasterKey(): string | null {
   if (typeof window === "undefined") return null;
   try {
@@ -469,9 +500,11 @@ const DEFAULT_AGENT_DRAFT_MODEL = "claude-sonnet-4-6";
 
 function draftModelFrom(models: string[]): string {
   const concrete = models.filter((model) => !model.endsWith("/*"));
+  const anthropicWildcard = models.find((model) => model === "anthropic/*");
   return (
     concrete.find((model) => model === DEFAULT_AGENT_DRAFT_MODEL) ??
     concrete.find((model) => model.endsWith(`/${DEFAULT_AGENT_DRAFT_MODEL}`)) ??
+    (anthropicWildcard ? `anthropic/${DEFAULT_AGENT_DRAFT_MODEL}` : undefined) ??
     concrete.find((model) => /claude.*sonnet/i.test(model)) ??
     concrete[0] ??
     DEFAULT_AGENT_DRAFT_MODEL
