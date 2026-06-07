@@ -5,11 +5,13 @@ import type {
   AgentRuntime,
   AgentRuntimeId,
   HarnessMessage,
+  McpServer,
   Memory,
   OpencodeSession,
   PlatformMcp,
   Skill,
   SpendLog,
+  VaultKeyEntry,
 } from "./types";
 
 const BASE = "";
@@ -695,8 +697,12 @@ export async function resolveInboxItem(id: string, note?: string): Promise<void>
 // `next dev`), we transparently fall back to sessionStorage so the flow still
 // works. Per project policy, secrets only ever touch sessionStorage — never
 // localStorage.
+//
+// Scopes:
+//   "personal" — stored under the current user's namespace (default)
+//   "global"   — admin-managed keys visible to all users
 
-const VAULT_USER = "default";
+const VAULT_USER = "local";
 const VAULT_FALLBACK_PREFIX = "lite-harness-integration:";
 
 function fallbackSet(key: string, value: string): void {
@@ -737,12 +743,15 @@ function fallbackList(): string[] {
 export async function saveIntegrationKey(
   envKey: string,
   value: string,
+  scope: "personal" | "global" = "personal",
 ): Promise<"vault" | "session"> {
   try {
-    const res = await req(`/api/vault/${VAULT_USER}`, {
+    const endpoint =
+      scope === "global" ? `/api/vault/global` : `/api/vault/${VAULT_USER}`;
+    const res = await req(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: envKey, value }),
+      body: JSON.stringify({ key: envKey, value, scope }),
     });
     if (res.ok) return "vault";
   } catch {
@@ -752,19 +761,24 @@ export async function saveIntegrationKey(
   return "session";
 }
 
-/** Remove a stored integration key from both vault and sessionStorage. */
-export async function deleteIntegrationKey(envKey: string): Promise<void> {
+/** Remove a stored integration key from vault and sessionStorage. */
+export async function deleteIntegrationKey(
+  envKey: string,
+  scope: "personal" | "global" = "personal",
+): Promise<void> {
   try {
-    await req(`/api/vault/${VAULT_USER}/${encodeURIComponent(envKey)}`, {
-      method: "DELETE",
-    });
+    const endpoint =
+      scope === "global"
+        ? `/api/vault/global/${encodeURIComponent(envKey)}`
+        : `/api/vault/${VAULT_USER}/${encodeURIComponent(envKey)}`;
+    await req(endpoint, { method: "DELETE" });
   } catch {
     /* noop */
   }
   fallbackDelete(envKey);
 }
 
-/** List the env-key names that currently have a stored value. */
+/** List the env-key names that currently have a stored value (personal + global). */
 export async function listIntegrationKeys(): Promise<string[]> {
   const keys = new Set<string>(fallbackList());
   try {
@@ -779,26 +793,181 @@ export async function listIntegrationKeys(): Promise<string[]> {
   return [...keys];
 }
 
-export interface VaultKeyEntry {
-  key: string;
-  updated_at?: number;
-  source?: string;
-}
+// VaultKeyEntry is defined in types.ts
+export type { VaultKeyEntry } from "./types";
 
-/** List all vault keys with metadata (no values). */
+/** List all vault keys with metadata for the current user (personal + global). */
 export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
-  const fallback: VaultKeyEntry[] = fallbackList().map((k) => ({ key: k }));
-  const byKey = new Map<string, VaultKeyEntry>(fallback.map((e) => [e.key, e]));
+  const fallback: VaultKeyEntry[] = fallbackList().map((k) => ({
+    key: k,
+    scope: "personal" as const,
+  }));
+  const byKey = new Map<string, VaultKeyEntry>(
+    fallback.map((e) => [`${e.scope}:${e.key}`, e]),
+  );
   try {
     const res = await req(`/api/vault/${VAULT_USER}`);
     if (res.ok) {
       const data = (await res.json()) as { keys?: VaultKeyEntry[] };
-      for (const k of data.keys ?? []) byKey.set(k.key, k);
+      for (const k of data.keys ?? []) byKey.set(`${k.scope}:${k.key}`, k);
     }
   } catch {
     /* vault unavailable — sessionStorage only */
   }
   return [...byKey.values()];
+}
+
+// ── MCP Server Registry ───────────────────────────────────────────────────────
+
+/** List all MCP servers (admin). Returns full rows including server-side secrets. */
+export async function listMcpServers(): Promise<McpServer[]> {
+  const res = await req("/v1/mcp/server");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+/**
+ * List MCP servers for the user connect flow via the public hub.
+ * Server-side secrets (credentials, static_headers, env) are stripped by the backend.
+ */
+export async function listPublicMcpServers(): Promise<McpServer[]> {
+  const res = await req("/public/mcp_hub");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+
+/** Create an MCP server (admin). */
+export async function createMcpServer(input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Update an MCP server (admin). */
+export async function updateMcpServer(server_id: string, input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, server_id }),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Delete an MCP server (admin). */
+export async function deleteMcpServer(server_id: string): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}`, { method: "DELETE" }),
+  );
+}
+
+export interface McpToolDef {
+  name: string;
+  description?: string | null;
+  inputSchema?: unknown;
+}
+
+/** List the tools exposed by an existing (saved) MCP server. */
+export async function listMcpServerTools(server_id: string): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`);
+  const data = await jsonOrThrow<{ tools?: McpToolDef[]; data?: McpToolDef[] }>(res);
+  return data.tools ?? data.data ?? [];
+}
+
+/** Test tools discovery with caller-supplied variable values (for admin test panel). */
+export async function testMcpServerTools(
+  server_id: string,
+  variables: Record<string, string>,
+): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ variables }),
+  });
+  const data = await jsonOrThrow<{ tools?: McpToolDef[] }>(res);
+  return data.tools ?? [];
+}
+
+/** Discover tools from an arbitrary MCP server URL (new-server flow). */
+export async function discoverMcpToolsFromUrl(url: string): Promise<McpToolDef[]> {
+  const base = url.replace(/\/+$/, "");
+  const res = await fetch(`${base}/tools/list`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new ApiError(res.status, body);
+  }
+  const data = (await res.json()) as {
+    result?: { tools?: McpToolDef[] };
+    tools?: McpToolDef[];
+  };
+  return data?.result?.tools ?? data?.tools ?? [];
+}
+
+/** Store a user credential for a BYOK MCP server. */
+export async function storeMcpUserCredential(
+  server_id: string,
+  credential: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": user_id },
+      body: JSON.stringify({ credential }),
+    }),
+  );
+}
+
+/** Store a per-user variable for a BYOK MCP server in the vault.
+ *  Key format: `mcp_var:{server_id}:{var_name}`, scope "personal". */
+export async function storeMcpVarCredential(
+  server_id: string,
+  var_name: string,
+  value: string,
+  user_id = "default",
+): Promise<void> {
+  const res = await req(`/api/vault/${encodeURIComponent(user_id)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      key: `mcp_var:${server_id}:${var_name}`,
+      value,
+      scope: "personal",
+    }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+}
+
+/** Delete a user credential for an MCP server. */
+export async function deleteMcpUserCredential(
+  server_id: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "DELETE",
+      headers: { "x-user-id": user_id },
+    }),
+  );
+}
+
+/** List the user's connected MCP servers. */
+export async function listMcpUserCredentials(
+  user_id = "default",
+): Promise<{ server_id: string; updated_at?: number }[]> {
+  const res = await req("/v1/mcp/user-credentials", {
+    headers: { "x-user-id": user_id },
+  });
+  const data = await jsonOrThrow<{ data: { server_id: string; updated_at?: number }[] }>(res);
+  return data.data ?? [];
 }
 
 // ── Skills CRUD (DB-backed, /api/skills) ──────────────────────────────────────
@@ -1120,3 +1289,4 @@ export async function deleteMemory(agentId: string, key: string): Promise<void> 
     { method: "DELETE" },
   );
 }
+

@@ -6,7 +6,6 @@ import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -42,7 +41,6 @@ export default function VaultPage() {
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [showEnv, setShowEnv] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -57,14 +55,7 @@ export default function VaultPage() {
     refresh();
   }, []);
 
-  const onDelete = (key: string) => {
-    setDeleteTarget(key);
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const key = deleteTarget;
-    setDeleteTarget(null);
+  const onDelete = async (key: string) => {
     setKeys((prev) => prev?.filter((k) => k.key !== key) ?? null);
     await deleteIntegrationKey(key);
     await refresh();
@@ -91,7 +82,7 @@ export default function VaultPage() {
           </div>
         </header>
 
-        <main id="main-content" className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-6">
           {error && (
             <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {error}
@@ -100,7 +91,7 @@ export default function VaultPage() {
 
           {keys === null && !error && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+              <Loader2 className="size-4 animate-spin" />
               Loading…
             </div>
           )}
@@ -133,8 +124,7 @@ export default function VaultPage() {
             <div className="mt-6 max-w-2xl">
               <button
                 onClick={() => setShowEnv((v) => !v)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded"
-                aria-expanded={showEnv}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <span>{showEnv ? "▾" : "▸"}</span>
                 <span>{envKeys.length} environment variable{envKeys.length !== 1 ? "s" : ""} available as secrets</span>
@@ -163,21 +153,6 @@ export default function VaultPage() {
           refresh();
         }}
       />
-
-      <Dialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete secret</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Delete <span className="font-mono font-medium text-foreground">{deleteTarget}</span>? This cannot be undone.
-          </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" size="sm" onClick={() => void confirmDelete()}>Delete</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -291,9 +266,10 @@ function VaultEditor({
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="vault-key-name" className="text-xs font-medium uppercase tracking-wide">Key name</Label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Key name
+            </label>
             <Input
-              id="vault-key-name"
               value={keyName}
               onChange={(e) => setKeyName(e.target.value)}
               placeholder="e.g. GITHUB_TOKEN"
@@ -305,10 +281,11 @@ function VaultEditor({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="vault-key-value" className="text-xs font-medium uppercase tracking-wide">Value</Label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Value
+            </label>
             <div className="relative">
               <Input
-                id="vault-key-value"
                 type={reveal ? "text" : "password"}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
@@ -340,7 +317,7 @@ function VaultEditor({
           >
             {saving ? (
               <>
-                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                <Loader2 className="size-4 animate-spin" />
                 Saving…
               </>
             ) : isEdit ? (

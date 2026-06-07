@@ -121,6 +121,14 @@ export interface AgentRunStart {
   event_url: string;
 }
 
+export interface VaultKeyEntry {
+  key: string;
+  scope: "global" | "personal";
+  updated_at?: number;
+  /** "env" if sourced from environment variables */
+  source?: string;
+}
+
 /** A reusable, DB-backed skill (capability doc) attachable to an agent. */
 export interface Skill {
   id: string;
@@ -140,6 +148,27 @@ export interface Memory {
   always_on?: boolean | number;
   created_at: number;
   updated_at: number;
+}
+
+export interface McpServer {
+  server_id: string;
+  server_name?: string | null;
+  alias?: string | null;
+  description?: string | null;
+  instructions?: string | null;
+  url?: string | null;
+  transport: string;
+  auth_type?: string | null;
+  is_byok: boolean;
+  byok_description?: string[];
+  byok_api_key_help_url?: string | null;
+  allowed_tools?: string[];
+  available_on_public_internet: boolean;
+  approval_status?: string | null;
+  status?: string | null;
+  created_at?: number | null;
+  updated_at?: number | null;
+  [k: string]: unknown;
 }
 
 export interface SpendLog {
