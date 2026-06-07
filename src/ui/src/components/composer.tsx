@@ -70,12 +70,12 @@ export function Composer({
               placeholder={placeholder}
               disabled={sending || disabled}
               rows={1}
-              className="min-h-14 w-full resize-none bg-transparent px-4 pt-4 text-[15px] outline-none placeholder:text-muted-foreground"
+              className="min-h-14 w-full resize-none bg-transparent px-4 pt-4 text-[15px] outline-none focus-visible:outline-none placeholder:text-muted-foreground"
             />
             <div className="flex items-center justify-between px-4 pb-3 text-xs text-muted-foreground">
               <span className="mono flex min-w-0 items-center gap-2 truncate">
                 {error ? (
-                  <span className="text-red-600">{error}</span>
+                  <span className="text-red-600 dark:text-red-400">{error}</span>
                 ) : (
                   model || "Enter to send · Shift+Enter for newline"
                 )}

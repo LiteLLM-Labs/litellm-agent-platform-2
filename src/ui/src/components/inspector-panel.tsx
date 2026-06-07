@@ -46,14 +46,14 @@ function summarize(ev: OcEvent): string {
 }
 
 const TYPE_COLOR: Record<string, string> = {
-  "session.status_idle": "text-amber-600",
-  "session.error": "text-red-600",
-  "session.status": "text-violet-600",
-  "assistant_response": "text-sky-600",
-  "thinking_back": "text-violet-600",
-  "agent.message": "text-sky-600",
-  "agent.thinking": "text-violet-600",
-  "agent.reasoning": "text-violet-600",
+  "session.status_idle": "text-amber-600 dark:text-amber-400",
+  "session.error": "text-red-600 dark:text-red-400",
+  "session.status": "text-violet-600 dark:text-violet-400",
+  "assistant_response": "text-sky-600 dark:text-sky-400",
+  "thinking_back": "text-violet-600 dark:text-violet-400",
+  "agent.message": "text-sky-600 dark:text-sky-400",
+  "agent.thinking": "text-violet-600 dark:text-violet-400",
+  "agent.reasoning": "text-violet-600 dark:text-violet-400",
 };
 
 function fmtTime(ts: number): string {
@@ -67,7 +67,7 @@ function fmtTime(ts: number): string {
 
 function EventRow({ frame }: { frame: Frame }) {
   const [open, setOpen] = useState(false);
-  const color = TYPE_COLOR[frame.ev.type] ?? "text-foreground/70";
+  const color = TYPE_COLOR[frame.ev.type] ?? "text-muted-foreground";
   return (
     <div className="border-b border-border text-[11px]">
       <button
@@ -164,8 +164,9 @@ export function InspectorPanel({
         <button
           type="button"
           onClick={onClose}
-          className="ml-auto p-1 hover:bg-accent rounded"
+          className="ml-auto p-1 hover:bg-accent rounded focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
           title="Close inspector"
+          aria-label="Close inspector"
         >
           <X className="size-4 text-muted-foreground" />
         </button>

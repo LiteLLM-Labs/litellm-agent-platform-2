@@ -130,13 +130,13 @@ export function ProvidersPanel() {
         <p className="text-sm text-muted-foreground">
           Connect provider credentials before assigning models to agents.
         </p>
-        {loading && <p className="text-xs text-muted-foreground">Loading providers...</p>}
+        {loading && <p className="text-xs text-muted-foreground">Loading providers…</p>}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
 
       {connectedProviders.length > 0 && (
         <section className="grid gap-2">
-          <h3>Connected LLM providers</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight">Connected LLM providers</h3>
           <Card className="grid min-w-0 gap-3 p-4">
             {connectedProviders.map((provider) => (
               <div
@@ -178,7 +178,7 @@ export function ProvidersPanel() {
 
       <section className="grid gap-2">
         <div className="flex items-center justify-between gap-3">
-          <h3>Available LLM providers</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight">Available LLM providers</h3>
           <Badge variant="outline" className="text-[10px]">
             Model routing
           </Badge>
@@ -226,7 +226,7 @@ export function ProvidersPanel() {
 
       {step !== "catalog" && selectedProvider && (
         <section className="grid gap-2">
-          <h3>{selectedConnectedProvider ? "Provider details" : `Connect ${selectedProvider.name}`}</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight">{selectedConnectedProvider ? "Provider details" : `Connect ${selectedProvider.name}`}</h3>
           <Card className="min-w-0 p-4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
               <div className="grid min-w-0 gap-4">
@@ -304,7 +304,7 @@ export function ProvidersPanel() {
                 disabled={saving || !selectedProvider || !apiKey.trim() || !baseUrl.trim()}
               >
                 <Check className="size-3.5" />
-                {saving ? "Saving..." : "Save provider"}
+                {saving ? "Saving…" : "Save provider"}
               </Button>
             </div>
           </Card>

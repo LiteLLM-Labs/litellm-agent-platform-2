@@ -62,7 +62,7 @@ function agentPrompt(agent: Agent | null): string {
 
 function shortPrompt(prompt: string): string {
   const compact = prompt.replace(/\s+/g, " ").trim();
-  return compact.length > 220 ? compact.slice(0, 220).trimEnd() + "..." : compact;
+  return compact.length > 220 ? compact.slice(0, 220).trimEnd() + "…" : compact;
 }
 
 function runtimeLabel(runtime?: string): string {
@@ -755,16 +755,17 @@ function ChatInner() {
             {sessionStatus === "busy" ? (
               <button
                 onClick={() => sid && abortSession(sid).catch(() => {})}
-                className="flex items-center gap-1 text-[11px] text-amber-500 font-mono hover:text-red-500 transition-colors group"
+                className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 font-mono hover:text-red-600 dark:hover:text-red-400 transition-colors group"
                 title="Abort agent"
+                aria-label="Agent busy — click to abort"
               >
-                <Loader2 className="w-3 h-3 animate-spin group-hover:hidden" />
+                <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none group-hover:hidden" />
                 <Square className="w-3 h-3 hidden group-hover:block fill-current" />
                 <span className="group-hover:hidden">busy</span>
                 <span className="hidden group-hover:inline">abort</span>
               </button>
             ) : (
-              <span className="flex items-center gap-1 text-[11px] text-emerald-500 font-mono">
+              <span className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-mono">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
                 idle
               </span>
@@ -798,7 +799,7 @@ function ChatInner() {
                   </div>
                 </SelectContent>
               </Select>
-              {switchingAgent && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+              {switchingAgent && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none text-muted-foreground" />}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-muted-foreground">model</span>
@@ -853,14 +854,14 @@ function ChatInner() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="truncate text-sm font-semibold leading-5">{activeAgentName}</h2>
+                        <h2 className="truncate text-base font-semibold tracking-tight leading-5">{activeAgentName}</h2>
                         {activePrompt ? (
-                          <span className="inline-flex h-5 items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 text-[10px] font-medium text-emerald-500">
+                          <span className="inline-flex h-5 items-center gap-1 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
                             <CheckCircle2 className="size-3" />
                             prompt active
                           </span>
                         ) : (
-                          <span className="inline-flex h-5 items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-500">
+                          <span className="inline-flex h-5 items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
                             <AlertTriangle className="size-3" />
                             no saved prompt
                           </span>
@@ -906,7 +907,7 @@ function ChatInner() {
                           {skills.map((skill) => (
                             <span
                               key={skill}
-                              className="inline-flex h-5 items-center gap-1 rounded-md border border-sky-500/25 bg-sky-500/10 px-1.5 font-mono text-[10px] text-sky-500"
+                              className="inline-flex h-5 items-center gap-1 rounded-md border border-sky-500/25 bg-sky-500/10 px-1.5 font-mono text-[10px] text-sky-600 dark:text-sky-400"
                             >
                               <Wrench className="size-3" />
                               {skill}
@@ -915,7 +916,7 @@ function ChatInner() {
                           {vaultKeys.map((key) => (
                             <span
                               key={key}
-                              className="inline-flex h-5 items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-1.5 font-mono text-[10px] text-amber-500"
+                              className="inline-flex h-5 items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-1.5 font-mono text-[10px] text-amber-600 dark:text-amber-400"
                             >
                               <KeyRound className="size-3" />
                               {key}
@@ -930,7 +931,7 @@ function ChatInner() {
                 <section className="min-w-0 bg-background/35 p-4">
                   <div className="flex items-center gap-2">
                     <div className="min-w-0">
-                      <div className="text-xs font-medium">System prompt</div>
+                      <h3 className="text-[13.5px] font-semibold tracking-tight">System prompt</h3>
                       <div className="text-[11px] text-muted-foreground">
                         {activePrompt ? "Visible before the first turn runs." : "No reusable agent prompt is attached."}
                       </div>
@@ -975,7 +976,7 @@ function ChatInner() {
                         </div>
                       )
                     ) : (
-                      <div className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-500">
+                      <div className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-600 dark:text-amber-400">
                         {activeAgent
                           ? "This saved agent will run without a stored system prompt until one is added on the Agents page."
                           : "This is a built-in runtime session, so there is no saved agent prompt to review."}
@@ -983,7 +984,7 @@ function ChatInner() {
                     )}
                   </div>
                   {promptCopied && (
-                    <div className="mt-2 text-[11px] text-emerald-500">
+                    <div className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">
                       Copied system prompt.
                     </div>
                   )}
@@ -991,8 +992,10 @@ function ChatInner() {
               </div>
             </Card>
             {displayMessages && displayMessages.length === 0 && (
-              <div className="py-16 text-center text-sm text-muted-foreground">
-                No messages yet. Say hi.
+              <div className="flex flex-col items-center gap-3 py-16 text-center">
+                <Bot className="size-8 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">No messages yet.</p>
+                <p className="text-xs text-muted-foreground">Type a message below to start the conversation.</p>
               </div>
             )}
             {displayMessages?.map((m, i) => (

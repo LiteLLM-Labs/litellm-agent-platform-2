@@ -302,3 +302,73 @@ Before marking any UI task done, verify every item:
 - [ ] All `"..."` replaced with `"…"` in UI-visible strings
 - [ ] Submit buttons disabled during async and show inline spinner
 - [ ] Page works in dark mode (no hardcoded light-only colors)
+- [ ] Every table column value varies across rows and is non-trivial (drop same-value columns)
+- [ ] Row actions visible at rest — not `opacity-0` — or a persistent `⋮` menu is always shown
+- [ ] User intent test passed: primary intent visible in <5s without hover or click
+
+---
+
+## 8. Table Design Rules
+
+### Column selection
+
+Before writing a `<th>`, answer all three:
+
+1. **Does this column's value vary meaningfully across rows?** If every row shows the same value (`unknown`, `active`, `sse`) — drop the column or fold it into another cell.
+2. **Is this the information the user came here to find?** That column goes first or gets a copy button.
+3. **Can this column be empty for some rows?** If yes, render `—` explicitly — never a blank cell.
+
+### Row actions — never `opacity-0`
+
+Users do not hover every row to discover that editing is possible. Actions hidden until hover look broken on rows that haven't been hovered.
+
+```tsx
+// Correct — always present, deemphasized at rest
+<div className="flex items-center justify-end gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+
+// Wrong — invisible until hover; users never discover it
+<div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+```
+
+`opacity-0` on row actions is only acceptable when a persistent `⋮` overflow button is always visible at full opacity on the same row.
+
+### Status badges on live/async data
+
+Never render a status badge whose value is always a fallback (`unknown`, `—`, `n/a`). A badge with no signal is noise that erodes trust in the UI.
+
+- If the system cannot compute status yet: omit the badge, or show a subtle amber `•` pulse dot with `aria-label="Status checking…"`.
+- Only render a status badge when the backend can return at least two distinct meaningful values.
+
+### Gateway/infra tables — show the route users actually use
+
+Any table listing a server, provider, or endpoint must show the gateway route, not just the upstream config URL. The upstream URL ≠ the URL agents use. Both belong; the gateway route is more important.
+
+```tsx
+// In a table row for an MCP server:
+<td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+  /{server.server_name}/mcp
+</td>
+```
+
+---
+
+## 9. User Intent Test
+
+Run this before shipping any page, table, or list view.
+
+**Step 1 — Write the intent in one sentence:**
+> "A [user type] opens this page to [do what]."
+
+Examples:
+- *"An admin opens MCP Servers to find the proxy route for a server and verify it's configured."*
+- *"A developer opens Keys to find an existing key's ID or create a new one."*
+- *"An admin opens Providers to see which are connected and connect a new one."*
+
+**Step 2 — Is the answer visible in under 5 seconds, without hover or click?**
+
+If no → the layout is wrong. The answer to the user's intent must be in the first column, or the first visual element they see. Restructure until yes.
+
+Common failures:
+- The most important value (proxy route, key ID, status) is in a later column or hidden until hover.
+- The primary CTA ("Connect", "Add Server") is only reachable after scrolling.
+- All rows look identical — no visual hierarchy distinguishing connected from disconnected, active from errored.

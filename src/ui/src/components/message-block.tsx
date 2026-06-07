@@ -154,8 +154,7 @@ function AssistantBlock({
     <article className="group/turn flex flex-col gap-3 py-1">
       {failed && msg.text ? (
         <div
-          className="sessions-md max-w-[920px] text-[15px] leading-7"
-          style={{ color: "#b91c1c" }}
+          className="sessions-md max-w-[920px] text-[15px] leading-7 text-red-600 dark:text-red-400"
         >
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
         </div>
@@ -182,7 +181,7 @@ function AssistantBlock({
           </div>
         ) : (
           <div className="flex items-center gap-2 text-[14px] text-muted-foreground leading-relaxed">
-            <Loader2 className="w-3 h-3 animate-spin" />
+            <Loader2 className="w-3 h-3 animate-spin motion-reduce:animate-none" />
             thinking…
           </div>
         )
@@ -197,16 +196,16 @@ function AssistantBlock({
           )}
           {inProgress && (
             <div className="flex items-center gap-1.5 pt-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse" />
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:300ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse motion-reduce:animate-none" />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse motion-reduce:animate-none [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-pulse motion-reduce:animate-none [animation-delay:300ms]" />
             </div>
           )}
         </>
       )}
 
       {failed && msg.error && (
-        <div className="mono text-[11px] text-red-700">{msg.error}</div>
+        <div className="mono text-[11px] text-red-600 dark:text-red-400">{msg.error}</div>
       )}
 
       {!inProgress && !failed && (
@@ -309,6 +308,8 @@ function ReasoningBlock({ text }: { text: string }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-label={open ? "Collapse reasoning" : "Expand reasoning"}
+        aria-expanded={open}
         className="flex items-start gap-1 text-left hover:text-foreground"
       >
         <ChevronDown
@@ -436,10 +437,10 @@ function ToolBlock({ part }: { part: HarnessMessagePart }) {
 
   const statusColor =
     status === "completed"
-      ? "text-emerald-600"
+      ? "text-emerald-600 dark:text-emerald-400"
       : status === "error"
-        ? "text-red-600"
-        : "text-amber-600";
+        ? "text-red-600 dark:text-red-400"
+        : "text-amber-600 dark:text-amber-400";
   const StatusIcon =
     status === "completed" ? Check : status === "error" ? X : Loader2;
   const statusLabel = status === "completed" ? "done" : status;
@@ -455,13 +456,13 @@ function ToolBlock({ part }: { part: HarnessMessagePart }) {
         }`}
       >
         <ToolIcon tool={toolName} status={status} />
-        <span className="shrink-0 text-[14px] font-medium text-foreground/90">{label}</span>
+        <span className="shrink-0 text-[14px] font-medium text-foreground">{label}</span>
         {desc && (
           <span className="mono min-w-0 max-w-[min(38rem,42vw)] truncate text-[12px] text-muted-foreground">{desc}</span>
         )}
         <span className={`mono inline-flex shrink-0 items-center gap-1 rounded-full border border-current/15 px-2 py-0.5 text-[10.5px] ${statusColor}`}>
           <StatusIcon
-            className={`size-3 shrink-0 ${status === "running" ? "animate-spin" : ""}`}
+            className={`size-3 shrink-0 ${status === "running" ? "animate-spin motion-reduce:animate-none" : ""}`}
           />
           {statusLabel}
         </span>

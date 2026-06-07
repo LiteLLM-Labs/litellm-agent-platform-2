@@ -34,7 +34,13 @@ import {
 
 function formatTime(ts?: number | null): string {
   if (!ts) return "Never";
-  return new Date(ts * 1000).toLocaleString();
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(ts * 1000));
 }
 
 export function ApiKeysPanel() {
@@ -126,7 +132,7 @@ export function ApiKeysPanel() {
 
       {keys === null ? (
         <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" />
+          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
           Loading keys
         </div>
       ) : keys.length === 0 ? (
@@ -217,7 +223,7 @@ export function ApiKeysPanel() {
                   Cancel
                 </Button>
                 <Button onClick={create} disabled={creating}>
-                  {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                  {creating ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Plus className="size-4" />}
                   Create key
                 </Button>
               </>
