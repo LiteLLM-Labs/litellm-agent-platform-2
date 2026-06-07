@@ -1,4 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
+use tokio::sync::OnceCell;
 
 use axum::{
     body::{to_bytes, Body},
@@ -28,6 +29,8 @@ pub mod flows;
 
 use db::reset_tables;
 
+static MIGRATED: OnceCell<()> = OnceCell::const_new();
+
 pub struct AppFixture {
     pub app: axum::Router,
     pool: PgPool,
@@ -41,7 +44,11 @@ impl AppFixture {
             .ok()
             .filter(|url| !url.trim().is_empty())?;
         let pool = managed_agents_pool::connect(&database_url).await.unwrap();
-        managed_agents_pool::migrate_fresh(&pool).await.unwrap();
+        MIGRATED
+            .get_or_init(|| async {
+                managed_agents_pool::migrate_fresh(&pool).await.unwrap();
+            })
+            .await;
         reset_tables(&pool).await;
         let e2b = mock_e2b().await;
         let slack = mock_slack().await;
