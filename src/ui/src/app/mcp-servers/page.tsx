@@ -10,7 +10,6 @@ import {
   Search,
   Info,
   X,
-  ChevronDown,
   Zap,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
@@ -24,8 +23,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   listMcpServers,
   createMcpServer,
@@ -197,6 +204,7 @@ export default function McpServersPage() {
   const [servers, setServers] = useState<McpServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editorServer, setEditorServer] = useState<McpServer | null | "new">(null);
+  const [confirmDelete, setConfirmDelete] = useState<McpServer | null>(null);
 
   const refresh = async () => {
     try {
@@ -212,7 +220,13 @@ export default function McpServersPage() {
   }, []);
 
   const onDelete = async (s: McpServer) => {
-    if (!confirm(`Delete MCP server "${s.alias ?? s.server_name ?? s.server_id}"?`)) return;
+    setConfirmDelete(s);
+  };
+
+  const onConfirmDelete = async () => {
+    if (!confirmDelete) return;
+    const s = confirmDelete;
+    setConfirmDelete(null);
     setServers((prev) => prev?.filter((x) => x.server_id !== s.server_id) ?? null);
     try {
       await deleteMcpServer(s.server_id);
@@ -248,9 +262,10 @@ export default function McpServersPage() {
           )}
 
           {servers === null && !error && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading…
+            <div className="max-w-5xl space-y-2">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-12 rounded-lg border border-border bg-muted/30 animate-pulse" />
+              ))}
             </div>
           )}
 
@@ -316,6 +331,28 @@ export default function McpServersPage() {
           refresh();
         }}
       />
+
+      {/* Confirm delete dialog */}
+      <Dialog open={confirmDelete !== null} onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete MCP server?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove &ldquo;
+              {confirmDelete?.alias ?? confirmDelete?.server_name ?? confirmDelete?.server_id}
+              &rdquo;. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => void onConfirmDelete()}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -362,7 +399,7 @@ function ServerRow({
             </Badge>
           )}
           {server.available_on_public_internet && (
-            <Badge className="text-[10px] bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30">
+            <Badge className="text-[10px] bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30">
               Public
             </Badge>
           )}
@@ -373,7 +410,7 @@ function ServerRow({
           variant={status === "active" ? "secondary" : "outline"}
           className={`text-[10px] ${
             status === "active"
-              ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30"
+              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
               : "text-muted-foreground"
           }`}
         >
@@ -410,13 +447,15 @@ function ServerRow({
 function SectionHeader({ label, tooltip }: { label: string; tooltip: string }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-sm font-medium">{label}</span>
-      <span
+      <span className="text-[13.5px] font-semibold tracking-tight">{label}</span>
+      <button
+        type="button"
         title={tooltip}
-        className="cursor-help text-muted-foreground hover:text-foreground transition-colors"
+        aria-label={tooltip}
+        className="cursor-help text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
       >
         <Info className="size-3.5" />
-      </span>
+      </button>
     </div>
   );
 }
@@ -478,38 +517,42 @@ function VariablesTable({
               <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-0 items-center">
                 <div className="px-3 py-2 border-r border-border">
                   <input
+                    id={`var-name-${idx}`}
                     value={v.name}
                     onChange={(e) => patchRow(idx, "name", e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
                     placeholder="VAR_NAME"
-                    className="w-full bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60"
+                    autoComplete="off"
+                    className="w-full bg-transparent font-mono text-xs outline-none focus:ring-1 focus:ring-ring rounded placeholder:text-muted-foreground/60"
                   />
                 </div>
                 <div className="px-3 py-2 border-r border-border">
                   <input
+                    id={`var-desc-${idx}`}
                     value={v.description}
                     onChange={(e) => patchRow(idx, "description", e.target.value)}
                     placeholder="Short description"
-                    className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+                    className="w-full bg-transparent text-xs outline-none focus:ring-1 focus:ring-ring rounded placeholder:text-muted-foreground/60"
                   />
                 </div>
-                <div className="px-3 py-2 border-r border-border">
-                  <div className="relative flex items-center">
-                    <select
-                      value={v.scope}
-                      onChange={(e) => patchRow(idx, "scope", e.target.value as VariableScope)}
-                      className="appearance-none bg-transparent text-xs outline-none pr-5 cursor-pointer"
-                    >
-                      <option value="per_user">Per-user</option>
-                      <option value="instance">Instance</option>
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-0 size-3 text-muted-foreground" />
-                  </div>
+                <div className="px-2 py-1.5 border-r border-border">
+                  <Select
+                    value={v.scope}
+                    onValueChange={(val) => patchRow(idx, "scope", val as VariableScope)}
+                  >
+                    <SelectTrigger size="sm" className="h-6 text-xs border-0 shadow-none bg-transparent px-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="per_user">Per-user</SelectItem>
+                      <SelectItem value="instance">Instance</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="flex items-center justify-center w-8">
                   <button
                     type="button"
                     onClick={() => removeRow(idx)}
-                    className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                    className="p-1 text-muted-foreground hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded"
                     aria-label="Remove variable"
                   >
                     <X className="size-3.5" />
@@ -520,17 +563,27 @@ function VariablesTable({
               {/* Inline value input for instance-scoped variables */}
               {v.scope === "instance" && (
                 <div className="px-3 pb-2 pt-0 bg-muted/20 border-t border-dashed border-border">
-                  <label className="block text-[10px] text-muted-foreground mb-1 mt-1">
-                    Value{" "}
-                    <span className="text-muted-foreground/60">
-                      (admin-set, shared across all users — encryption coming soon)
-                    </span>
-                  </label>
+                  <Label
+                    htmlFor={`var-value-${idx}`}
+                    className="block text-[10px] text-muted-foreground mb-1 mt-1 font-normal"
+                  >
+                    Value
+                    <button
+                      type="button"
+                      title="Admin-set value shared across all users. Encryption support is coming soon."
+                      aria-label="Admin-set value shared across all users. Encryption support is coming soon."
+                      className="ml-1 cursor-help text-muted-foreground/60 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded align-middle"
+                    >
+                      <Info className="inline size-3" />
+                    </button>
+                  </Label>
                   <input
+                    id={`var-value-${idx}`}
                     type="password"
                     value={v.value}
                     onChange={(e) => patchRow(idx, "value", e.target.value)}
                     placeholder="Enter value…"
+                    autoComplete="off"
                     className="w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
@@ -598,25 +651,28 @@ function StaticHeadersTable({
             >
               <div className="px-3 py-2 border-r border-border">
                 <input
+                  id={`hdr-name-${idx}`}
                   value={h.name}
                   onChange={(e) => patchRow(idx, "name", e.target.value)}
                   placeholder="x-api-key"
-                  className="w-full bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60"
+                  className="w-full bg-transparent font-mono text-xs outline-none focus:ring-1 focus:ring-ring rounded placeholder:text-muted-foreground/60"
                 />
               </div>
               <div className="px-3 py-2 border-r border-border">
                 <input
+                  id={`hdr-value-${idx}`}
                   value={h.value}
                   onChange={(e) => patchRow(idx, "value", e.target.value)}
                   placeholder="${VAR_NAME}"
-                  className="w-full bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60"
+                  autoComplete="off"
+                  className="w-full bg-transparent font-mono text-xs outline-none focus:ring-1 focus:ring-ring rounded placeholder:text-muted-foreground/60"
                 />
               </div>
               <div className="flex items-center justify-center w-8">
                 <button
                   type="button"
                   onClick={() => removeRow(idx)}
-                  className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                  className="p-1 text-muted-foreground hover:text-destructive transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded"
                   aria-label="Remove header"
                 >
                   <X className="size-3.5" />
@@ -696,7 +752,8 @@ function TestConnectionPanel({
         <button
           type="button"
           onClick={() => { setOpen(false); setResult(null); }}
-          className="text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Close test panel"
+          className="text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded"
         >
           <X className="size-3.5" />
         </button>
@@ -706,11 +763,12 @@ function TestConnectionPanel({
         <div className="space-y-2">
           {instanceVars.map((v) => (
             <div key={v.name} className="space-y-1">
-              <label className="text-[10px] text-muted-foreground font-mono">
+              <Label htmlFor={`test-instance-${v.name}`} className="text-[10px] text-muted-foreground font-mono font-normal">
                 {v.name}{" "}
                 <span className="text-muted-foreground/60">(instance — pre-filled)</span>
-              </label>
+              </Label>
               <Input
+                id={`test-instance-${v.name}`}
                 value={v.value}
                 disabled
                 className="h-7 text-xs font-mono"
@@ -720,19 +778,21 @@ function TestConnectionPanel({
           ))}
           {perUserVars.map((v) => (
             <div key={v.name} className="space-y-1">
-              <label className="text-[10px] font-mono">
+              <Label htmlFor={`test-user-${v.name}`} className="text-[10px] font-mono font-normal">
                 Test value for{" "}
                 <span className="font-semibold">{v.name}</span>
                 {v.description && (
                   <span className="text-muted-foreground ml-1">— {v.description}</span>
                 )}
-              </label>
+              </Label>
               <Input
+                id={`test-user-${v.name}`}
                 value={testValues[v.name] ?? ""}
                 onChange={(e) =>
                   setTestValues((prev) => ({ ...prev, [v.name]: e.target.value }))
                 }
                 placeholder={`Enter ${v.name}…`}
+                autoComplete="off"
                 className="h-7 text-xs font-mono"
               />
             </div>
@@ -748,7 +808,7 @@ function TestConnectionPanel({
         className="h-7 gap-1.5 text-xs"
       >
         {loading ? (
-          <Loader2 className="size-3 animate-spin" />
+          <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
         ) : (
           <Zap className="size-3" />
         )}
@@ -808,6 +868,10 @@ function McpServerEditor({
   const [discoveredTools, setDiscoveredTools] = useState<McpToolDef[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
+  // Per-user test values entered inline before discovering
+  const [testVarValues, setTestVarValues] = useState<Record<string, string>>({});
+
+  const perUserVars = form.variables.filter((v) => v.scope === "per_user");
 
   useEffect(() => {
     if (serverOrNew === "new") {
@@ -818,6 +882,7 @@ function McpServerEditor({
     setError(null);
     setDiscoveredTools(null);
     setDiscoverError(null);
+    setTestVarValues({});
   }, [serverOrNew]);
 
   const patch = <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -829,7 +894,11 @@ function McpServerEditor({
     try {
       let tools: McpToolDef[];
       if (isEdit) {
-        tools = await listMcpServerTools((serverOrNew as McpServer).server_id);
+        // Use test variable values if any per_user vars defined
+        const serverId = (serverOrNew as McpServer).server_id;
+        tools = Object.keys(testVarValues).length > 0
+          ? await testMcpServerTools(serverId, testVarValues)
+          : await listMcpServerTools(serverId);
       } else {
         const url = form.url.trim();
         if (!url) {
@@ -977,14 +1046,6 @@ function McpServerEditor({
             onChange={(h) => patch("static_headers", h)}
           />
 
-          {/* Test connection (only when editing an existing server) */}
-          {isEdit && (
-            <TestConnectionPanel
-              serverId={(serverOrNew as McpServer).server_id}
-              variables={form.variables}
-            />
-          )}
-
           {/* divider */}
           <div className="border-t border-border" />
 
@@ -1006,13 +1067,34 @@ function McpServerEditor({
                 className="h-7 gap-1.5 text-xs"
               >
                 {discovering ? (
-                  <Loader2 className="size-3 animate-spin" />
+                  <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
                 ) : (
                   <Search className="size-3" />
                 )}
-                {discovering ? "Discovering…" : "Discover tools"}
+                {discovering ? "Discovering…" : "Discover & test"}
               </Button>
             </div>
+
+            {/* Per-user variable test inputs — shown when per_user vars are defined */}
+            {perUserVars.length > 0 && (
+              <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Enter test values for per-user variables to discover tools:
+                </p>
+                {perUserVars.map((v) => (
+                  <div key={v.name} className="flex items-center gap-2">
+                    <label className="text-xs font-mono w-40 shrink-0 truncate">{v.name}</label>
+                    <Input
+                      type="password"
+                      value={testVarValues[v.name] ?? ""}
+                      onChange={(e) => setTestVarValues((prev) => ({ ...prev, [v.name]: e.target.value }))}
+                      placeholder="test value"
+                      className="h-7 text-xs font-mono"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {discoverError && (
               <p className="text-xs text-destructive">{discoverError}</p>
@@ -1098,7 +1180,7 @@ function McpServerEditor({
           <Button onClick={onSave} disabled={saving}>
             {saving ? (
               <>
-                <Loader2 className="size-4 animate-spin" />
+                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                 Saving…
               </>
             ) : isEdit ? (

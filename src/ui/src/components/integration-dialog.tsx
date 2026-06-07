@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { BrandIcon } from "@/components/brand-icons";
 import { storeMcpUserCredential, storeMcpVarCredential, deleteMcpUserCredential, getStoredMasterKey } from "@/lib/api";
 import type { McpServer } from "@/lib/types";
@@ -198,7 +199,7 @@ export function IntegrationDialog({
               className="w-full"
             >
               {testing ? (
-                <><Loader2 className="size-3.5 animate-spin" /> Testing connection…</>
+                <><Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> Testing connection…</>
               ) : (
                 <><Zap className="size-3.5" /> Test connection</>
               )}
@@ -242,7 +243,7 @@ export function IntegrationDialog({
                     href={server.byok_api_key_help_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="underline hover:text-foreground"
+                    className="underline hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
                   >
                     Get your {keyLabel}
                   </a>
@@ -258,16 +259,17 @@ export function IntegrationDialog({
               // Per-variable inputs
               perUserVars.map((v) => (
                 <div key={v.name} className="space-y-1">
-                  <label className="font-mono text-xs text-muted-foreground">
+                  <Label htmlFor={`int-var-${v.name}`} className="font-mono text-xs text-muted-foreground font-normal">
                     {v.name}
                     {v.description && (
                       <span className="ml-1 font-sans normal-case text-muted-foreground/70">
                         — {v.description}
                       </span>
                     )}
-                  </label>
+                  </Label>
                   <div className="relative">
                     <Input
+                      id={`int-var-${v.name}`}
                       type={reveal ? "text" : "password"}
                       value={varValues[v.name] ?? ""}
                       onChange={(e) =>
@@ -286,11 +288,12 @@ export function IntegrationDialog({
             ) : (
               // Legacy single key input
               <>
-                <label className="font-mono text-xs text-muted-foreground">
+                <Label htmlFor="int-legacy-key" className="font-mono text-xs text-muted-foreground font-normal">
                   {keyLabel}
-                </label>
+                </Label>
                 <div className="relative">
                   <Input
+                    id="int-legacy-key"
                     type={reveal ? "text" : "password"}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
@@ -329,7 +332,7 @@ export function IntegrationDialog({
             >
               {saving ? (
                 <>
-                  <Loader2 className="size-4 animate-spin" />
+                  <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                   Saving
                 </>
               ) : connected ? (

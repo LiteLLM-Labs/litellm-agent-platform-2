@@ -89,7 +89,7 @@ export default function VaultPage() {
 
           {keys === null && !error && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
               Loading…
             </div>
           )}
@@ -108,13 +108,13 @@ export default function VaultPage() {
           {keys !== null && !empty && (
             <div className="max-w-2xl space-y-6">
               {/* Global Keys */}
-              <section>
+              <section aria-labelledby="section-global-keys">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Globe className="size-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <h2 id="section-global-keys" className="text-xs font-semibold uppercase tracking-tight text-muted-foreground">
                       Global Keys
-                    </span>
+                    </h2>
                     <span className="text-xs text-muted-foreground">(admin-managed, visible to all users)</span>
                   </div>
                   <Button
@@ -146,13 +146,13 @@ export default function VaultPage() {
               </section>
 
               {/* Personal Keys */}
-              <section>
+              <section aria-labelledby="section-my-keys">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <User className="size-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <h2 id="section-my-keys" className="text-xs font-semibold uppercase tracking-tight text-muted-foreground">
                       My Keys
-                    </span>
+                    </h2>
                     <span className="text-xs text-muted-foreground">(only you can see these)</span>
                   </div>
                   <Button
@@ -442,7 +442,7 @@ function VaultEditor({
           >
             {saving ? (
               <>
-                <Loader2 className="size-4 animate-spin" />
+                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                 Saving…
               </>
             ) : isEdit ? (
