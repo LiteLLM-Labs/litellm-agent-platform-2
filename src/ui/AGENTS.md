@@ -284,7 +284,21 @@ Rules:
 
 ---
 
-## 7. Pre-Commit Checklist
+## 7. Agent Draft Invariants
+
+`AgentDraft` has fields that are **sources of truth** and fields that are **derived on output**. Never confuse them.
+
+| Source of truth | Derived in `createInputFromDraft` — never read back |
+|---|---|
+| `mcp_server_ids` | `mcp_servers`, `mcp_toolset` tool entries |
+| `vault_keys` | vault resolution in the backend |
+| `skill_ids` | skill attachment at session time |
+
+**MCP rule**: `createInputFromDraft` strips all `mcp_toolset` entries from `draft.tools` and rebuilds them from `mcp_server_ids`. If an ID is not in the `INTEGRATIONS` catalog it is silently dropped — no toolset, no server URL.
+
+---
+
+## 8. Pre-Commit Checklist
 
 Before marking any UI task done, verify every item:
 
