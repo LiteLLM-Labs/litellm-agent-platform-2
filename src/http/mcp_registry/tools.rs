@@ -153,10 +153,11 @@ pub async fn list_tools(
     } else {
         HashMap::new()
     };
-    let tools_url = substitute_vars(url.trim_end_matches('/'), &vars);
+    let tools_url = substitute_vars(url, &vars);
+    let tools_url = tools_url.trim_end_matches('/');
     let req = state
         .http
-        .post(&tools_url)
+        .post(tools_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream");
     let req = apply_static_headers(req, &server.static_headers, &vars);
@@ -248,10 +249,11 @@ pub async fn test_tools(
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref()).ok();
     let mut vars = build_instance_vars(&server, enc_key_opt.as_deref());
     vars.extend(body.variables);
-    let tools_url = substitute_vars(url.trim_end_matches('/'), &vars);
+    let tools_url = substitute_vars(url, &vars);
+    let tools_url = tools_url.trim_end_matches('/');
     let req = state
         .http
-        .post(&tools_url)
+        .post(tools_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream");
     let req = apply_static_headers(req, &server.static_headers, &vars);

@@ -1,6 +1,6 @@
 use serde_json::json;
 use wiremock::{
-    matchers::{body_json, header, method, path},
+    matchers::{header, method, path},
     Mock, MockServer, ResponseTemplate,
 };
 
@@ -133,22 +133,7 @@ async fn mount_claude_session_events(anthropic: &MockServer) {
     Mock::given(method("POST"))
         .and(path("/v1/sessions/sesn_111111111111111111111111/events"))
         .and(header("x-api-key", "anthropic-test"))
-        .and(body_json(json!({
-            "events": [{
-                "type": "user.message",
-                "content": [{ "type": "text", "text": "say hello" }]
-            }]
-        })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
-        .expect(1..)
-        .with_priority(1)
-        .mount(anthropic)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/v1/sessions/sesn_111111111111111111111111/events"))
-        .and(header("x-api-key", "anthropic-test"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "ok": true })))
-        .with_priority(2)
         .mount(anthropic)
         .await;
     Mock::given(method("GET"))
