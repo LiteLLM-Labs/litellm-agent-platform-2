@@ -177,20 +177,21 @@ pub async fn list_tools(
         .http
         .post(&tools_url)
         .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
         .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
         .send()
         .await
         .map_err(GatewayError::Upstream)?;
 
     let tools = if res.status().is_success() {
-        let body: Value = res.json().await.map_err(GatewayError::Upstream)?;
-        // Handle both {tools:[]} and {result:{tools:[]}} shapes
-        body.get("result")
-            .and_then(|r| r.get("tools"))
-            .or_else(|| body.get("tools"))
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default()
+        let content_type = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        let text = res.text().await.map_err(GatewayError::Upstream)?;
+        extract_tools_from_response(&text, &content_type)
     } else {
         vec![]
     };
@@ -199,4 +200,31 @@ pub async fn list_tools(
         server_id,
         tools,
     }))
+}
+
+fn extract_tools_from_response(text: &str, content_type: &str) -> Vec<Value> {
+    // SSE (text/event-stream): parse data: lines
+    if content_type.contains("event-stream") || text.starts_with("data:") {
+        for line in text.lines() {
+            let data = line.strip_prefix("data:").map(str::trim).unwrap_or("");
+            if data.is_empty() { continue; }
+            if let Ok(v) = serde_json::from_str::<Value>(data) {
+                let tools = v.pointer("/result/tools")
+                    .or_else(|| v.get("tools"))
+                    .and_then(Value::as_array)
+                    .cloned();
+                if let Some(t) = tools { return t; }
+            }
+        }
+        return vec![];
+    }
+    // JSON: parse directly
+    if let Ok(v) = serde_json::from_str::<Value>(text) {
+        return v.pointer("/result/tools")
+            .or_else(|| v.get("tools"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+    }
+    vec![]
 }
