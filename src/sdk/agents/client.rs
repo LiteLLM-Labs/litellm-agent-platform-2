@@ -87,7 +87,7 @@ impl Lap {
         response_json(response).await
     }
 
-    pub(super) async fn get(
+    pub(crate) async fn get(
         &self,
         runtime: AgentRuntime,
         path: &str,

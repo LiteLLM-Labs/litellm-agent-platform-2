@@ -121,6 +121,22 @@ impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
                 .await
         })
     }
+
+    fn list_events<'a>(
+        &'a self,
+        client: &'a Lap,
+        session_id: &'a str,
+    ) -> AdapterFuture<'a, serde_json::Value> {
+        Box::pin(async move {
+            let provider_session_id = provider_session_id(client, session_id)?;
+            client
+                .get(
+                    AgentRuntime::ClaudeManagedAgents,
+                    &format!("/v1/sessions/{provider_session_id}/events"),
+                )
+                .await
+        })
+    }
 }
 
 fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> {
@@ -143,7 +159,6 @@ fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> 
     Ok(body)
 }
 
-#[allow(dead_code)]
 fn provider_session_id(client: &Lap, session_id: &str) -> Result<String, AgentSdkError> {
     Ok(client
         .context_for_session(session_id)?
