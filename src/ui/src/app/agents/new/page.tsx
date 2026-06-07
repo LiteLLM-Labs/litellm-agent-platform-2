@@ -40,6 +40,7 @@ import {
   withRuntimeDefaultTools,
 } from "@/lib/agent-builder";
 import type { AgentDraft, AgentTemplate } from "@/lib/agent-builder";
+import { INTEGRATIONS } from "@/lib/integrations";
 import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes, listModels } from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
 import type { AgentRuntime } from "@/lib/types";
@@ -796,6 +797,58 @@ function AgentDraftControls({
             ))}
           </div>
         </div>
+
+        <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-sm font-medium">MCP integrations</Label>
+            <span className="font-mono text-xs text-[#9d9384]">
+              {draft.mcp_server_ids.length} connected
+            </span>
+          </div>
+          <div className="grid gap-2">
+            {INTEGRATIONS.map((integration) => {
+              const enabled = draft.mcp_server_ids.includes(integration.id);
+              const toggle = (on: boolean) => {
+                const next = on
+                  ? [...draft.mcp_server_ids, integration.id]
+                  : draft.mcp_server_ids.filter((id) => id !== integration.id);
+                update({ mcp_server_ids: next });
+              };
+              return (
+                <label
+                  key={integration.id}
+                  className="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs hover:bg-white/10"
+                >
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => toggle(e.target.checked)}
+                    className="mt-0.5 size-3.5 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{integration.name}</span>
+                      <span className="truncate font-mono text-[#9d9384]">{integration.envKey}</span>
+                    </div>
+                    <div className="mt-0.5 text-[#9d9384]">{integration.description}</div>
+                    {enabled && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {integration.tools.map((tool) => (
+                          <span
+                            key={tool}
+                            className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#c9c0b1]"
+                          >
+                            {tool}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -828,6 +881,7 @@ function ConfigPreview({ draft }: { draft: AgentDraft }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <TokenList label="Vault keys" values={draft.vault_keys} />
           <TokenList label="Skill IDs" values={draft.skill_ids} />
+          <TokenList label="MCP integrations" values={draft.mcp_server_ids} />
         </div>
       </div>
     </div>

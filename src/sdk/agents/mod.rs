@@ -1,5 +1,4 @@
 mod client;
-mod cursor;
 mod events;
 mod opencode;
 mod opencode_stream;
