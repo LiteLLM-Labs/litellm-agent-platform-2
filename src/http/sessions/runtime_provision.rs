@@ -1,6 +1,5 @@
 use serde_json::Value;
 use sqlx::PgPool;
-
 use crate::{
     db::managed_agents::{
         runtime_refs::{self, schema::UpsertRuntimeRef},
@@ -25,14 +24,7 @@ use super::{
     },
     runtime_sdk::agent_sdk_error,
 };
-
-struct RuntimeProvision {
-    runtime_agent_id: String,
-    provider_session_id: Option<String>,
-    provider_run_id: Option<String>,
-    provider_url: Option<String>,
-    metadata: Value,
-}
+struct RuntimeProvision { runtime_agent_id: String, provider_session_id: Option<String>, provider_run_id: Option<String>, provider_url: Option<String>, metadata: Value }
 
 pub(super) async fn provision_runtime_session(
     state: &AppState,
@@ -288,30 +280,20 @@ async fn persist_runtime_refs(
 }
 
 fn integration_mcp_toolsets(config: &Value) -> Vec<Value> {
-    let server_names: std::collections::HashSet<&str> = config
-        .get("mcp_servers")
-        .and_then(Value::as_array)
-        .map(|servers| {
-            servers
-                .iter()
-                .filter_map(|s| s.get("name").and_then(Value::as_str))
-                .collect()
-        })
+    let names: std::collections::HashSet<&str> = config
+        .get("mcp_servers").and_then(Value::as_array)
+        .map(|ss| ss.iter().filter_map(|s| s.get("name").and_then(Value::as_str)).collect())
         .unwrap_or_default();
     config
-        .get("tools")
-        .and_then(Value::as_array)
+        .get("tools").and_then(Value::as_array)
         .map(|tools| {
-            tools
-                .iter()
+            tools.iter()
                 .filter(|t| {
                     t.get("type").and_then(Value::as_str) == Some("mcp_toolset")
-                        && t.get("mcp_server_name")
-                            .and_then(Value::as_str)
-                            .is_some_and(|name| server_names.contains(name))
+                        && t.get("mcp_server_name").and_then(Value::as_str)
+                            .is_some_and(|n| names.contains(n))
                 })
-                .cloned()
-                .collect()
+                .cloned().collect()
         })
         .unwrap_or_default()
 }

@@ -1,3 +1,4 @@
+mod authorization;
 pub(crate) mod config;
 mod dispatch;
 pub(crate) mod dm_api;
@@ -5,6 +6,7 @@ mod events;
 mod form;
 mod interactivity;
 pub(crate) mod manifest_api;
+mod members;
 mod message;
 mod oauth;
 mod replies;
@@ -14,8 +16,12 @@ mod reply_storage;
 mod reply_stream;
 mod signature;
 pub(crate) mod types;
+pub(super) mod users;
 pub(crate) mod web_api;
 
+pub use authorization::authorize_slack_invocation;
 pub use events::events;
 pub use interactivity::interactivity;
+pub use members::members as slack_members;
+pub use members::update_access as slack_update_access;
 pub use oauth::{oauth_callback, oauth_state};

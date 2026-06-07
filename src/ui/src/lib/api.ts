@@ -1232,6 +1232,37 @@ export async function createSlackOAuthState(agentId: string): Promise<string> {
   return data.state;
 }
 
+export interface SlackChannelMember {
+  id: string;
+  name: string;
+  real_name?: string;
+  is_bot?: boolean;
+  profile?: { display_name?: string; image_48?: string };
+}
+
+export interface SlackChannelMembersResponse {
+  members: SlackChannelMember[];
+  access: string;
+  allowed_user_ids: string[];
+}
+
+export async function listSlackChannelMembers(agentId: string): Promise<SlackChannelMembersResponse> {
+  const res = await req(`/api/agents/${encodeURIComponent(agentId)}/channels/slack/members`);
+  return jsonOrThrow<SlackChannelMembersResponse>(res);
+}
+
+export async function updateSlackChannelAccess(
+  agentId: string,
+  body: { access: string; allowed_user_ids: string[] },
+): Promise<void> {
+  const res = await req(`/api/agents/${encodeURIComponent(agentId)}/channels/slack/access`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new ApiError(await res.text(), res.status);
+}
+
 export async function deleteAgent(id: string): Promise<void> {
   await req(`/api/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

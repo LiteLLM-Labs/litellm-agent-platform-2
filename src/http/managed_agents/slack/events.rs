@@ -16,7 +16,7 @@ use crate::{
 use super::{
     config::{load_agent, load_secret, signing_secret_key, slack_config},
     message::{incoming_message, session_prompt},
-    replies::spawn_slack_prompt,
+    replies::{post_denial_ephemeral, spawn_slack_prompt},
     signature,
     types::{SlackAgentConfig, SlackIncomingMessage},
 };
@@ -58,6 +58,15 @@ async fn handle_event_callback(
     let Some(message) = incoming_message(payload) else {
         return Ok(());
     };
+    let team_id = payload.get("team_id").and_then(Value::as_str).unwrap_or("");
+    let user_id = payload.get("event").and_then(|e| e.get("user")).and_then(Value::as_str).unwrap_or("");
+    if super::authorize_slack_invocation(&pool, &agent.id, user_id, team_id)
+        .await
+        .is_err()
+    {
+        post_denial_ephemeral(&state, &agent, &config, payload, user_id).await;
+        return Ok(());
+    }
     let (agent, config) =
         super::dispatch::route_agent(&pool, agent, config, payload, &message).await?;
     let event_key = slack_event_key(payload, &message);
