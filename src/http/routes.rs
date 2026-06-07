@@ -113,7 +113,7 @@ fn mcp_routes() -> Router<Arc<AppState>> {
 }
 
 fn mcp_registry_routes() -> Router<Arc<AppState>> {
-    use crate::http::mcp_registry::{admin, proxy, public, tools, user_credentials};
+    use crate::http::mcp_registry::{admin, discover, proxy, public, tools, user_credentials};
     Router::new()
         // Public (no auth)
         .route("/public/mcp_hub", get(public::mcp_hub))
@@ -121,6 +121,8 @@ fn mcp_registry_routes() -> Router<Arc<AppState>> {
             "/v1/mcp/server/{server_id}/tools",
             get(tools::list_tools).post(tools::test_tools),
         )
+        // Discover tools from an arbitrary URL (no saved server required)
+        .route("/v1/mcp/discover", post(discover::discover_tools))
         // Admin CRUD
         .route(
             "/v1/mcp/server",

@@ -77,7 +77,7 @@ fn apply_static_headers(
     req
 }
 
-async fn fetch_tools(req: reqwest::RequestBuilder) -> Result<Vec<Value>, GatewayError> {
+pub(super) async fn fetch_tools(req: reqwest::RequestBuilder) -> Result<Vec<Value>, GatewayError> {
     let res = req
         .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
         .send()
@@ -93,7 +93,9 @@ async fn fetch_tools(req: reqwest::RequestBuilder) -> Result<Vec<Value>, Gateway
         let text = res.text().await.map_err(GatewayError::Upstream)?;
         Ok(extract_tools_from_response(&text, &ct))
     } else {
-        Ok(vec![])
+        let status = res.status().as_u16();
+        let body = res.text().await.unwrap_or_default();
+        Err(GatewayError::UpstreamHttp(status, body))
     }
 }
 
@@ -133,10 +135,11 @@ pub async fn list_tools(
     } else {
         HashMap::new()
     };
-    let tools_url = substitute_vars(url.trim_end_matches('/'), &vars);
+    let tools_url = substitute_vars(url, &vars);
+    let tools_url = tools_url.trim_end_matches('/');
     let req = state
         .http
-        .post(&tools_url)
+        .post(tools_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream");
     let req = apply_static_headers(req, &server.static_headers, &vars);
@@ -228,10 +231,11 @@ pub async fn test_tools(
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref()).ok();
     let mut vars = build_instance_vars(&server, enc_key_opt.as_deref());
     vars.extend(body.variables);
-    let tools_url = substitute_vars(url.trim_end_matches('/'), &vars);
+    let tools_url = substitute_vars(url, &vars);
+    let tools_url = tools_url.trim_end_matches('/');
     let req = state
         .http
-        .post(&tools_url)
+        .post(tools_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream");
     let req = apply_static_headers(req, &server.static_headers, &vars);

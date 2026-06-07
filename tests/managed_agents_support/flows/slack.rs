@@ -29,9 +29,12 @@ pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
     assert_slack_api_call_count(fixture, "/chat.postMessage", post_baseline + 1).await;
     assert_slack_api_called(fixture, "/chat.update").await;
     send_channel_thread_reply(fixture, agent_id).await;
+    // Wait for the thread-reply response before capturing the baseline in
+    // enable_and_assert_slack_messages so the count is deterministic.
+    assert_slack_api_call_count(fixture, "/chat.postMessage", post_baseline + 2).await;
     super::slack_mcp::enable_and_assert_slack_messages(fixture, agent_id).await;
     assert_slack_api_call_count(fixture, "/reactions.add", reaction_baseline + 2).await;
-    assert_slack_api_call_count(fixture, "/chat.postMessage", post_baseline + 2).await;
+    assert_slack_api_call_count(fixture, "/chat.postMessage", post_baseline + 4).await;
     assert_interactivity_accepts_approval(fixture, agent_id).await;
 }
 
