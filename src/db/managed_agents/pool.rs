@@ -18,8 +18,7 @@ pub async fn migrate(pool: &PgPool) -> Result<(), GatewayError> {
 }
 
 /// Like `migrate`, but drops `_sqlx_migrations` first so stale checksums never block CI.
-/// Only use in test setup — never in production.
-#[cfg(test)]
+/// Only for test setup — never call in production code.
 pub async fn migrate_fresh(pool: &PgPool) -> Result<(), GatewayError> {
     sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations")
         .execute(pool)
