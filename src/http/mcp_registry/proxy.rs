@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     body::{Body, Bytes},
@@ -51,15 +51,12 @@ pub async fn dynamic_mcp(
     // Forward to the server URL as-is; the registered URL is the full endpoint.
     let target_url = base_url.trim_end_matches('/').to_owned();
 
-    // ── 3. Resolve credential ─────────────────────────────────────────────────
+    // ── 3. Resolve variables ──────────────────────────────────────────────────
     let user_id = caller_user_id(&headers, &state);
     let enc_key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
 
-    let credential: Option<String> =
-        resolve_user_credential(pool, &server.server_id, &user_id, &enc_key)
-            .await?
-            .or_else(|| resolve_server_credential(&server.credentials, &enc_key));
+    let vars = resolve_variables(pool, &server, &user_id, &enc_key).await?;
 
     // ── 4. Build outbound request ─────────────────────────────────────────────
     let reqwest_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
@@ -72,13 +69,15 @@ pub async fn dynamic_mcp(
         req = req.header(name, value);
     }
 
-    // Inject configured static headers (always sent, last to win on conflict).
+    // Inject static headers with variable substitution.
+    let has_static_headers = server.static_headers.as_object().map_or(false, |o| !o.is_empty());
     if let Some(obj) = server.static_headers.as_object() {
         for (name, val) in obj {
-            if let Some(v) = val.as_str() {
+            if let Some(template) = val.as_str() {
+                let resolved = substitute_vars(template, &vars);
                 if let (Ok(n), Ok(hv)) = (
                     HeaderName::from_bytes(name.as_bytes()),
-                    HeaderValue::from_str(v),
+                    HeaderValue::from_str(&resolved),
                 ) {
                     req = req.header(n, hv);
                 }
@@ -86,9 +85,15 @@ pub async fn dynamic_mcp(
         }
     }
 
-    // Inject auth header.
-    if let Some(cred) = credential {
-        req = apply_auth(req, server.auth_type.as_deref(), &cred);
+    // Backwards-compat: fall back to apply_auth if no static_headers and auth_type is set.
+    if !has_static_headers {
+        let credential: Option<String> =
+            resolve_user_credential(pool, &server.server_id, &user_id, &enc_key)
+                .await?
+                .or_else(|| resolve_server_credential(&server.credentials, &enc_key));
+        if let Some(cred) = credential {
+            req = apply_auth(req, server.auth_type.as_deref(), &cred);
+        }
     }
 
     if !body.is_empty() {
@@ -108,6 +113,79 @@ pub async fn dynamic_mcp(
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+/// Build a variable substitution map from the server's `mcp_info["variables"]` array.
+///
+/// Each variable has `{name, scope, description}`. Resolution:
+/// - `scope = "instance"`: decrypt from `server.credentials[name]`; fall back to plaintext.
+/// - `scope = "per_user"`: fetch from vault as `mcp_var:{server_id}:{var_name}` owned by user_id.
+async fn resolve_variables(
+    pool: &sqlx::PgPool,
+    server: &crate::db::mcp_servers::schema::McpServerRow,
+    user_id: &str,
+    enc_key: &str,
+) -> Result<HashMap<String, String>, GatewayError> {
+    let mut map = HashMap::new();
+
+    let vars = match server
+        .mcp_info
+        .get("variables")
+        .and_then(|v| v.as_array())
+    {
+        Some(arr) => arr.clone(),
+        None => return Ok(map),
+    };
+
+    for var in &vars {
+        let name = match var.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        let scope = var.get("scope").and_then(|v| v.as_str()).unwrap_or("instance");
+
+        let value: Option<String> = if scope == "per_user" {
+            // Fetch from personal vault: key = mcp_var:{server_id}:{var_name}
+            let vault_key = format!("mcp_var:{}:{}", server.server_id, name);
+            credentials::get_personal_by_name(pool, &vault_key, user_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|row| {
+                    row.credential_values
+                        .get("value")
+                        .and_then(|v| v.as_str())
+                        .and_then(|enc| credential_crypto::decrypt_value(enc, enc_key).ok())
+                })
+        } else {
+            // scope = "instance": resolve from server.credentials[name]
+            server
+                .credentials
+                .get(name)
+                .and_then(|v| v.as_str())
+                .map(|raw| {
+                    // Try decryption first; fall back to plaintext if it fails.
+                    credential_crypto::decrypt_value(raw, enc_key)
+                        .unwrap_or_else(|_| raw.to_owned())
+                })
+        };
+
+        if let Some(v) = value {
+            map.insert(name.to_owned(), v);
+        }
+    }
+
+    Ok(map)
+}
+
+/// Replace all `${VAR_NAME}` occurrences in `template` with values from `vars`.
+fn substitute_vars(template: &str, vars: &HashMap<String, String>) -> String {
+    let mut result = template.to_owned();
+    for (name, value) in vars {
+        let placeholder = format!("${{{}}}", name);
+        result = result.replace(&placeholder, value);
+    }
+    result
+}
 
 /// Look up the personal vault key for this (server, user) pair and decrypt it.
 /// Key format: `mcp_user:{server_id}:{user_id}`

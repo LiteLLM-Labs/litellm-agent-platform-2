@@ -8,6 +8,10 @@ import {
   Trash2,
   Loader2,
   Search,
+  Info,
+  X,
+  ChevronDown,
+  Zap,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -33,6 +37,18 @@ import {
 import type { McpToolDef } from "@/lib/api";
 import type { McpServer } from "@/lib/types";
 
+// ── Variable / header types ────────────────────────────────────────────────────
+
+type VariableScope = "instance" | "per_user";
+
+interface VariableDef {
+  name: string;
+  description: string;
+  scope: VariableScope;
+  /** Only meaningful for scope=instance — stored as plaintext for now (encryption is a follow-up). */
+  value: string;
+}
+
 // ── Form state ────────────────────────────────────────────────────────────────
 
 interface FormState {
@@ -41,10 +57,10 @@ interface FormState {
   description: string;
   url: string;
   transport: string;
-  auth_type: string;
-  is_byok: boolean;
-  byok_description: string;
-  byok_api_key_help_url: string;
+  /** Variables table: defines the credential/config contract for this server */
+  variables: VariableDef[];
+  /** Static headers sent to the MCP server; values may reference ${VAR_NAME} */
+  static_headers: { name: string; value: string }[];
   /** Array of selected tool names. Empty = allow all. */
   allowed_tools: string[];
   /** Fallback raw text when discovery hasn't been attempted or failed. */
@@ -58,10 +74,8 @@ const EMPTY_FORM: FormState = {
   description: "",
   url: "",
   transport: "sse",
-  auth_type: "none",
-  is_byok: false,
-  byok_description: "",
-  byok_api_key_help_url: "",
+  variables: [],
+  static_headers: [],
   allowed_tools: [],
   allowed_tools_text: "",
   available_on_public_internet: false,
@@ -69,16 +83,49 @@ const EMPTY_FORM: FormState = {
 
 function serverToForm(s: McpServer): FormState {
   const tools = s.allowed_tools ?? [];
+
+  // Reconstruct variables from mcp_info.variables (new shape) or fall back to
+  // legacy byok_description for servers saved with the old form.
+  const rawVars = (s as Record<string, unknown>)["mcp_info"] as
+    | { variables?: Array<{ name: string; description?: string; scope?: string }> }
+    | undefined;
+  const rawCreds = (s as Record<string, unknown>)["credentials"] as
+    | Record<string, string>
+    | undefined;
+  const rawHeaders = (s as Record<string, unknown>)["static_headers"] as
+    | Record<string, string>
+    | undefined;
+
+  let variables: VariableDef[] = [];
+  if (rawVars?.variables && rawVars.variables.length > 0) {
+    variables = rawVars.variables.map((v) => ({
+      name: v.name ?? "",
+      description: v.description ?? "",
+      scope: (v.scope === "per_user" ? "per_user" : "instance") as VariableScope,
+      value: rawCreds?.[v.name] ?? "",
+    }));
+  } else if (s.is_byok && s.byok_description && s.byok_description.length > 0) {
+    // Migrate legacy BYOK key names to per_user variables.
+    variables = s.byok_description.map((name) => ({
+      name,
+      description: "",
+      scope: "per_user" as VariableScope,
+      value: "",
+    }));
+  }
+
+  const static_headers: { name: string; value: string }[] = rawHeaders
+    ? Object.entries(rawHeaders).map(([name, value]) => ({ name, value }))
+    : [];
+
   return {
     server_name: s.server_name ?? "",
     alias: s.alias ?? "",
     description: s.description ?? "",
     url: s.url ?? "",
     transport: s.transport ?? "sse",
-    auth_type: s.auth_type ?? "none",
-    is_byok: s.is_byok ?? false,
-    byok_description: (s.byok_description ?? []).join(", "),
-    byok_api_key_help_url: s.byok_api_key_help_url ?? "",
+    variables,
+    static_headers,
     allowed_tools: tools,
     allowed_tools_text: tools.join(", "),
     available_on_public_internet: s.available_on_public_internet ?? false,
@@ -86,10 +133,6 @@ function serverToForm(s: McpServer): FormState {
 }
 
 function formToPayload(f: FormState, discoveredTools: McpToolDef[] | null): Partial<McpServer> {
-  const byok = f.byok_description
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
   // If we have discovery results, use the checkbox selection; otherwise parse the text field.
   const tools =
     discoveredTools !== null
@@ -98,19 +141,53 @@ function formToPayload(f: FormState, discoveredTools: McpToolDef[] | null): Part
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean);
+
+  const hasPerUserVars = f.variables.some((v) => v.scope === "per_user");
+  const perUserVarNames = f.variables
+    .filter((v) => v.scope === "per_user")
+    .map((v) => v.name);
+
+  // Instance variable values go into credentials (plaintext for now — encryption is a follow-up).
+  const credentials: Record<string, string> = {};
+  for (const v of f.variables) {
+    if (v.scope === "instance" && v.value.trim()) {
+      credentials[v.name] = v.value.trim();
+    }
+  }
+
+  // Static headers as a flat record.
+  const static_headers: Record<string, string> = {};
+  for (const h of f.static_headers) {
+    if (h.name.trim()) {
+      static_headers[h.name.trim()] = h.value;
+    }
+  }
+
+  // Variable definitions (no values) stored in mcp_info.
+  const mcp_info = {
+    variables: f.variables.map((v) => ({
+      name: v.name,
+      description: v.description,
+      scope: v.scope,
+    })),
+  };
+
   return {
     server_name: f.server_name.trim() || undefined,
     alias: f.alias.trim() || undefined,
     description: f.description.trim() || undefined,
     url: f.url.trim(),
     transport: f.transport,
-    auth_type: f.auth_type === "none" ? undefined : f.auth_type,
-    is_byok: f.is_byok,
-    byok_description: byok.length ? byok : undefined,
-    byok_api_key_help_url: f.byok_api_key_help_url.trim() || undefined,
+    // BYOK backwards-compat: true if any per-user variable exists.
+    is_byok: hasPerUserVars,
+    byok_description: perUserVarNames.length ? perUserVarNames : undefined,
+    // New fields.
+    mcp_info,
+    credentials: Object.keys(credentials).length ? credentials : undefined,
+    static_headers: Object.keys(static_headers).length ? static_headers : undefined,
     allowed_tools: tools.length ? tools : undefined,
     available_on_public_internet: f.available_on_public_internet,
-  };
+  } as Partial<McpServer>;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -327,6 +404,386 @@ function ServerRow({
   );
 }
 
+// ── Small helpers ─────────────────────────────────────────────────────────────
+
+function SectionHeader({ label, tooltip }: { label: string; tooltip: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-sm font-medium">{label}</span>
+      <span
+        title={tooltip}
+        className="cursor-help text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Info className="size-3.5" />
+      </span>
+    </div>
+  );
+}
+
+// ── Variables table ───────────────────────────────────────────────────────────
+
+function VariablesTable({
+  variables,
+  onChange,
+}: {
+  variables: VariableDef[];
+  onChange: (vars: VariableDef[]) => void;
+}) {
+  const addRow = () =>
+    onChange([
+      ...variables,
+      { name: "", description: "", scope: "per_user", value: "" },
+    ]);
+
+  const removeRow = (idx: number) =>
+    onChange(variables.filter((_, i) => i !== idx));
+
+  const patchRow = <K extends keyof VariableDef>(
+    idx: number,
+    key: K,
+    value: VariableDef[K],
+  ) => {
+    const next = variables.map((v, i) => (i === idx ? { ...v, [key]: value } : v));
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <SectionHeader
+          label="Variables"
+          tooltip="Define variables that will be available in headers as ${VAR_NAME}. Per-user variables are filled in by each user; Instance variables are set once by the admin."
+        />
+      </div>
+
+      {variables.length > 0 && (
+        <div className="rounded-md border border-border overflow-hidden">
+          {/* header */}
+          <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-0 border-b border-border bg-muted/40">
+            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+              Variable name
+            </div>
+            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+              Description
+            </div>
+            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+              Scope
+            </div>
+            <div className="w-8" />
+          </div>
+
+          {variables.map((v, idx) => (
+            <div key={idx} className="border-b border-border last:border-b-0">
+              <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-0 items-center">
+                <div className="px-3 py-2 border-r border-border">
+                  <input
+                    value={v.name}
+                    onChange={(e) => patchRow(idx, "name", e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
+                    placeholder="VAR_NAME"
+                    className="w-full bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60"
+                  />
+                </div>
+                <div className="px-3 py-2 border-r border-border">
+                  <input
+                    value={v.description}
+                    onChange={(e) => patchRow(idx, "description", e.target.value)}
+                    placeholder="Short description"
+                    className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+                  />
+                </div>
+                <div className="px-3 py-2 border-r border-border">
+                  <div className="relative flex items-center">
+                    <select
+                      value={v.scope}
+                      onChange={(e) => patchRow(idx, "scope", e.target.value as VariableScope)}
+                      className="appearance-none bg-transparent text-xs outline-none pr-5 cursor-pointer"
+                    >
+                      <option value="per_user">Per-user</option>
+                      <option value="instance">Instance</option>
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-0 size-3 text-muted-foreground" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-center w-8">
+                  <button
+                    type="button"
+                    onClick={() => removeRow(idx)}
+                    className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                    aria-label="Remove variable"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Inline value input for instance-scoped variables */}
+              {v.scope === "instance" && (
+                <div className="px-3 pb-2 pt-0 bg-muted/20 border-t border-dashed border-border">
+                  <label className="block text-[10px] text-muted-foreground mb-1 mt-1">
+                    Value{" "}
+                    <span className="text-muted-foreground/60">
+                      (admin-set, shared across all users — encryption coming soon)
+                    </span>
+                  </label>
+                  <input
+                    type="password"
+                    value={v.value}
+                    onChange={(e) => patchRow(idx, "value", e.target.value)}
+                    placeholder="Enter value…"
+                    className="w-full rounded border border-input bg-background px-2 py-1 font-mono text-xs outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={addRow}
+        className="h-7 gap-1.5 text-xs"
+      >
+        <Plus className="size-3" />
+        Add Variable
+      </Button>
+    </div>
+  );
+}
+
+// ── Static headers table ──────────────────────────────────────────────────────
+
+function StaticHeadersTable({
+  headers,
+  onChange,
+}: {
+  headers: { name: string; value: string }[];
+  onChange: (h: { name: string; value: string }[]) => void;
+}) {
+  const addRow = () => onChange([...headers, { name: "", value: "" }]);
+  const removeRow = (idx: number) => onChange(headers.filter((_, i) => i !== idx));
+  const patchRow = (idx: number, key: "name" | "value", value: string) => {
+    const next = headers.map((h, i) => (i === idx ? { ...h, [key]: value } : h));
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <SectionHeader
+          label="Static Headers"
+          tooltip="Headers sent to the MCP server on every request. Use ${VAR_NAME} to reference variables defined above."
+        />
+      </div>
+
+      {headers.length > 0 && (
+        <div className="rounded-md border border-border overflow-hidden">
+          <div className="grid grid-cols-[1fr_1fr_auto] gap-0 border-b border-border bg-muted/40">
+            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+              Header name
+            </div>
+            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+              Value
+            </div>
+            <div className="w-8" />
+          </div>
+
+          {headers.map((h, idx) => (
+            <div
+              key={idx}
+              className="grid grid-cols-[1fr_1fr_auto] gap-0 items-center border-b border-border last:border-b-0"
+            >
+              <div className="px-3 py-2 border-r border-border">
+                <input
+                  value={h.name}
+                  onChange={(e) => patchRow(idx, "name", e.target.value)}
+                  placeholder="x-api-key"
+                  className="w-full bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60"
+                />
+              </div>
+              <div className="px-3 py-2 border-r border-border">
+                <input
+                  value={h.value}
+                  onChange={(e) => patchRow(idx, "value", e.target.value)}
+                  placeholder="${VAR_NAME}"
+                  className="w-full bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60"
+                />
+              </div>
+              <div className="flex items-center justify-center w-8">
+                <button
+                  type="button"
+                  onClick={() => removeRow(idx)}
+                  className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                  aria-label="Remove header"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={addRow}
+        className="h-7 gap-1.5 text-xs"
+      >
+        <Plus className="size-3" />
+        Add Header
+      </Button>
+    </div>
+  );
+}
+
+// ── Test connection panel ─────────────────────────────────────────────────────
+
+function TestConnectionPanel({
+  serverId,
+  variables,
+}: {
+  serverId: string;
+  variables: VariableDef[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [testValues, setTestValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<
+    { tools: McpToolDef[] } | { error: string } | null
+  >(null);
+
+  const perUserVars = variables.filter((v) => v.scope === "per_user");
+  const instanceVars = variables.filter((v) => v.scope === "instance");
+
+  const run = async () => {
+    setLoading(true);
+    setResult(null);
+    try {
+      const tools = await listMcpServerTools(serverId);
+      setResult({ tools });
+    } catch (e) {
+      setResult({ error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen(true)}
+        className="h-7 gap-1.5 text-xs"
+      >
+        <Zap className="size-3" />
+        Test connection
+      </Button>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-border p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium">Test connection</span>
+        <button
+          type="button"
+          onClick={() => { setOpen(false); setResult(null); }}
+          className="text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+
+      {(perUserVars.length > 0 || instanceVars.length > 0) && (
+        <div className="space-y-2">
+          {instanceVars.map((v) => (
+            <div key={v.name} className="space-y-1">
+              <label className="text-[10px] text-muted-foreground font-mono">
+                {v.name}{" "}
+                <span className="text-muted-foreground/60">(instance — pre-filled)</span>
+              </label>
+              <Input
+                value={v.value}
+                disabled
+                className="h-7 text-xs font-mono"
+                placeholder="(set in form)"
+              />
+            </div>
+          ))}
+          {perUserVars.map((v) => (
+            <div key={v.name} className="space-y-1">
+              <label className="text-[10px] font-mono">
+                Test value for{" "}
+                <span className="font-semibold">{v.name}</span>
+                {v.description && (
+                  <span className="text-muted-foreground ml-1">— {v.description}</span>
+                )}
+              </label>
+              <Input
+                value={testValues[v.name] ?? ""}
+                onChange={(e) =>
+                  setTestValues((prev) => ({ ...prev, [v.name]: e.target.value }))
+                }
+                placeholder={`Enter ${v.name}…`}
+                className="h-7 text-xs font-mono"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Button
+        type="button"
+        size="sm"
+        onClick={run}
+        disabled={loading}
+        className="h-7 gap-1.5 text-xs"
+      >
+        {loading ? (
+          <Loader2 className="size-3 animate-spin" />
+        ) : (
+          <Zap className="size-3" />
+        )}
+        {loading ? "Testing…" : "Run test"}
+      </Button>
+
+      {result && "error" in result && (
+        <p className="text-xs text-destructive">{result.error}</p>
+      )}
+
+      {result && "tools" in result && (
+        <div className="space-y-1">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">
+            Tools returned ({result.tools.length})
+          </p>
+          {result.tools.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No tools found.</p>
+          ) : (
+            <div className="rounded border border-border divide-y divide-border max-h-32 overflow-y-auto">
+              {result.tools.map((t) => (
+                <div key={t.name} className="px-2 py-1.5">
+                  <span className="font-mono text-xs font-medium">{t.name}</span>
+                  {t.description && (
+                    <span className="ml-2 text-[11px] text-muted-foreground">
+                      {t.description}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Add/Edit modal ────────────────────────────────────────────────────────────
 
 function McpServerEditor({
@@ -382,9 +839,7 @@ function McpServerEditor({
       setDiscoveredTools(tools);
       // Pre-select tools that were already in allowed_tools
       const alreadySelected = new Set(form.allowed_tools);
-      if (alreadySelected.size > 0) {
-        // Keep existing selection intact — it was loaded from the saved server.
-      } else {
+      if (alreadySelected.size === 0) {
         // No prior selection: select all by default so the admin can uncheck unwanted ones.
         setForm((f) => ({ ...f, allowed_tools: tools.map((t) => t.name) }));
       }
@@ -430,7 +885,7 @@ function McpServerEditor({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="w-[92vw] sm:max-w-xl max-h-[88vh] flex flex-col gap-0 p-0">
+      <DialogContent className="w-[92vw] sm:max-w-2xl max-h-[88vh] flex flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
           <DialogTitle>{isEdit ? "Edit MCP Server" : "Add MCP Server"}</DialogTitle>
           <DialogDescription>
@@ -440,7 +895,7 @@ function McpServerEditor({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
           {/* server_name */}
           <div className="space-y-1.5">
             <Label htmlFor="mcp-server-name">Server name</Label>
@@ -505,65 +960,31 @@ function McpServerEditor({
             </select>
           </div>
 
-          {/* auth_type */}
-          <div className="space-y-1.5">
-            <Label htmlFor="mcp-auth-type">Auth type</Label>
-            <select
-              id="mcp-auth-type"
-              value={form.auth_type}
-              onChange={(e) => patch("auth_type", e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              <option value="none">None</option>
-              <option value="bearer_token">Bearer token</option>
-              <option value="api_key">API key</option>
-              <option value="basic">Basic auth</option>
-            </select>
-          </div>
+          {/* divider */}
+          <div className="border-t border-border" />
 
-          {/* is_byok */}
-          <div className="space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={form.is_byok}
-                onChange={(e) => patch("is_byok", e.target.checked)}
-                className="rounded"
-              />
-              <span className="text-sm font-medium">
-                Users provide their own key (BYOK)
-              </span>
-            </label>
+          {/* Variables */}
+          <VariablesTable
+            variables={form.variables}
+            onChange={(vars) => patch("variables", vars)}
+          />
 
-            {form.is_byok && (
-              <div className="ml-6 space-y-3 rounded-md border border-border p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="mcp-byok-desc" className="text-xs">
-                    Key names <span className="text-muted-foreground">(comma-separated)</span>
-                  </Label>
-                  <Input
-                    id="mcp-byok-desc"
-                    value={form.byok_description}
-                    onChange={(e) => patch("byok_description", e.target.value)}
-                    placeholder="MY_API_KEY, MY_SECRET"
-                    className="font-mono text-xs"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="mcp-byok-url" className="text-xs">
-                    Help URL <span className="text-muted-foreground">(optional)</span>
-                  </Label>
-                  <Input
-                    id="mcp-byok-url"
-                    value={form.byok_api_key_help_url}
-                    onChange={(e) => patch("byok_api_key_help_url", e.target.value)}
-                    placeholder="https://docs.example.com/api-keys"
-                    className="text-xs"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Static Headers */}
+          <StaticHeadersTable
+            headers={form.static_headers}
+            onChange={(h) => patch("static_headers", h)}
+          />
+
+          {/* Test connection (only when editing an existing server) */}
+          {isEdit && (
+            <TestConnectionPanel
+              serverId={(serverOrNew as McpServer).server_id}
+              variables={form.variables}
+            />
+          )}
+
+          {/* divider */}
+          <div className="border-t border-border" />
 
           {/* allowed_tools */}
           <div className="space-y-2">

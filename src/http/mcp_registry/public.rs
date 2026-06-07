@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     extract::{Path, State},
@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db::mcp_servers::{repository, schema::McpServerRow},
+    db::{credentials, mcp_servers::{repository, schema::McpServerRow}},
     errors::GatewayError,
-    proxy::{auth::master_key::require_any_gateway_key, state::AppState},
+    proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
 
 // ── response types ─────────────────────────────────────────────────────────────
@@ -171,13 +171,78 @@ pub async fn list_tools(
             GatewayError::InvalidConfig("MCP server has no URL configured".to_owned())
         })?;
 
-    // Call tools/list on the MCP server via the registered endpoint URL.
+    // Resolve variables for header substitution
+    let user_id = super::caller_user_id(&headers, &state);
+    let enc_key_opt = credential_crypto::encryption_key(
+        state.config.general_settings.master_key.as_deref()
+    ).ok();
+
+    // Build substitution map from mcp_info["variables"]
+    let vars: HashMap<String, String> = if let Some(key) = enc_key_opt.as_deref() {
+        build_vars_map(pool, &server, &user_id, key).await
+    } else {
+        HashMap::new()
+    };
+
+    // Call tools/list on the MCP server
     let tools_url = url.trim_end_matches('/').to_owned();
-    let res = state
+    let mut req = state
         .http
         .post(&tools_url)
         .header("Content-Type", "application/json")
-        .header("Accept", "application/json, text/event-stream")
+        .header("Accept", "application/json, text/event-stream");
+
+    // Inject static headers with variable substitution.
+    let has_static_headers = server.static_headers.as_object().map_or(false, |o| !o.is_empty());
+    if let Some(obj) = server.static_headers.as_object() {
+        for (name, val) in obj {
+            if let Some(template) = val.as_str() {
+                let resolved = substitute_vars(template, &vars);
+                if let (Ok(n), Ok(hv)) = (
+                    axum::http::HeaderName::from_bytes(name.as_bytes()),
+                    axum::http::HeaderValue::from_str(&resolved),
+                ) {
+                    req = req.header(n, hv);
+                }
+            }
+        }
+    }
+
+    // Backwards-compat: fall back to credential-based auth when no static_headers.
+    if !has_static_headers {
+        if let Some(key) = enc_key_opt.as_deref() {
+            let cred_name = format!("mcp_user:{}:{}", server_id, user_id);
+            let credential: Option<String> =
+                credentials::get_personal_by_name(pool, &cred_name, &user_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|r| {
+                        r.credential_values.get("value")
+                            .and_then(|v| v.as_str())
+                            .and_then(|enc| credential_crypto::decrypt_value(enc, key).ok())
+                    })
+                    .or_else(|| {
+                        server.credentials.get("value")
+                            .and_then(|v| v.as_str())
+                            .and_then(|enc| credential_crypto::decrypt_value(enc, key).ok())
+                            .or_else(|| {
+                                server.credentials.get("api_key")
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_owned)
+                            })
+                    });
+            if let Some(cred) = credential {
+                req = match server.auth_type.as_deref().unwrap_or("bearer_token") {
+                    "api_key" => req.header("x-api-key", cred),
+                    "basic"   => req.header("Authorization", format!("Basic {cred}")),
+                    _         => req.header("Authorization", format!("Bearer {cred}")),
+                };
+            }
+        }
+    }
+
+    let res = req
         .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
         .send()
         .await
@@ -200,6 +265,75 @@ pub async fn list_tools(
         server_id,
         tools,
     }))
+}
+
+/// Build a variable substitution map from a server's `mcp_info["variables"]` array.
+///
+/// - `scope = "instance"`: decrypt from `server.credentials[name]`, fall back to plaintext.
+/// - `scope = "per_user"`: fetch from vault as `mcp_var:{server_id}:{var_name}` owned by user_id.
+async fn build_vars_map(
+    pool: &sqlx::PgPool,
+    server: &McpServerRow,
+    user_id: &str,
+    enc_key: &str,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    let vars = match server
+        .mcp_info
+        .get("variables")
+        .and_then(|v| v.as_array())
+    {
+        Some(arr) => arr.clone(),
+        None => return map,
+    };
+
+    for var in &vars {
+        let name = match var.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+        let scope = var.get("scope").and_then(|v| v.as_str()).unwrap_or("instance");
+
+        let value: Option<String> = if scope == "per_user" {
+            let vault_key = format!("mcp_var:{}:{}", server.server_id, name);
+            credentials::get_personal_by_name(pool, &vault_key, user_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|row| {
+                    row.credential_values
+                        .get("value")
+                        .and_then(|v| v.as_str())
+                        .and_then(|enc| credential_crypto::decrypt_value(enc, enc_key).ok())
+                })
+        } else {
+            server
+                .credentials
+                .get(name)
+                .and_then(|v| v.as_str())
+                .map(|raw| {
+                    credential_crypto::decrypt_value(raw, enc_key)
+                        .unwrap_or_else(|_| raw.to_owned())
+                })
+        };
+
+        if let Some(v) = value {
+            map.insert(name.to_owned(), v);
+        }
+    }
+
+    map
+}
+
+/// Replace all `${VAR_NAME}` occurrences in `template` with values from `vars`.
+fn substitute_vars(template: &str, vars: &HashMap<String, String>) -> String {
+    let mut result = template.to_owned();
+    for (name, value) in vars {
+        let placeholder = format!("${{{}}}", name);
+        result = result.replace(&placeholder, value);
+    }
+    result
 }
 
 fn extract_tools_from_response(text: &str, content_type: &str) -> Vec<Value> {

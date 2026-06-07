@@ -7,8 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { BrandIcon } from "@/components/brand-icons";
-import { storeMcpUserCredential, deleteMcpUserCredential, getStoredMasterKey } from "@/lib/api";
+import { storeMcpUserCredential, storeMcpVarCredential, deleteMcpUserCredential, getStoredMasterKey } from "@/lib/api";
 import type { McpServer } from "@/lib/types";
+
+interface McpVariable {
+  name: string;
+  scope: string;
+  description?: string;
+}
 
 export function IntegrationDialog({
   server,
@@ -24,6 +30,8 @@ export function IntegrationDialog({
   onChange: () => void;
 }) {
   const [apiKey, setApiKey] = useState("");
+  // Per-variable values: { [varName]: value }
+  const [varValues, setVarValues] = useState<Record<string, string>>({});
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +60,14 @@ export function IntegrationDialog({
   const adminTools: string[] = server.allowed_tools ?? [];
   const tools = discoveredTools.length > 0 ? discoveredTools : adminTools;
 
+  // Derive per-user variables from mcp_info.variables
+  const allVars = (server.mcp_info as { variables?: McpVariable[] } | undefined)?.variables ?? [];
+  const perUserVars: McpVariable[] = allVars.filter((v) => v.scope === "per_user");
+  const hasPerUserVars = perUserVars.length > 0;
+
   const reset = () => {
     setApiKey("");
+    setVarValues({});
     setReveal(false);
     setError(null);
     setTestResult(null);
@@ -89,11 +103,23 @@ export function IntegrationDialog({
   };
 
   const onSave = async () => {
-    if (!apiKey.trim()) return;
     setSaving(true);
     setError(null);
     try {
-      await storeMcpUserCredential(server.server_id, apiKey.trim());
+      if (hasPerUserVars) {
+        // Store each per-user variable separately in the vault.
+        await Promise.all(
+          perUserVars.map((v) => {
+            const val = varValues[v.name]?.trim() ?? "";
+            if (!val) return Promise.resolve();
+            return storeMcpVarCredential(server.server_id, v.name, val);
+          }),
+        );
+      } else {
+        // Legacy: single API key credential.
+        if (!apiKey.trim()) return;
+        await storeMcpUserCredential(server.server_id, apiKey.trim());
+      }
       onChange();
       reset();
       onOpenChange(false);
@@ -228,36 +254,77 @@ export function IntegrationDialog({
 
         {server.is_byok ? (
           <div className="space-y-2">
-            <label className="font-mono text-xs text-muted-foreground">
-              {keyLabel}
-            </label>
-            <div className="relative">
-              <Input
-                type={reveal ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter API key..."
-                className="h-10 pr-9 font-mono"
-                autoComplete="off"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void onSave();
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setReveal((r) => !r)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                aria-label={reveal ? "Hide API key" : "Show API key"}
-              >
-                {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
-            </div>
+            {hasPerUserVars ? (
+              // Per-variable inputs
+              perUserVars.map((v) => (
+                <div key={v.name} className="space-y-1">
+                  <label className="font-mono text-xs text-muted-foreground">
+                    {v.name}
+                    {v.description && (
+                      <span className="ml-1 font-sans normal-case text-muted-foreground/70">
+                        — {v.description}
+                      </span>
+                    )}
+                  </label>
+                  <div className="relative">
+                    <Input
+                      type={reveal ? "text" : "password"}
+                      value={varValues[v.name] ?? ""}
+                      onChange={(e) =>
+                        setVarValues((prev) => ({ ...prev, [v.name]: e.target.value }))
+                      }
+                      placeholder={`Enter ${v.name}…`}
+                      className="h-10 pr-9 font-mono"
+                      autoComplete="off"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void onSave();
+                      }}
+                    />
+                  </div>
+                </div>
+              ))
+            ) : (
+              // Legacy single key input
+              <>
+                <label className="font-mono text-xs text-muted-foreground">
+                  {keyLabel}
+                </label>
+                <div className="relative">
+                  <Input
+                    type={reveal ? "text" : "password"}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="Enter API key..."
+                    className="h-10 pr-9 font-mono"
+                    autoComplete="off"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void onSave();
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setReveal((r) => !r)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              aria-label={reveal ? "Hide values" : "Show values"}
+            >
+              {reveal ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+              {reveal ? "Hide" : "Show"} values
+            </button>
 
             {error && <div className="text-xs text-destructive">{error}</div>}
 
             <Button
               onClick={() => void onSave()}
-              disabled={saving || !apiKey.trim()}
+              disabled={
+                saving ||
+                (hasPerUserVars
+                  ? perUserVars.every((v) => !(varValues[v.name]?.trim()))
+                  : !apiKey.trim())
+              }
               className="w-full"
             >
               {saving ? (
@@ -266,7 +333,7 @@ export function IntegrationDialog({
                   Saving
                 </>
               ) : connected ? (
-                "Update API key"
+                "Update credentials"
               ) : (
                 "Save"
               )}

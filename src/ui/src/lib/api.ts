@@ -902,6 +902,26 @@ export async function storeMcpUserCredential(
   );
 }
 
+/** Store a per-user variable for a BYOK MCP server in the vault.
+ *  Key format: `mcp_var:{server_id}:{var_name}`, scope "personal". */
+export async function storeMcpVarCredential(
+  server_id: string,
+  var_name: string,
+  value: string,
+  user_id = "default",
+): Promise<void> {
+  const res = await req(`/api/vault/${encodeURIComponent(user_id)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      key: `mcp_var:${server_id}:${var_name}`,
+      value,
+      scope: "personal",
+    }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+}
+
 /** Delete a user credential for an MCP server. */
 export async function deleteMcpUserCredential(
   server_id: string,
