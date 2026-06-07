@@ -564,14 +564,17 @@ export function createInputFromDraft(draft: AgentDraft) {
   const cron = draft.cron.trim();
   const runtime = draft.runtime.trim() || DEFAULT_RUNTIME;
 
-  // Resolve mcp_server_ids → mcp_servers array + mcp_toolset tool entries
-  const mcpServers = draft.mcp_server_ids
+  // Resolve mcp_server_ids → mcp_servers array + mcp_toolset tool entries.
+  // Only emit toolsets for IDs that resolved to a known integration — prevents
+  // orphan mcp_toolset entries referencing servers not present in mcp_servers.
+  const resolvedMcpServers = draft.mcp_server_ids
     .map((id) => {
       const integration = INTEGRATIONS.find((i) => i.id === id);
-      return integration ? { type: "url", name: id, url: integration.mcpUrl } : null;
+      return integration ? { id, type: "url", name: id, url: integration.mcpUrl } : null;
     })
-    .filter(Boolean);
-  const mcpToolsets = draft.mcp_server_ids.map((id) => ({
+    .filter((s): s is NonNullable<typeof s> => s !== null);
+  const mcpServers = resolvedMcpServers.map(({ id: _id, ...rest }) => rest);
+  const mcpToolsets = resolvedMcpServers.map(({ id }) => ({
     type: "mcp_toolset",
     mcp_server_name: id,
   }));

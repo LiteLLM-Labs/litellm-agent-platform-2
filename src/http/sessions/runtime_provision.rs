@@ -121,6 +121,7 @@ async fn create_provider_agent(
                 tools.extend(crate::http::platform_mcps::platform_mcp_toolsets(
                     &created.agent.config,
                 ));
+                tools.extend(integration_mcp_toolsets(&created.agent.config));
                 tools
             },
             mcp_servers: mcp_servers(state, &created.agent)?,
@@ -284,4 +285,21 @@ async fn persist_runtime_refs(
         "running",
     )
     .await
+}
+
+fn integration_mcp_toolsets(config: &Value) -> Vec<Value> {
+    config
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| {
+            tools
+                .iter()
+                .filter(|t| {
+                    t.get("type").and_then(Value::as_str) == Some("mcp_toolset")
+                        && t.get("mcp_server_name").and_then(Value::as_str).is_some()
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
 }
