@@ -45,6 +45,9 @@ jobs:
       - name: Lint with Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      - name: Reset test database
+        run: psql postgres://postgres:postgres@127.0.0.1:5432/lap_test -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+
       - name: Run tests
         run: cargo test --locked
 
