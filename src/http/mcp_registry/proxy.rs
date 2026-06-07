@@ -17,6 +17,8 @@ use crate::{
     proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
 
+use super::caller_user_id;
+
 /// `GET|POST|PUT|DELETE|PATCH /{mcp_server_name}/mcp`
 ///
 /// Proxies MCP protocol traffic to the registered upstream server, injecting
@@ -50,7 +52,7 @@ pub async fn dynamic_mcp(
     let target_url = base_url.trim_end_matches('/').to_owned();
 
     // ── 3. Resolve credential ─────────────────────────────────────────────────
-    let user_id = extract_user_id(&headers);
+    let user_id = caller_user_id(&headers, &state);
     let enc_key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
 
@@ -106,23 +108,6 @@ pub async fn dynamic_mcp(
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
-
-fn extract_user_id(headers: &HeaderMap, state: &AppState) -> String {
-    let Some(master_key) = state.config.general_settings.master_key.as_deref() else {
-        return "default".to_owned();
-    };
-    let is_admin = require_master_key(headers, Some(master_key)).is_ok();
-    if is_admin {
-        headers
-            .get("x-user-id")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.trim().is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| "default".to_owned())
-    } else {
-        "default".to_owned()
-    }
-}
 
 /// Look up the personal vault key for this (server, user) pair and decrypt it.
 /// Key format: `mcp_user:{server_id}:{user_id}`

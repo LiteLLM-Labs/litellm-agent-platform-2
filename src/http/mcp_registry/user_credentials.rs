@@ -13,24 +13,7 @@ use crate::{
     proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-fn caller_user_id(headers: &HeaderMap, state: &AppState) -> String {
-    let Some(master_key) = state.config.general_settings.master_key.as_deref() else {
-        return "default".to_owned();
-    };
-    let is_admin = require_master_key(headers, Some(master_key)).is_ok();
-    if is_admin {
-        headers
-            .get("x-user-id")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.trim().is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| "default".to_owned())
-    } else {
-        "default".to_owned()
-    }
-}
+use super::caller_user_id;
 
 fn key_name(server_id: &str, user_id: &str) -> String {
     format!("mcp_user:{}:{}", server_id, user_id)
@@ -102,7 +85,7 @@ pub async fn store(
             GatewayError::InvalidJsonMessage("credential or api_key is required".to_owned())
         })?;
 
-    let user_id = extract_user_id(&headers);
+    let user_id = caller_user_id(&headers, &state);
     let enc_key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
     let encrypted = credential_crypto::encrypt_value(raw_value.trim(), &enc_key)?;
@@ -125,7 +108,7 @@ pub async fn delete_credential(
 ) -> Result<(StatusCode, Json<DeleteUserCredentialResponse>), GatewayError> {
     require_any_gateway_key(&headers, &state)?;
 
-    let user_id = extract_user_id(&headers);
+    let user_id = caller_user_id(&headers, &state);
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let k = key_name(&server_id, &user_id);
@@ -149,7 +132,7 @@ pub async fn list(
 ) -> Result<Json<ListUserCredentialsResponse>, GatewayError> {
     require_any_gateway_key(&headers, &state)?;
 
-    let user_id = extract_user_id(&headers);
+    let user_id = caller_user_id(&headers, &state);
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
 

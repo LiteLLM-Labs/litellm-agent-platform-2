@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Eye, EyeOff, Info, Check, Loader2, Unplug, Zap, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,12 +29,28 @@ export function IntegrationDialog({
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; tools: string[]; count: number } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [discoveredTools, setDiscoveredTools] = useState<string[]>([]);
+
+  // Auto-fetch tools when dialog opens
+  useEffect(() => {
+    if (!open || !server) return;
+    setDiscoveredTools([]);
+    fetch(`/v1/mcp/server/${encodeURIComponent(server.server_id)}/tools`, { cache: "no-store" })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { tools?: { name?: string }[] } | null) => {
+        if (data?.tools) {
+          setDiscoveredTools(data.tools.map((t) => t.name ?? "").filter(Boolean));
+        }
+      })
+      .catch(() => {});
+  }, [open, server]);
 
   if (!server) return null;
 
   const displayName = server.server_name ?? server.alias ?? server.server_id;
   const keyLabel = server.byok_description?.[0] ?? "API Key";
-  const tools: string[] = server.allowed_tools ?? [];
+  const adminTools: string[] = server.allowed_tools ?? [];
+  const tools = discoveredTools.length > 0 ? discoveredTools : adminTools;
 
   const reset = () => {
     setApiKey("");
@@ -144,8 +160,7 @@ export function IntegrationDialog({
           </div>
         )}
 
-        {connected && (
-          <div className="space-y-2">
+        <div className="space-y-2">
             <Button
               variant="outline"
               size="sm"
@@ -185,7 +200,6 @@ export function IntegrationDialog({
               </div>
             )}
           </div>
-        )}
 
         {server.is_byok && (
           <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">

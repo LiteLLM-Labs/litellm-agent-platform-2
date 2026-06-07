@@ -833,6 +833,13 @@ export async function listPublicMcpServers(): Promise<McpServer[]> {
   return data.data ?? [];
 }
 
+/** Discover all MCP servers (requires gateway key, not master key). */
+export async function listDiscoverableMcpServers(): Promise<McpServer[]> {
+  const res = await req("/v1/mcp/discover");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
 /** Create an MCP server (admin). */
 export async function createMcpServer(input: Partial<McpServer>): Promise<McpServer> {
   const res = await req("/v1/mcp/server", {
