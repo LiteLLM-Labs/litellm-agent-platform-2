@@ -200,7 +200,7 @@ function SessionsStart() {
       const params = new URLSearchParams({
         id: session.id,
       });
-      if (trimmed && !session.runtime) {
+      if (trimmed) {
         params.set("prompt", trimmed);
         params.set("autostart", "1");
       }
