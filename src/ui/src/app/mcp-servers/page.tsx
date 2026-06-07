@@ -445,17 +445,28 @@ function ServerRow({
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function SectionHeader({ label, tooltip }: { label: string; tooltip: string }) {
+  const [show, setShow] = useState(false);
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-start gap-1.5">
       <span className="text-[13.5px] font-semibold tracking-tight">{label}</span>
-      <button
-        type="button"
-        title={tooltip}
-        aria-label={tooltip}
-        className="cursor-help text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
-      >
-        <Info className="size-3.5" />
-      </button>
+      <div className="relative">
+        <button
+          type="button"
+          aria-label={tooltip}
+          onMouseEnter={() => setShow(true)}
+          onMouseLeave={() => setShow(false)}
+          onFocus={() => setShow(true)}
+          onBlur={() => setShow(false)}
+          className="cursor-help text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        >
+          <Info className="size-3.5" />
+        </button>
+        {show && (
+          <div className="absolute left-0 top-5 z-50 w-72 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md">
+            {tooltip}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -492,7 +503,7 @@ function VariablesTable({
       <div className="flex items-center justify-between">
         <SectionHeader
           label="Variables"
-          tooltip="Define variables that will be available in headers as ${VAR_NAME}. Per-user variables are filled in by each user; Instance variables are set once by the admin."
+          tooltip="Reference variables in the URL and headers using ${VAR_NAME}. Per-user: each user provides their own value (e.g. their API key). Instance: admin sets one value shared for all users."
         />
       </div>
 
@@ -1002,6 +1013,15 @@ function McpServerEditor({
             />
           </div>
 
+          {/* divider */}
+          <div className="border-t border-border" />
+
+          {/* Variables — above URL so ${VAR_NAME} can be referenced in the URL field */}
+          <VariablesTable
+            variables={form.variables}
+            onChange={(vars) => patch("variables", vars)}
+          />
+
           {/* url (required) */}
           <div className="space-y-1.5">
             <Label htmlFor="mcp-url">
@@ -1030,15 +1050,6 @@ function McpServerEditor({
               <option value="stdio">stdio</option>
             </select>
           </div>
-
-          {/* divider */}
-          <div className="border-t border-border" />
-
-          {/* Variables */}
-          <VariablesTable
-            variables={form.variables}
-            onChange={(vars) => patch("variables", vars)}
-          />
 
           {/* Static Headers */}
           <StaticHeadersTable
