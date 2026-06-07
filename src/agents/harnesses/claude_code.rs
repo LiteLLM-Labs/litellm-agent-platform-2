@@ -13,10 +13,11 @@ pub const ID: &str = "claude-code";
 pub fn build_run(agent: &AgentDefinition, prompt: &str) -> HarnessRunSpec {
     HarnessRunSpec {
         command: format!(
-            "set -euo pipefail\nnpm install --silent --no-audit --no-fund @anthropic-ai/claude-agent-sdk@latest >/dev/null\nLITELLM_AGENT_PROMPT={} LITELLM_AGENT_MODEL={} LITELLM_AGENT_SYSTEM={} node --input-type=module <<'LITELLM_CLAUDE_AGENT_SDK'\n{}\nLITELLM_CLAUDE_AGENT_SDK",
+            "set -euo pipefail\nnpm install --silent --no-audit --no-fund @anthropic-ai/claude-agent-sdk@latest >/dev/null\nLITELLM_AGENT_PROMPT={} LITELLM_AGENT_MODEL={} LITELLM_AGENT_SYSTEM={} LITELLM_AGENT_MCP_SERVERS={} node --input-type=module <<'LITELLM_CLAUDE_AGENT_SDK'\n{}\nLITELLM_CLAUDE_AGENT_SDK",
             shell_quote(prompt),
             shell_quote(&agent.model),
             shell_quote(&agent.system),
+            shell_quote(&serde_json::to_string(&agent.mcp_servers).unwrap_or_else(|_| "[]".to_owned())),
             CLAUDE_AGENT_SDK_SCRIPT
         ),
         events: HarnessEvents::ClaudeCode(ClaudeCodeEvents::default()),
@@ -28,6 +29,7 @@ const CLAUDE_AGENT_SDK_SCRIPT: &str = r#"import { query } from "@anthropic-ai/cl
 const prompt = process.env.LITELLM_AGENT_PROMPT ?? "";
 const model = process.env.LITELLM_AGENT_MODEL || undefined;
 const append = process.env.LITELLM_AGENT_SYSTEM || undefined;
+const mcpServers = mcpServerOptions(process.env.LITELLM_AGENT_MCP_SERVERS || "[]");
 const startedAt = Date.now();
 let sawResult = false;
 let text = "";
@@ -40,7 +42,29 @@ const options = {
     ? { type: "preset", preset: "claude_code", append }
     : { type: "preset", preset: "claude_code" },
   ...(model ? { model } : {}),
+  ...(Object.keys(mcpServers).length > 0 ? {
+    mcpServers,
+    allowedTools: Object.keys(mcpServers).map((name) => `mcp__${name}`),
+  } : {}),
 };
+
+function mcpServerOptions(raw) {
+  let parsed = [];
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!Array.isArray(parsed)) return {};
+  return Object.fromEntries(parsed.flatMap((server) => {
+    if (!server || typeof server !== "object") return [];
+    const name = typeof server.name === "string" && server.name ? server.name : undefined;
+    const url = typeof server.url === "string" && server.url ? server.url : undefined;
+    if (!name || !url) return [];
+    const { name: _name, ...rest } = server;
+    return [[name, { type: "http", ...rest, url }]];
+  }));
+}
 
 function write(frame) {
   process.stdout.write(JSON.stringify(frame) + "\n");

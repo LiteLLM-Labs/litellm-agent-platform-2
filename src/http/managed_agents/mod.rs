@@ -1,5 +1,6 @@
 pub mod files;
 pub mod inbox;
+pub mod mcp_servers;
 pub mod memory;
 pub mod registry;
 pub mod routes;

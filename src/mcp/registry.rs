@@ -5,6 +5,7 @@ use base64::Engine;
 use reqwest::Url;
 
 use crate::{
+    db::managed_agents::mcp_servers::schema::ManagedMcpServerRow,
     errors::GatewayError,
     proxy::config::{GatewayConfig, McpAuthType, McpServerEntry},
 };
@@ -58,7 +59,7 @@ impl McpServerRegistry {
 }
 
 impl McpServer {
-    fn from_entry(name: &str, entry: &McpServerEntry) -> Result<Self, GatewayError> {
+    pub fn from_entry(name: &str, entry: &McpServerEntry) -> Result<Self, GatewayError> {
         let url = entry.url.parse().map_err(|error| {
             GatewayError::InvalidConfig(format!("{name} has invalid mcp_servers.url: {error}"))
         })?;
@@ -73,6 +74,33 @@ impl McpServer {
                 .map(|h| h.to_ascii_lowercase())
                 .collect(),
         })
+    }
+
+    pub fn from_managed_row(row: &ManagedMcpServerRow) -> Result<Self, GatewayError> {
+        let auth_type = match row.auth_type.as_str() {
+            "api_key" => McpAuthType::ApiKey,
+            "bearer_token" => McpAuthType::BearerToken,
+            "authorization" => McpAuthType::Authorization,
+            "none" => McpAuthType::None,
+            other => {
+                return Err(GatewayError::InvalidConfig(format!(
+                    "{}: unsupported mcp auth_type '{}'",
+                    row.id, other
+                )));
+            }
+        };
+        Self::from_entry(
+            &row.id,
+            &McpServerEntry {
+                url: row.url.clone(),
+                transport: Default::default(),
+                auth_type,
+                auth_value: row.auth_value.clone(),
+                static_headers: HashMap::new(),
+                extra_headers: Vec::new(),
+                description: row.description.clone(),
+            },
+        )
     }
 }
 

@@ -1,6 +1,7 @@
 pub mod files;
 pub mod inbox;
 pub mod loops;
+pub mod mcp_servers;
 pub mod memory;
 pub mod messages;
 pub mod pool;

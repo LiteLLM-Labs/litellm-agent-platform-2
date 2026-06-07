@@ -13,6 +13,7 @@ export interface AgentDraft {
   timezone: string;
   vault_keys: string[];
   skill_ids: string[];
+  mcp_server_ids: string[];
   max_runtime_minutes: number;
   on_failure: string;
 }
@@ -61,13 +62,20 @@ function baseDraft(): AgentDraft {
     timezone: DEFAULT_TIMEZONE,
     vault_keys: [],
     skill_ids: [],
+    mcp_server_ids: [],
     max_runtime_minutes: 30,
     on_failure: DEFAULT_FAILURE,
   };
 }
 
 export function blankAgentDraft(): AgentDraft {
-  return { ...baseDraft(), tools: DEFAULT_TOOLS.map((tool) => ({ ...tool })), vault_keys: [], skill_ids: [] };
+  return {
+    ...baseDraft(),
+    tools: DEFAULT_TOOLS.map((tool) => ({ ...tool })),
+    vault_keys: [],
+    skill_ids: [],
+    mcp_server_ids: [],
+  };
 }
 
 export function defaultToolsForRuntime(runtime: string, runtimes: AgentRuntime[]): AgentTool[] {
@@ -89,6 +97,7 @@ function withDraft(patch: Partial<AgentDraft>): AgentDraft {
     tools: (patch.tools ?? DEFAULT_TOOLS).map((tool) => ({ ...tool })),
     vault_keys: [...(patch.vault_keys ?? [])],
     skill_ids: [...(patch.skill_ids ?? [])],
+    mcp_server_ids: [...(patch.mcp_server_ids ?? [])],
   };
 }
 
@@ -289,6 +298,7 @@ export function buildAgentDraftFromPrompt(prompt: string): AgentDraft {
         'You are a friendly Hello World agent. When a user sends you any message, greet them warmly with "Hello, World!" and a brief, cheerful follow-up. Keep responses short, positive, and welcoming.',
       cron: promptCron,
       vault_keys: promptVaultKeys,
+      mcp_server_ids: [],
     };
   }
 
@@ -302,6 +312,7 @@ export function buildAgentDraftFromPrompt(prompt: string): AgentDraft {
     cron: promptCron || template.draft.cron,
     vault_keys: unique([...template.draft.vault_keys, ...promptVaultKeys]),
     skill_ids: [...template.draft.skill_ids],
+    mcp_server_ids: [...template.draft.mcp_server_ids],
   };
 }
 
@@ -362,6 +373,9 @@ export function stringifyAgentDraft(draft: AgentDraft): string {
   }
   if (draft.vault_keys.length > 0) lines.push(`vault_keys: ${listBlock(draft.vault_keys)}`);
   if (draft.skill_ids.length > 0) lines.push(`skill_ids: ${listBlock(draft.skill_ids)}`);
+  if (draft.mcp_server_ids.length > 0) {
+    lines.push(`mcp_server_ids: ${listBlock(draft.mcp_server_ids)}`);
+  }
   if (draft.max_runtime_minutes !== 30) lines.push(`max_runtime_minutes: ${draft.max_runtime_minutes}`);
   if (draft.on_failure !== DEFAULT_FAILURE) lines.push(`on_failure: ${scalar(draft.on_failure)}`);
   return lines.join("\n");
@@ -518,7 +532,7 @@ export function parseAgentDraftConfig(source: string): ParsedAgentDraft {
       continue;
     }
 
-    if (key === "vault_keys" || key === "skill_ids") {
+    if (key === "vault_keys" || key === "skill_ids" || key === "mcp_server_ids") {
       const values = value ? inlineList(value) : [];
       if (!value) {
         i += 1;
@@ -565,6 +579,7 @@ export function createInputFromDraft(draft: AgentDraft) {
     schedule: cron ? { cron, timezone: draft.timezone.trim() || "UTC" } : null,
     vault_keys: draft.vault_keys,
     skill_ids: draft.skill_ids,
+    mcp_server_ids: draft.mcp_server_ids,
     max_runtime_minutes: draft.max_runtime_minutes,
     on_failure: draft.on_failure.trim() || DEFAULT_FAILURE,
     config: {

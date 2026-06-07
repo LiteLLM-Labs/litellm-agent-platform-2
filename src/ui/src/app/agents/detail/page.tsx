@@ -418,6 +418,22 @@ function AgentDetail() {
                         </>
                       )}
 
+                      {Array.isArray(agent.mcp_server_ids) && agent.mcp_server_ids.length > 0 && (
+                        <>
+                          <dt className="font-medium text-muted-foreground">MCP servers</dt>
+                          <dd className="flex flex-wrap gap-1">
+                            {agent.mcp_server_ids.map((serverId) => (
+                              <span
+                                key={String(serverId)}
+                                className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]"
+                              >
+                                {String(serverId)}
+                              </span>
+                            ))}
+                          </dd>
+                        </>
+                      )}
+
                       <dt className="font-medium text-muted-foreground">Run schedule</dt>
                       <dd className="flex flex-col gap-1">
                         <span className="font-mono text-xs">
