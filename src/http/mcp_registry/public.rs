@@ -200,23 +200,3 @@ pub async fn list_tools(
         tools,
     }))
 }
-
-/// GET /v1/mcp/discover — auth: any configured gateway key (or open if none set).
-///
-/// Returns all MCP servers regardless of public-internet visibility.
-/// Intended for authenticated clients that need the full catalogue.
-/// Credentials and env_vars are never included in the response.
-pub async fn discover(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<Json<McpHubResponse>, GatewayError> {
-    require_any_gateway_key(&headers, &state)?;
-
-    let Some(pool) = state.db.as_ref() else {
-        return Ok(Json(McpHubResponse { data: vec![] }));
-    };
-
-    let rows = repository::list(pool).await?;
-    let data = rows.into_iter().map(PublicMcpServer::from).collect();
-    Ok(Json(McpHubResponse { data }))
-}

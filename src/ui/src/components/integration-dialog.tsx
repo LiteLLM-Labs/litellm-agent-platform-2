@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { BrandIcon } from "@/components/brand-icons";
-import { storeMcpUserCredential, deleteMcpUserCredential } from "@/lib/api";
+import { storeMcpUserCredential, deleteMcpUserCredential, getStoredMasterKey } from "@/lib/api";
 import type { McpServer } from "@/lib/types";
 
 export function IntegrationDialog({
@@ -64,9 +64,12 @@ export function IntegrationDialog({
     setTestResult(null);
     try {
       const serverName = server.alias ?? server.server_name ?? server.server_id;
+      const key = getStoredMasterKey();
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (key) headers["authorization"] = `Bearer ${key}`;
       const res = await fetch(`/${encodeURIComponent(serverName)}/mcp`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
         cache: "no-store",
       });

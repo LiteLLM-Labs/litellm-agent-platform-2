@@ -826,19 +826,6 @@ export async function listMcpServers(): Promise<McpServer[]> {
   return data.data ?? [];
 }
 
-/** Get public MCP hub (no auth needed). */
-export async function listPublicMcpServers(): Promise<McpServer[]> {
-  const res = await fetch(BASE + "/public/mcp_hub", { cache: "no-store" });
-  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
-  return data.data ?? [];
-}
-
-/** Discover all MCP servers (requires gateway key, not master key). */
-export async function listDiscoverableMcpServers(): Promise<McpServer[]> {
-  const res = await req("/v1/mcp/discover");
-  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
-  return data.data ?? [];
-}
 
 /** Create an MCP server (admin). */
 export async function createMcpServer(input: Partial<McpServer>): Promise<McpServer> {
@@ -865,6 +852,39 @@ export async function deleteMcpServer(server_id: string): Promise<void> {
   await jsonOrThrow(
     await req(`/v1/mcp/server/${encodeURIComponent(server_id)}`, { method: "DELETE" }),
   );
+}
+
+export interface McpToolDef {
+  name: string;
+  description?: string | null;
+  inputSchema?: unknown;
+}
+
+/** List the tools exposed by an existing (saved) MCP server. */
+export async function listMcpServerTools(server_id: string): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`);
+  const data = await jsonOrThrow<{ tools?: McpToolDef[]; data?: McpToolDef[] }>(res);
+  return data.tools ?? data.data ?? [];
+}
+
+/** Discover tools from an arbitrary MCP server URL (new-server flow). */
+export async function discoverMcpToolsFromUrl(url: string): Promise<McpToolDef[]> {
+  const base = url.replace(/\/+$/, "");
+  const res = await fetch(`${base}/tools/list`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new ApiError(res.status, body);
+  }
+  const data = (await res.json()) as {
+    result?: { tools?: McpToolDef[] };
+    tools?: McpToolDef[];
+  };
+  return data?.result?.tools ?? data?.tools ?? [];
 }
 
 /** Store a user credential for a BYOK MCP server. */

@@ -118,8 +118,6 @@ fn mcp_registry_routes() -> Router<Arc<AppState>> {
         // Public (no auth)
         .route("/public/mcp_hub", get(public::mcp_hub))
         .route("/v1/mcp/server/{server_id}/tools", get(public::list_tools))
-        // Discovery (soft auth)
-        .route("/v1/mcp/discover", get(public::discover))
         // Admin CRUD
         .route(
             "/v1/mcp/server",
