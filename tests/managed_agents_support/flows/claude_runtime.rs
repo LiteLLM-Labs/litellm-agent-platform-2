@@ -4,7 +4,7 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-use super::super::{request_json, AppFixture};
+use super::super::{read_events_until_completed, request_json, AppFixture};
 
 pub async fn save_anthropic_credentials(fixture: &AppFixture) -> MockServer {
     let anthropic = MockServer::start().await;
@@ -20,6 +20,84 @@ pub async fn save_anthropic_credentials(fixture: &AppFixture) -> MockServer {
     )
     .await;
     anthropic
+}
+
+pub async fn exercise_claude_runtime_session_storage(fixture: &AppFixture, agent_id: &str) {
+    let _anthropic = save_anthropic_credentials(fixture).await;
+    let session = create_claude_runtime_session(fixture, agent_id).await;
+    let session_id = session["id"].as_str().unwrap();
+    assert_claude_session_response(&session);
+    assert_claude_session_stored(fixture, session_id).await;
+    assert_claude_runtime_events_stored(fixture, session_id).await;
+}
+
+async fn create_claude_runtime_session(fixture: &AppFixture, agent_id: &str) -> serde_json::Value {
+    request_json(
+        fixture.app.clone(),
+        "POST",
+        "/session",
+        Some(json!({
+            "agent": agent_id,
+            "agent_id": agent_id,
+            "runtime": "claude_managed_agents",
+            "title": "Claude runtime storage",
+            "prompt": "say hello"
+        })),
+    )
+    .await
+}
+
+fn assert_claude_session_response(session: &serde_json::Value) {
+    let session_id = session["id"].as_str().unwrap();
+    assert!(session_id.starts_with("ses_"));
+    assert_eq!(session["runtime"], "claude_managed_agents");
+    assert_eq!(
+        session["provider_session_id"],
+        "sesn_111111111111111111111111"
+    );
+}
+
+async fn assert_claude_session_stored(fixture: &AppFixture, session_id: &str) {
+    let stored = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/session/{session_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        stored["provider_session_id"],
+        "sesn_111111111111111111111111"
+    );
+}
+
+async fn assert_claude_runtime_events_stored(fixture: &AppFixture, session_id: &str) {
+    let events = read_events_until_completed(
+        fixture.app.clone(),
+        &format!("/v1/sessions/{session_id}/events/stream"),
+        session_id,
+    )
+    .await;
+    assert!(events.contains("hello from managed agent"));
+
+    let replay = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/sessions/{session_id}/events"),
+        None,
+    )
+    .await;
+    assert_claude_replay_events(&replay);
+}
+
+fn assert_claude_replay_events(replay: &serde_json::Value) {
+    let replay_events = replay["data"].as_array().unwrap();
+    assert!(replay_events
+        .iter()
+        .any(|event| event["type"] == "agent.message"));
+    assert!(replay_events
+        .iter()
+        .any(|event| event["type"] == "session.status_idle"));
 }
 
 async fn mount_claude_runtime(anthropic: &MockServer) {

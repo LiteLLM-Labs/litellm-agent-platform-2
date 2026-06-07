@@ -8,14 +8,15 @@ use axum::{
     Json,
 };
 use futures_util::StreamExt;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
-    db::managed_agents::sessions,
+    callbacks::events::CallbackEventPayload,
+    db::managed_agents::{runtime_events, sessions},
     errors::GatewayError,
     proxy::{auth::master_key::require_master_key, state::AppState},
-    sdk::agents::AgentEventStream,
+    sdk::agents::{AgentEvent, AgentEventStream},
 };
 
 use super::{
@@ -52,10 +53,17 @@ pub async fn runtime_events(
         .map_err(agent_sdk_error)?;
     let stream_pool = pool.clone();
     let stream_session_id = row.id.clone();
+    let callbacks = state.callbacks.clone();
     let body_stream = async_stream::stream! {
         futures_util::pin_mut!(provider_stream);
         while let Some(event) = provider_stream.next().await {
-            yield provider_event_line(event);
+            match event {
+                Ok(event) => {
+                    emit_runtime_event(&callbacks, &stream_session_id, &event).await;
+                    yield provider_event_line(Ok(event));
+                }
+                Err(error) => yield provider_event_line::<AgentEvent>(Err(error)),
+            }
         }
         let _ = sessions::repository::set_status(&stream_pool, &stream_session_id, "idle").await;
     };
@@ -79,6 +87,10 @@ pub async fn runtime_event_list(
     )?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let row = session(pool, &session_id).await?;
+    let stored = runtime_events::repository::list(pool, &row.id).await?;
+    if !stored.is_empty() {
+        return Ok(Json(json!({ "data": stored })));
+    }
     let runtime = row.runtime.as_deref().ok_or_else(|| {
         GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
@@ -91,6 +103,7 @@ pub async fn runtime_event_list(
         .list(&row.id)
         .await
         .map_err(agent_sdk_error)?;
+    emit_runtime_event_list(&state.callbacks, &row.id, &events).await;
     Ok(Json(events))
 }
 
@@ -123,4 +136,29 @@ fn require_events_master_key(
         return Ok(());
     }
     require_master_key(headers, configured)
+}
+
+async fn emit_runtime_event<T: serde::Serialize>(
+    callbacks: &crate::callbacks::CallbackManager,
+    session_id: &str,
+    event: &T,
+) {
+    if let Some(payload) = CallbackEventPayload::managed_runtime_session_event(session_id, event) {
+        callbacks.on_event(payload).await;
+    }
+}
+
+async fn emit_runtime_event_list(
+    callbacks: &crate::callbacks::CallbackManager,
+    session_id: &str,
+    events: &Value,
+) {
+    let items = events
+        .as_array()
+        .or_else(|| events.get("data").and_then(Value::as_array));
+    if let Some(items) = items {
+        for event in items {
+            emit_runtime_event(callbacks, session_id, event).await;
+        }
+    }
 }

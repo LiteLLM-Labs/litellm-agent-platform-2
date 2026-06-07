@@ -11,6 +11,7 @@ mod sessions;
 mod slack;
 mod slack_helpers;
 
+pub use claude_runtime::exercise_claude_runtime_session_storage;
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use platform_mcps::exercise_platform_mcps;
 pub use sessions::exercise_sessions;

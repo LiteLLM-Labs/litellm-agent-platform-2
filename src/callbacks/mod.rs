@@ -1,10 +1,12 @@
 pub mod base;
+pub mod events;
 pub mod litellm_db;
 pub mod standard_logging;
 
 use std::sync::Arc;
 
 use base::BaseCallback;
+use events::CallbackEventPayload;
 use standard_logging::StandardLoggingPayload;
 
 #[derive(Clone, Default)]
@@ -28,6 +30,12 @@ impl CallbackManager {
     pub fn on_error(&self, payload: StandardLoggingPayload) {
         for callback in self.callbacks.iter() {
             callback.on_error(payload.clone());
+        }
+    }
+
+    pub async fn on_event(&self, payload: CallbackEventPayload) {
+        for callback in self.callbacks.iter() {
+            callback.on_event(payload.clone()).await;
         }
     }
 }
