@@ -648,14 +648,17 @@ function ChatInner() {
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
     refetch();
-    const unsub = subscribeRuntimeEvents({
-      sessionId: sid,
-      onEvent: handleRuntimeEvent,
-      onError: (err) => setError(err instanceof Error ? err.message : String(err)),
-    });
-    listRuntimeEvents(sid)
-      .then(replayRuntimeEvents)
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    let unsub: (() => void) | undefined;
+    if (sessionRuntime) {
+      unsub = subscribeRuntimeEvents({
+        sessionId: sid,
+        onEvent: handleRuntimeEvent,
+        onError: (err) => setError(err instanceof Error ? err.message : String(err)),
+      });
+      listRuntimeEvents(sid)
+        .then(replayRuntimeEvents)
+        .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+    }
     if (autostartPrompt && autostartedRef.current !== sid) {
       autostartedRef.current = sid;
       beginRuntimeTurn(autostartPrompt);
