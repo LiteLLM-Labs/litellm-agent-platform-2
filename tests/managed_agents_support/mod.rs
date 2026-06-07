@@ -48,7 +48,9 @@ impl AppFixture {
                 Ok(()) => break,
                 Err(e) => {
                     let msg = e.to_string();
-                    let is_race = msg.contains("VersionMismatch") || msg.contains("duplicate key");
+                    let is_race = msg.contains("VersionMismatch")
+                        || msg.contains("duplicate key")
+                        || msg.contains("previously applied but has been modified");
                     if !is_race || attempt == 4 {
                         panic!("migration failed: {e}");
                     }
