@@ -14,10 +14,13 @@ use crate::{
     proxy::{auth::master_key::require_any_gateway_key, state::AppState},
 };
 
+mod definitions;
+mod session_management;
 mod slack;
 mod tools;
 
 pub const PLATFORM_SESSION_MCP_ID: &str = "read_platform_session";
+pub const SEND_PLATFORM_SESSION_MESSAGE_MCP_ID: &str = "send_platform_session_message";
 pub const AGENT_MEMORY_MCP_ID: &str = "agent_memory";
 pub const SEND_SLACK_MESSAGE_MCP_ID: &str = "send_slack_message";
 pub const PLATFORM_MCP_SERVER_NAME: &str = "platform";
@@ -35,6 +38,11 @@ pub fn platform_mcps() -> Vec<PlatformMcp> {
             id: PLATFORM_SESSION_MCP_ID,
             name: "Read platform session",
             description: "Read persisted platform session messages for debugging and handoff.",
+        },
+        PlatformMcp {
+            id: SEND_PLATFORM_SESSION_MESSAGE_MCP_ID,
+            name: "Send platform session message",
+            description: "Send a user message into a platform session and resume that agent run.",
         },
         PlatformMcp {
             id: AGENT_MEMORY_MCP_ID,
@@ -145,13 +153,13 @@ pub async fn serve(
         "tools/list" => json!({
             "jsonrpc": "2.0",
             "id": request.id,
-            "result": { "tools": tool_defs() }
+            "result": { "tools": definitions::tool_defs() }
         }),
         "tools/call" => {
             let Some(params) = request.params else {
                 return Ok(Json(rpc_error(request.id, -32602, "params are required")));
             };
-            let result = call_tool(&state, pool, &agent_id, params).await?;
+            let result = call_tool(state.clone(), pool, &agent_id, params).await?;
             json!({ "jsonrpc": "2.0", "id": request.id, "result": result })
         }
         "notifications/initialized" => json!({
@@ -167,65 +175,15 @@ pub async fn serve(
 fn is_platform_mcp(id: &str) -> bool {
     matches!(
         id,
-        PLATFORM_SESSION_MCP_ID | AGENT_MEMORY_MCP_ID | SEND_SLACK_MESSAGE_MCP_ID
+        PLATFORM_SESSION_MCP_ID
+            | SEND_PLATFORM_SESSION_MESSAGE_MCP_ID
+            | AGENT_MEMORY_MCP_ID
+            | SEND_SLACK_MESSAGE_MCP_ID
     )
 }
 
-fn tool_defs() -> Vec<Value> {
-    vec![
-        json!({
-            "name": PLATFORM_SESSION_MCP_ID,
-            "description": "Read persisted platform session messages by session_id.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "session_id": { "type": "string" }
-                },
-                "required": ["session_id"]
-            }
-        }),
-        json!({
-            "name": AGENT_MEMORY_MCP_ID,
-            "description": "List, read, or update DB-backed memory for this platform agent.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "action": { "type": "string", "enum": ["list", "get", "set"] },
-                    "key": { "type": "string" },
-                    "value": { "type": "string" },
-                    "always_on": { "type": "boolean" }
-                },
-                "required": ["action"]
-            }
-        }),
-        json!({
-            "name": SEND_SLACK_MESSAGE_MCP_ID,
-            "description": "Send a Slack channel message or DM using this agent's connected Slack bot.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "channel_id": {
-                        "type": "string",
-                        "description": "Slack channel ID, such as C123. When omitted, sends a DM."
-                    },
-                    "user_id": {
-                        "type": "string",
-                        "description": "Slack user ID, such as U123. Used for DMs only."
-                    },
-                    "email": {
-                        "type": "string",
-                        "description": "Slack user email. Used for DMs when user_id is omitted."
-                    },
-                    "text": { "type": "string" }
-                },
-                "required": ["text"]
-            }
-        }),
-    ]
-}
-
 async fn call_tool(
-    state: &AppState,
+    state: Arc<AppState>,
     pool: &PgPool,
     agent_id: &str,
     params: Value,
@@ -239,9 +197,21 @@ async fn call_tool(
         .cloned()
         .unwrap_or_else(|| json!({}));
     let payload = match name {
-        PLATFORM_SESSION_MCP_ID => tools::read_platform_session(pool, arguments).await?,
+        PLATFORM_SESSION_MCP_ID => {
+            session_management::read_platform_session(pool, arguments).await?
+        }
+        SEND_PLATFORM_SESSION_MESSAGE_MCP_ID => {
+            session_management::send_platform_session_message(
+                state.clone(),
+                pool.clone(),
+                arguments,
+            )
+            .await?
+        }
         AGENT_MEMORY_MCP_ID => tools::agent_memory(pool, agent_id, arguments).await?,
-        SEND_SLACK_MESSAGE_MCP_ID => slack::send_message(state, pool, agent_id, arguments).await?,
+        SEND_SLACK_MESSAGE_MCP_ID => {
+            slack::send_message(state.as_ref(), pool, agent_id, arguments).await?
+        }
         _ => {
             return Ok(json!({
                 "isError": true,
