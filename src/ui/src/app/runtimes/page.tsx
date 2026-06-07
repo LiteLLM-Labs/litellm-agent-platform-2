@@ -88,7 +88,7 @@ export default function RuntimesPage() {
           </div>
           <ThemeToggle />
         </header>
-        <main className="flex-1 overflow-y-auto">
+        <main id="main-content" className="flex-1 overflow-y-auto">
           <div className="mx-auto grid w-[calc(100vw-4rem)] max-w-5xl gap-5 px-4 py-6 sm:w-full">
             <div className="min-w-0">
               <h2 className="text-lg font-semibold tracking-tight">Agent Runtime Credentials</h2>

@@ -217,7 +217,7 @@ function SessionsStart() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
-      <main className="relative flex min-w-0 flex-1 overflow-hidden bg-background text-foreground">
+      <main id="main-content" className="relative flex min-w-0 flex-1 overflow-hidden bg-background text-foreground">
         <div
           aria-hidden
           className="absolute inset-0 opacity-80"

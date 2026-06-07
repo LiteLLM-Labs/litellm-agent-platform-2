@@ -62,7 +62,7 @@ export default function IntegrationsPage() {
           <ThemeToggle />
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main id="main-content" className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl px-6 py-6">
             <div className="mb-6">
               <h1 className="text-xl font-semibold tracking-tight">Connect your tools</h1>
@@ -83,14 +83,14 @@ export default function IntegrationsPage() {
             </div>
 
             {groups.length === 0 && (
-              <div className=”rounded-xl border border-dashed border-border py-12 text-center”>
-                <Puzzle className=”mx-auto mb-2 size-6 text-muted-foreground” />
-                <p className=”text-sm text-muted-foreground”>
+              <div className="rounded-xl border border-dashed border-border py-12 text-center">
+                <Puzzle className="mx-auto mb-2 size-6 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">
                   No integrations match &ldquo;{query}&rdquo;.
                 </p>
                 <button
-                  onClick={() => setQuery(“”)}
-                  className=”mt-3 text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50”
+                  onClick={() => setQuery("")}
+                  className="mt-3 text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   Clear search
                 </button>

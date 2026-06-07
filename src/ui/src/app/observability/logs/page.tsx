@@ -259,7 +259,7 @@ export default function ObservabilityLogsPage() {
           </div>
         </header>
 
-        <main className="relative min-h-0 flex-1 overflow-hidden">
+        <main id="main-content" className="relative min-h-0 flex-1 overflow-hidden">
           <section className="flex h-full min-h-0 min-w-0 flex-col bg-card">
             <div className="border-b border-border px-4 py-3">
               <div className="flex flex-wrap items-center justify-end gap-4 text-sm text-muted-foreground">

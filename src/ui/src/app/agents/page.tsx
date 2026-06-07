@@ -273,7 +273,7 @@ export default function AgentsPage() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main id="main-content" className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 py-6 flex flex-col gap-3">
             {error && (
               <Card className="border-destructive p-3">

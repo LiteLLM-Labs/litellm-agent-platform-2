@@ -97,7 +97,7 @@ export default function SkillsPage() {
           <ThemeToggle />
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main id="main-content" className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-4xl px-6 py-6">
             <div className="mb-6 flex items-start justify-between gap-4">
               <div>

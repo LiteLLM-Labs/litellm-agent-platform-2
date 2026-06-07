@@ -19,7 +19,7 @@ export default function TeamsPage() {
           <ThemeToggle />
         </header>
 
-        <main className="flex-1 overflow-y-auto px-4 py-6">
+        <main id="main-content" className="flex-1 overflow-y-auto px-4 py-6">
           <div className="rounded-xl border border-dashed border-border py-16 text-center">
             <Users className="mx-auto mb-3 size-7 text-muted-foreground" />
             <h2 className="text-base font-semibold tracking-tight">No teams yet</h2>
