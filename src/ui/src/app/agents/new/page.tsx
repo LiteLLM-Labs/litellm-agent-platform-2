@@ -141,6 +141,12 @@ export default function NewAgentPage() {
     }
   };
 
+  const startFromUi = () => {
+    openConfig(withRuntimeDefaultTools(AGENT_TEMPLATES[0].draft, runtimes), "blank", {
+      request: "Manual UI setup",
+    });
+  };
+
   const create = async () => {
     const current = parseAgentDraftConfig(configText);
     if (current.error) {
@@ -215,6 +221,7 @@ export default function NewAgentPage() {
               selectedTemplateId={selectedTemplateId}
               onPromptChange={setPrompt}
               onGenerate={draftFromPrompt}
+              onStartFromUi={startFromUi}
               onTemplateSelect={(template) =>
                 openConfig(withRuntimeDefaultTools(template.draft, runtimes), template.id, { request: template.title })
               }
@@ -302,6 +309,7 @@ function CreateStep({
   selectedTemplateId,
   onPromptChange,
   onGenerate,
+  onStartFromUi,
   onTemplateSelect,
 }: {
   draft: AgentDraft;
@@ -310,6 +318,7 @@ function CreateStep({
   selectedTemplateId: string;
   onPromptChange: (next: string) => void;
   onGenerate: () => void;
+  onStartFromUi: () => void;
   onTemplateSelect: (template: AgentTemplate) => void;
 }) {
   return (
@@ -355,6 +364,17 @@ function CreateStep({
             <Badge variant="outline" className="rounded-md">
               {draft.model}
             </Badge>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onStartFromUi}
+              disabled={drafting}
+              className="gap-1.5"
+            >
+              <Bot className="size-3.5" />
+              Use UI editor
+            </Button>
             <div className="ml-auto" />
             <Button
               type="button"
@@ -692,10 +712,10 @@ function AgentDraftControls({
   };
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto bg-[#f8f6f1] px-5 py-4 text-[#242321] dark:bg-[#262523] dark:text-[#f7f2e8]">
+    <div className="min-h-0 flex-1 overflow-y-auto bg-[#2b2a28] px-5 py-4 text-[#f7f2e8]">
       <div className="mx-auto grid max-w-3xl gap-4">
         <div className="grid gap-1.5">
-          <Label htmlFor="draft-name" className="text-[#4b4640] dark:text-[#ddd4c7]">
+          <Label htmlFor="draft-name" className="text-[#c9c0b1]">
             Name
           </Label>
           <Input
@@ -703,12 +723,12 @@ function AgentDraftControls({
             value={draft.name}
             onChange={(event) => update({ name: event.target.value })}
             placeholder="security-reviewer"
-            className="bg-background text-foreground"
+            className="border-white/10 bg-[#242321] text-[#f7f2e8] placeholder:text-[#9d9384]"
           />
         </div>
 
         <div className="grid gap-1.5">
-          <Label htmlFor="draft-description" className="text-[#4b4640] dark:text-[#ddd4c7]">
+          <Label htmlFor="draft-description" className="text-[#c9c0b1]">
             Description
           </Label>
           <Input
@@ -716,42 +736,46 @@ function AgentDraftControls({
             value={draft.description}
             onChange={(event) => update({ description: event.target.value })}
             placeholder="What this agent does"
-            className="bg-background text-foreground"
+            className="border-white/10 bg-[#242321] text-[#f7f2e8] placeholder:text-[#9d9384]"
           />
         </div>
 
         <div className="grid gap-1.5">
-          <Label className="text-[#4b4640] dark:text-[#ddd4c7]">Model</Label>
-          <ModelSelect
-            value={draft.model}
-            models={availableModels}
-            onValueChange={(model) => update({ model })}
-          />
+          <Label className="text-[#c9c0b1]">Model</Label>
+          <div className="[&_button]:border-white/10 [&_button]:bg-[#242321] [&_button]:text-[#f7f2e8] [&_svg]:text-[#9d9384]">
+            <ModelSelect
+              value={draft.model}
+              models={availableModels}
+              onValueChange={(model) => update({ model })}
+            />
+          </div>
         </div>
 
         <div className="grid gap-1.5">
-          <Label htmlFor="draft-system" className="text-[#4b4640] dark:text-[#ddd4c7]">
+          <Label htmlFor="draft-system" className="text-[#c9c0b1]">
             System prompt
           </Label>
           <Textarea
             id="draft-system"
             value={draft.system}
             onChange={(event) => update({ system: event.target.value })}
-            className="min-h-[280px] resize-y bg-background font-mono text-xs text-foreground"
+            className="min-h-[280px] resize-y border-white/10 bg-[#242321] font-mono text-xs text-[#f7f2e8] placeholder:text-[#9d9384]"
             placeholder="You are a meticulous security reviewer..."
           />
         </div>
 
-        <ScheduleEditor
-          cron={draft.cron}
-          timezone={draft.timezone}
-          onChange={(schedule) => update(schedule)}
-        />
+        <div className="[&_button]:border-white/10 [&_button]:bg-[#242321] [&_button]:text-[#f7f2e8] [&_input]:border-white/10 [&_input]:bg-[#242321] [&_input]:text-[#f7f2e8] [&_label]:text-[#c9c0b1] [&_section]:border-white/10 [&_section]:bg-black/10 [&_svg]:text-[#9d9384]">
+          <ScheduleEditor
+            cron={draft.cron}
+            timezone={draft.timezone}
+            onChange={(schedule) => update(schedule)}
+          />
+        </div>
 
-        <div className="grid gap-2 rounded-md border border-border bg-background p-3 text-foreground">
+        <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
           <div className="flex items-center justify-between gap-3">
             <Label className="text-sm font-medium">Tools</Label>
-            <span className="font-mono text-xs text-muted-foreground">
+            <span className="font-mono text-xs text-[#9d9384]">
               {draft.tools.length} selected
             </span>
           </div>
@@ -759,7 +783,7 @@ function AgentDraftControls({
             {toolOptions.map((toolId) => (
               <label
                 key={toolId}
-                className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md border border-border bg-muted/20 px-2.5 py-2 text-xs hover:bg-muted/40"
+                className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs hover:bg-white/10"
               >
                 <input
                   type="checkbox"
