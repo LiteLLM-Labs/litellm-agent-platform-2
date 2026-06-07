@@ -70,6 +70,20 @@ pub async fn dynamic_mcp(
         req = req.header(name, value);
     }
 
+    // Inject configured static headers (always sent, last to win on conflict).
+    if let Some(obj) = server.static_headers.as_object() {
+        for (name, val) in obj {
+            if let Some(v) = val.as_str() {
+                if let (Ok(n), Ok(hv)) = (
+                    HeaderName::from_bytes(name.as_bytes()),
+                    HeaderValue::from_str(v),
+                ) {
+                    req = req.header(n, hv);
+                }
+            }
+        }
+    }
+
     // Inject auth header.
     if let Some(cred) = credential {
         req = apply_auth(req, server.auth_type.as_deref(), &cred);
@@ -93,13 +107,21 @@ pub async fn dynamic_mcp(
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-fn extract_user_id(headers: &HeaderMap) -> String {
-    headers
-        .get("x-user-id")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.trim().is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| "default".to_owned())
+fn extract_user_id(headers: &HeaderMap, state: &AppState) -> String {
+    let Some(master_key) = state.config.general_settings.master_key.as_deref() else {
+        return "default".to_owned();
+    };
+    let is_admin = require_master_key(headers, Some(master_key)).is_ok();
+    if is_admin {
+        headers
+            .get("x-user-id")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| "default".to_owned())
+    } else {
+        "default".to_owned()
+    }
 }
 
 /// Look up the personal vault key for this (server, user) pair and decrypt it.

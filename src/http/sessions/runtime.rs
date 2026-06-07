@@ -104,8 +104,7 @@ async fn create_runtime_session_row(
         crate::db::managed_agents::skills::compose::compose_agent_system_prompt(pool, &agent)
             .await?;
     let credential = crate::http::agent_runtimes::load_credential(state, &runtime).await?;
-    let mut environment = input.environment.clone().unwrap_or_else(|| json!({}));
-    resolve_agent_vault_keys(state, pool, &agent, &mut environment).await?;
+    let stored_environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
     let initial_user_prompt = input
         .prompt
@@ -121,18 +120,20 @@ async fn create_runtime_session_row(
             title: &title,
             timezone: input.timezone.as_deref().or(input.tz.as_deref()),
             runtime_agent_ref_id: None,
-            environment: environment.clone(),
+            environment: stored_environment.clone(),
             provider_session_id: None,
             provider_run_id: None,
         },
     )
     .await?;
+    let mut provision_environment = stored_environment;
+    resolve_agent_vault_keys(state, pool, &agent, &mut provision_environment).await?;
     let prompt = runtime_prompt(input.prompt, &agent);
     Ok(CreatedRuntimeSession {
         runtime,
         agent,
         credential,
-        environment,
+        environment: provision_environment,
         initial_user_prompt,
         prompt,
         row,

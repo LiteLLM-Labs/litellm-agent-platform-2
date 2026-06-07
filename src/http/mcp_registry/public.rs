@@ -39,14 +39,11 @@ pub struct PublicMcpServer {
     pub allowed_tools: Value,
     pub tool_name_to_display_name: Value,
     pub tool_name_to_description: Value,
-    pub extra_headers: Value,
-    pub static_headers: Value,
     pub status: Option<String>,
     pub last_health_check: Option<i64>,
     pub health_check_error: Option<String>,
     pub command: Option<String>,
     pub args: Value,
-    pub env: Value,
     pub authorization_url: Option<String>,
     pub token_url: Option<String>,
     pub registration_url: Option<String>,
@@ -88,15 +85,12 @@ impl From<McpServerRow> for PublicMcpServer {
             allowed_tools: row.allowed_tools,
             tool_name_to_display_name: row.tool_name_to_display_name,
             tool_name_to_description: row.tool_name_to_description,
-            extra_headers: row.extra_headers,
-            static_headers: row.static_headers,
-            // credentials and env_vars intentionally dropped
+            // credentials, env_vars, env, static_headers, extra_headers intentionally dropped
             status: row.status,
             last_health_check: row.last_health_check,
             health_check_error: row.health_check_error,
             command: row.command,
             args: row.args,
-            env: row.env,
             authorization_url: row.authorization_url,
             token_url: row.token_url,
             registration_url: row.registration_url,
@@ -152,27 +146,22 @@ pub struct ToolsResponse {
     pub tools: Vec<Value>,
 }
 
-#[derive(Debug, Deserialize)]
-struct McpToolsListResponse {
-    tools: Option<Vec<Value>>,
-    result: Option<McpToolsResult>,
-}
-
-#[derive(Debug, Deserialize)]
-struct McpToolsResult {
-    tools: Option<Vec<Value>>,
-}
-
-/// GET /v1/mcp/server/{server_id}/tools — public, no auth required.
-/// Calls the MCP server's tools/list endpoint and returns discovered tools.
+/// GET /v1/mcp/server/{server_id}/tools — auth: any configured gateway key.
 pub async fn list_tools(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(server_id): Path<String>,
 ) -> Result<Json<ToolsResponse>, GatewayError> {
+    require_any_gateway_key(&headers, &state)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let server = repository::get(pool, &server_id)
         .await?
         .ok_or_else(|| GatewayError::NotFound(format!("MCP server not found: {server_id}")))?;
+    if server.approval_status.as_deref() != Some("active") {
+        return Err(GatewayError::NotFound(format!(
+            "MCP server not found: {server_id}"
+        )));
+    }
 
     let url = server
         .url

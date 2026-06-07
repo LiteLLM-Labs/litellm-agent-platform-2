@@ -119,7 +119,9 @@ export default function AgentsPage() {
   };
   const removeVaultKey = (k: string) => {
     setForm((f) => ({ ...f, vault_keys: f.vault_keys.filter((x) => x !== k) }));
-    deleteIntegrationKey(k).then(() =>
+    const entry = storedKeyEntries.find((x) => x.key === k);
+    const scope = (entry?.scope as "personal" | "global") ?? "personal";
+    deleteIntegrationKey(k, scope).then(() =>
       setStoredKeyEntries((p) => p.filter((x) => x.key !== k))
     ).catch(() => {});
     setVaultValues(({ [k]: _drop, ...rest }) => rest);

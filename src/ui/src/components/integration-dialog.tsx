@@ -47,10 +47,17 @@ export function IntegrationDialog({
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`/v1/mcp/server/${server.server_id}/tools`, { cache: "no-store" });
+      const serverName = server.alias ?? server.server_name ?? server.server_id;
+      const res = await fetch(`/${encodeURIComponent(serverName)}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+        cache: "no-store",
+      });
       if (res.ok) {
-        const data = await res.json() as { tools?: { name?: string }[] };
-        const tools = (data.tools ?? []).map((t) => t.name ?? "").filter(Boolean);
+        const data = await res.json() as { result?: { tools?: { name?: string }[] }; tools?: { name?: string }[] };
+        const rawTools = data.result?.tools ?? data.tools ?? [];
+        const tools = rawTools.map((t) => t.name ?? "").filter(Boolean);
         setTestResult({ ok: true, tools: tools.slice(0, 8), count: tools.length });
       } else {
         setTestResult({ ok: false, tools: [], count: 0 });
@@ -180,83 +187,91 @@ export function IntegrationDialog({
           </div>
         )}
 
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-          <Info className="mt-0.5 size-4 shrink-0" />
-          <span>
-            To use this service, please provide your {keyLabel} below.
-            {server.byok_api_key_help_url && (
-              <>
-                {" "}
-                <a
-                  href={server.byok_api_key_help_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline hover:text-foreground"
-                >
-                  Get your {keyLabel}
-                </a>
-              </>
-            )}
-          </span>
-        </div>
-
-        <div className="space-y-2">
-          <label className="font-mono text-xs text-muted-foreground">
-            {keyLabel}
-          </label>
-          <div className="relative">
-            <Input
-              type={reveal ? "text" : "password"}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter API key..."
-              className="h-10 pr-9 font-mono"
-              autoComplete="off"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void onSave();
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setReveal((r) => !r)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              aria-label={reveal ? "Hide API key" : "Show API key"}
-            >
-              {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </button>
+        {server.is_byok && (
+          <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+            <Info className="mt-0.5 size-4 shrink-0" />
+            <span>
+              To use this service, please provide your {keyLabel} below.
+              {server.byok_api_key_help_url && (
+                <>
+                  {" "}
+                  <a
+                    href={server.byok_api_key_help_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-foreground"
+                  >
+                    Get your {keyLabel}
+                  </a>
+                </>
+              )}
+            </span>
           </div>
+        )}
 
-          {error && <div className="text-xs text-destructive">{error}</div>}
+        {server.is_byok ? (
+          <div className="space-y-2">
+            <label className="font-mono text-xs text-muted-foreground">
+              {keyLabel}
+            </label>
+            <div className="relative">
+              <Input
+                type={reveal ? "text" : "password"}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter API key..."
+                className="h-10 pr-9 font-mono"
+                autoComplete="off"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void onSave();
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setReveal((r) => !r)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={reveal ? "Hide API key" : "Show API key"}
+              >
+                {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
 
-          <Button
-            onClick={() => void onSave()}
-            disabled={saving || !apiKey.trim()}
-            className="w-full"
-          >
-            {saving ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Saving
-              </>
-            ) : connected ? (
-              "Update API key"
-            ) : (
-              "Save"
-            )}
-          </Button>
+            {error && <div className="text-xs text-destructive">{error}</div>}
 
-          {connected && (
             <Button
-              variant="ghost"
-              onClick={() => void onDisconnect()}
-              disabled={saving}
-              className="w-full text-destructive hover:text-destructive"
+              onClick={() => void onSave()}
+              disabled={saving || !apiKey.trim()}
+              className="w-full"
             >
-              <Unplug className="size-4" />
-              Disconnect
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Saving
+                </>
+              ) : connected ? (
+                "Update API key"
+              ) : (
+                "Save"
+              )}
             </Button>
-          )}
-        </div>
+
+            {connected && (
+              <Button
+                variant="ghost"
+                onClick={() => void onDisconnect()}
+                disabled={saving}
+                className="w-full text-destructive hover:text-destructive"
+              >
+                <Unplug className="size-4" />
+                Disconnect
+              </Button>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No credentials required — this server is available to all agents automatically.
+          </p>
+        )}
       </DialogContent>
     </Dialog>
   );
