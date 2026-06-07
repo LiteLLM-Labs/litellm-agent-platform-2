@@ -170,6 +170,7 @@ function SessionsStart() {
     setError(null);
     try {
       const title = selectedAgent ? `${selectedAgent.name} session` : promptTitle(trimmed);
+      let shouldAutostartPrompt = Boolean(trimmed);
       const session =
         selectedAgent && !isDbBackedAgent(selectedAgent)
           ? await createSession(title, selectedAgent.id)
@@ -191,6 +192,7 @@ function SessionsStart() {
                 }));
               const environment =
                 runtimeForSession === "cursor" ? cursorEnvironment(repository, ref) : {};
+              shouldAutostartPrompt = false;
               return createSession(title, agent.id, {
                 runtime: runtimeForSession,
                 prompt: trimmed || undefined,
@@ -200,7 +202,7 @@ function SessionsStart() {
       const params = new URLSearchParams({
         id: session.id,
       });
-      if (trimmed) {
+      if (trimmed && shouldAutostartPrompt) {
         params.set("prompt", trimmed);
         params.set("autostart", "1");
       }
