@@ -8,6 +8,8 @@ use axum::{
 
 use crate::{errors::GatewayError, proxy::state::AppState};
 
+use crate::db::managed_agents::channels::{repository as channels_repo, schema::SlackChannelConfig};
+
 use super::{
     config::{bot_token_key, load_agent, load_secret, slack_config},
     web_api,
@@ -24,7 +26,15 @@ pub async fn members(
     let bot_token = load_secret(&state, &bot_token_key(&agent.id, &config)).await?;
     let users =
         web_api::list_users(&state.http, &state.config.slack.api_base_url, &bot_token).await?;
-    Ok(Json(serde_json::json!({ "members": users })))
+    let access_config = channels_repo::get_by_kind(pool, &agent_id, "slack")
+        .await?
+        .and_then(|ch| serde_json::from_value::<SlackChannelConfig>(ch.config).ok())
+        .unwrap_or_default();
+    Ok(Json(serde_json::json!({
+        "members": users,
+        "access": access_config.access.unwrap_or_else(|| "only_me".to_owned()),
+        "allowed_user_ids": access_config.allowed_user_ids.unwrap_or_default(),
+    })))
 }
 
 #[derive(serde::Deserialize)]
@@ -42,6 +52,13 @@ pub async fn update_access(
     if !["only_me", "selected_users", "everyone"].contains(&body.access.as_str()) {
         return Err(GatewayError::InvalidJsonMessage(
             "access must be only_me, selected_users, or everyone".to_owned(),
+        ));
+    }
+    if body.access == "selected_users"
+        && body.allowed_user_ids.as_ref().map_or(true, Vec::is_empty)
+    {
+        return Err(GatewayError::InvalidJsonMessage(
+            "selected_users requires at least one allowed_user_id".to_owned(),
         ));
     }
     let pool = crate::http::managed_agents::db(&state, &headers)?;

@@ -14,7 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { createSlackOAuthState, saveIntegrationKey, updateAgent } from "@/lib/api";
+import { createSlackOAuthState, listSlackChannelMembers, saveIntegrationKey, updateAgent, updateSlackChannelAccess } from "@/lib/api";
 import type { Agent } from "@/lib/types";
 
 const SLACK_BOT_SCOPES = [
@@ -198,6 +198,7 @@ export function useSlackAppFlow(setAgents: Dispatch<SetStateAction<Agent[] | nul
     setCreated(Boolean(existing.app_id || existing.client_id));
     setStep(existing.status === "connected" ? 4 : existing.client_id ? 3 : existing.app_id ? 2 : 1);
     setError(null);
+    // Don't reset access state here — fetchMembers will hydrate from server when step 4 loads.
     setAccessMode("only_me");
     setSelectedUserIds([]);
     setMembers([]);
@@ -295,31 +296,20 @@ export function useSlackAppFlow(setAgents: Dispatch<SetStateAction<Agent[] | nul
   const fetchMembers = async (currentAgent: Agent) => {
     setMembersLoading(true);
     try {
-      const res = await fetch(`/api/agents/${currentAgent.id}/channels/slack/members`);
-      if (res.ok) {
-        const data = await res.json() as {
-          members?: Array<{
-            id: string;
-            is_bot?: boolean;
-            real_name?: string;
-            name?: string;
-            profile?: { display_name?: string; image_48?: string };
-          }>;
-        };
-        const list: SlackMember[] = (data.members ?? [])
-          .filter((m) => !m.is_bot && m.id !== "USLACKBOT")
-          .map((m) => ({
-            id: m.id,
-            displayName: m.profile?.display_name || m.real_name || m.name || m.id,
-            avatarUrl: m.profile?.image_48 ?? "",
-          }));
-        setMembers(list);
-        // Pre-select connecting user
-        const authedId = slackConfig(currentAgent).authed_user_id;
-        if (authedId) {
-          setSelectedUserIds((prev) => (prev.length === 0 ? [authedId] : prev));
-        }
-      }
+      const data = await listSlackChannelMembers(currentAgent.id);
+      const list: SlackMember[] = data.members
+        .filter((m) => !m.is_bot && m.id !== "USLACKBOT")
+        .map((m) => ({
+          id: m.id,
+          displayName: m.profile?.display_name || m.real_name || m.name || m.id,
+          avatarUrl: m.profile?.image_48 ?? "",
+        }));
+      setMembers(list);
+      // Hydrate access state from server so reopening the dialog doesn't overwrite saved settings.
+      setAccessMode(data.access ?? "only_me");
+      setSelectedUserIds(data.allowed_user_ids ?? []);
+    } catch {
+      // Non-fatal: UI still functional without pre-populated access state.
     } finally {
       setMembersLoading(false);
     }
@@ -330,19 +320,10 @@ export function useSlackAppFlow(setAgents: Dispatch<SetStateAction<Agent[] | nul
     setSaving(true);
     setError(null);
     try {
-      const body = {
+      await updateSlackChannelAccess(agent.id, {
         access: accessMode,
         allowed_user_ids: accessMode === "everyone" ? [] : selectedUserIds,
-      };
-      const res = await fetch(`/api/agents/${agent.id}/channels/slack/access`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Failed to save access");
-      }
       setAccessSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

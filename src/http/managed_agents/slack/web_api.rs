@@ -259,26 +259,22 @@ pub async fn list_users(
     api_base_url: &str,
     bot_token: &str,
 ) -> Result<Vec<SlackUser>, GatewayError> {
-    let response: SlackUsersListResponse = client
-        .get(method_url(api_base_url, "users.list"))
-        .bearer_auth(bot_token)
-        .query(&[("limit", "200")])
-        .send()
-        .await
-        .map_err(GatewayError::Upstream)?
-        .json()
-        .await
-        .map_err(GatewayError::Upstream)?;
-    if !response.ok {
-        return Err(slack_api_error("users.list", response.error));
+    let mut all: Vec<SlackUser> = Vec::new();
+    let mut cursor = String::new();
+    loop {
+        let mut q = vec![("limit", "200".to_owned())];
+        if !cursor.is_empty() { q.push(("cursor", cursor.clone())); }
+        let r: SlackUsersListResponse = client
+            .get(method_url(api_base_url, "users.list"))
+            .bearer_auth(bot_token).query(&q).send().await
+            .map_err(GatewayError::Upstream)?.json().await
+            .map_err(GatewayError::Upstream)?;
+        if !r.ok { return Err(slack_api_error("users.list", r.error)); }
+        all.extend(r.members.unwrap_or_default().into_iter().filter(|u| !u.is_bot && u.id != "USLACKBOT"));
+        cursor = r.response_metadata.and_then(|m| m.next_cursor).unwrap_or_default();
+        if cursor.is_empty() { break; }
     }
-    let members = response
-        .members
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|u| !u.is_bot && u.id != "USLACKBOT")
-        .collect();
-    Ok(members)
+    Ok(all)
 }
 
 fn method_url(api_base_url: &str, method: &str) -> String {
