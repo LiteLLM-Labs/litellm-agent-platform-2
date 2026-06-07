@@ -1,8 +1,10 @@
 use serde_json::{json, Value};
 
-use crate::support::{read_events_until_completed, request_json, AppFixture};
+use crate::support::{request_json, AppFixture};
 
-use super::slack_helpers::{now_seconds, signed_json_request};
+use super::slack_helpers::{
+    assert_slack_api_call_count, now_seconds, signed_json_request, slack_api_call_count,
+};
 
 pub async fn assert_agent_factory(fixture: &AppFixture, platform_agent_id: &str) {
     let _anthropic = super::claude_runtime::save_anthropic_credentials(fixture).await;
@@ -128,6 +130,7 @@ async fn assert_factory_slack_dispatch(
     platform_agent_id: &str,
     child_agent_id: &str,
 ) {
+    let update_baseline = slack_api_call_count(fixture, "/chat.update").await;
     signed_json_request(
         fixture,
         &format!("/api/agents/{platform_agent_id}/slack/events"),
@@ -135,13 +138,8 @@ async fn assert_factory_slack_dispatch(
         axum::http::StatusCode::OK,
     )
     .await;
-    let session_id = wait_for_child_thread(fixture, child_agent_id).await;
-    read_events_until_completed(
-        fixture.app.clone(),
-        &format!("/v1/sessions/{session_id}/events/stream"),
-        &session_id,
-    )
-    .await;
+    wait_for_child_thread(fixture, child_agent_id).await;
+    assert_slack_api_call_count(fixture, "/chat.update", update_baseline + 1).await;
 }
 
 async fn wait_for_child_thread(fixture: &AppFixture, child_agent_id: &str) -> String {
