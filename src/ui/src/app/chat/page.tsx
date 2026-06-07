@@ -213,6 +213,27 @@ function mergeServerAndRuntimeMessages(
   let activeServerUserIndex: number | null = null;
 
   for (const message of localOnly) {
+    const runtimeUserText =
+      message.info.role === "assistant" && typeof message.info.runtimeUserText === "string"
+        ? message.info.runtimeUserText
+        : "";
+    if (runtimeUserText) {
+      const serverIndex = serverMessages.findIndex((serverMessage, index) => (
+        !consumedServerUsers.has(index) &&
+        serverMessage.info.role === "user" &&
+        messageText(serverMessage) === runtimeUserText
+      ));
+      if (serverIndex === -1) {
+        trailing.push(message);
+      } else {
+        consumedServerUsers.add(serverIndex);
+        const items = insertAfter.get(serverIndex) ?? [];
+        items.push(message);
+        insertAfter.set(serverIndex, items);
+      }
+      continue;
+    }
+
     if (isRuntimeOptimisticUser(message, sessionId)) {
       const text = messageText(message);
       const serverIndex = serverMessages.findIndex((serverMessage, index) => (
@@ -270,6 +291,7 @@ function ChatInner() {
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [runtimeHistoryLoaded, setRuntimeHistoryLoaded] = useState(false);
   const [providerSessionId, setProviderSessionId] = useState<string | undefined>();
   const [providerUrl, setProviderUrl] = useState<string | undefined>();
   const [sessionTitle, setSessionTitle] = useState<string>("");
@@ -282,15 +304,18 @@ function ChatInner() {
     textPartId: string;
     thinkingPartId: string;
   } | null>(null);
+  const activeSessionRef = useRef<string | null>(null);
   const autostartedRef = useRef<string | null>(null);
 
   const refetch = useCallback(async () => {
     if (!sid) return;
     try {
+      const sessionId = sid;
       const list = await getMessages(sid);
+      if (activeSessionRef.current !== sessionId) return;
       setMessages((prev) => {
         if (!prev) return list;
-        return mergeServerAndRuntimeMessages(list, prev, sid);
+        return mergeServerAndRuntimeMessages(list, prev, sessionId);
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -350,12 +375,20 @@ function ChatInner() {
   // Fetch session metadata to get the locked agent
   useEffect(() => {
     if (!sid) return;
+    activeSessionRef.current = sid;
     seenRuntimeEventIdsRef.current = new Set();
     runtimeReplayEventCountRef.current = 0;
     eventBufferRef.current = [];
     runtimeAssistantRef.current = null;
+    setMessages(null);
+    setError(null);
     setSessionLoaded(false);
+    setRuntimeHistoryLoaded(false);
+    setProviderSessionId(undefined);
+    setProviderUrl(undefined);
+    setSessionTitle("");
     getSession(sid).then(s => {
+      if (activeSessionRef.current !== sid) return;
       const a = s.agent_id ?? s.agent ?? s.harness;
       if (a) setSessionHarness(a);
       setSessionRuntime(s.runtime);
@@ -363,7 +396,9 @@ function ChatInner() {
       setProviderSessionId(s.provider_session_id);
       setProviderUrl(s.provider_url);
       if (s.title) setSessionTitle(s.title);
-    }).catch(() => {}).finally(() => setSessionLoaded(true));
+    }).catch(() => {}).finally(() => {
+      if (activeSessionRef.current === sid) setSessionLoaded(true);
+    });
   }, [sid]);
 
   // Fetch saved agents for dropdown
@@ -397,6 +432,17 @@ function ChatInner() {
       };
     }
     return runtimeAssistantRef.current;
+  }, [sid]);
+
+  const setRuntimeAssistantIds = useCallback((messageId: string) => {
+    if (!sid) return null;
+    const ids = {
+      messageId,
+      textPartId: `${messageId}_text`,
+      thinkingPartId: `${messageId}_thinking`,
+    };
+    runtimeAssistantRef.current = ids;
+    return ids;
   }, [sid]);
 
   const ensureRuntimeAssistantMessage = useCallback(() => {
@@ -571,6 +617,74 @@ function ChatInner() {
     setSessionStatus("busy");
   }, [runtimeAssistantIds, sessionRuntime, sid]);
 
+  const beginRuntimeReplayTurn = useCallback((ev: RuntimeAgentEvent) => {
+    if (!sid) return;
+    const userText = runtimeTextValue(ev.content).trim();
+    const eventId = typeof ev.id === "string" && ev.id ? ev.id : Date.now().toString(36);
+    const ids = setRuntimeAssistantIds(`${sid}_runtime_${eventId}`);
+    if (!ids) return;
+
+    setMessages((prev) => {
+      const next = [...(prev ?? [])];
+      let userIndex = -1;
+      if (userText) {
+        for (let index = 0; index < next.length; index += 1) {
+          const message = next[index];
+          if (message.info.role !== "user" || messageText(message) !== userText) continue;
+          const nextUserIndex = next.findIndex(
+            (candidate, candidateIndex) => candidateIndex > index && candidate.info.role === "user",
+          );
+          const searchEnd = nextUserIndex === -1 ? next.length : nextUserIndex;
+          const hasAssistant = next
+            .slice(index + 1, searchEnd)
+            .some((candidate) => candidate.info.role === "assistant");
+          if (!hasAssistant) {
+            userIndex = index;
+            break;
+          }
+          if (userIndex === -1) userIndex = index;
+        }
+      }
+
+      const existingIndex = next.findIndex((message) => message.info.id === ids.messageId);
+      if (existingIndex !== -1) return next;
+
+      const assistantMessage: HarnessMessage = {
+        info: { id: ids.messageId, role: "assistant", sessionID: sid, runtimeUserText: userText },
+        parts: [],
+      };
+      if (userIndex === -1) return [...next, assistantMessage];
+      return [
+        ...next.slice(0, userIndex + 1),
+        assistantMessage,
+        ...next.slice(userIndex + 1),
+      ];
+    });
+    setSessionStatus("busy");
+  }, [setRuntimeAssistantIds, sid]);
+
+  useEffect(() => {
+    if (!sid || !sessionRuntime || !runtimeHistoryLoaded || sessionStatus !== "busy" || !messages) return;
+    const hasPendingAssistant = messages.some((message) => {
+      if (message.info.role !== "assistant") return false;
+      if (message.info.finish) return false;
+      return message.parts.length === 0;
+    });
+    let lastUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].info.role === "user") {
+        lastUserIndex = index;
+        break;
+      }
+    }
+    const hasAssistantAfterLastUser =
+      lastUserIndex !== -1 &&
+      messages.slice(lastUserIndex + 1).some((message) => message.info.role === "assistant");
+    if (!hasPendingAssistant && !hasAssistantAfterLastUser) {
+      ensureRuntimeAssistantMessage();
+    }
+  }, [ensureRuntimeAssistantMessage, messages, runtimeHistoryLoaded, sessionRuntime, sessionStatus, sid]);
+
   const handleRuntimeEvent = useCallback((ev: RuntimeAgentEvent) => {
     const eventId = typeof ev.id === "string" ? ev.id : "";
     if (eventId) {
@@ -585,8 +699,12 @@ function ChatInner() {
 
     const type = normalizedRuntimeEventType(ev);
 
+    if (type === "user.message") {
+      beginRuntimeReplayTurn(ev);
+      return;
+    }
+
     if (type === "session.status_running") {
-      ensureRuntimeAssistantMessage();
       setSessionStatus("busy");
       return;
     }
@@ -637,7 +755,7 @@ function ChatInner() {
       appendRuntimePartText(isRuntimeThinkingEvent(type) ? "thinking" : runtimeEventPartKind(ev), delta);
     }
     setSessionStatus("busy");
-  }, [appendRuntimePartText, appendRuntimeToolEvent, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
+  }, [appendRuntimePartText, appendRuntimeToolEvent, beginRuntimeReplayTurn, ensureRuntimeAssistantMessage, finishRuntimeAssistantMessage]);
 
   const replayRuntimeEvents = useCallback((events: RuntimeAgentEvent[]) => {
     const start = Math.min(runtimeReplayEventCountRef.current, events.length);
@@ -651,8 +769,16 @@ function ChatInner() {
     let unsub: (() => void) | undefined;
     if (sessionRuntime) {
       listRuntimeEvents(sid)
-        .then(replayRuntimeEvents)
-        .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+        .then((events) => {
+          if (activeSessionRef.current !== sid) return;
+          replayRuntimeEvents(events);
+          setRuntimeHistoryLoaded(true);
+        })
+        .catch((err) => {
+          if (activeSessionRef.current !== sid) return;
+          setRuntimeHistoryLoaded(true);
+          setError(err instanceof Error ? err.message : String(err));
+        });
       if (sessionStatus === "busy" || autostartPrompt) {
         unsub = subscribeRuntimeEvents({
           sessionId: sid,
@@ -671,10 +797,12 @@ function ChatInner() {
         runtime: sessionRuntime,
       })
         .then(() => {
+          if (activeSessionRef.current !== sid) return;
           if (!sessionRuntime) return refetch();
         })
         .then(() => router.replace(`/chat/?id=${encodeURIComponent(sid)}`))
         .catch((err) => {
+          if (activeSessionRef.current !== sid) return;
           setError(err instanceof Error ? err.message : String(err));
           setSessionStatus("idle");
           runtimeAssistantRef.current = null;
@@ -691,10 +819,13 @@ function ChatInner() {
       listRuntimeEvents(sid)
         .then((events) => {
           if (!active) return;
+          if (activeSessionRef.current !== sid) return;
           replayRuntimeEvents(events);
         })
         .catch((err) => {
-          if (active) setError(err instanceof Error ? err.message : String(err));
+          if (active && activeSessionRef.current === sid) {
+            setError(err instanceof Error ? err.message : String(err));
+          }
         });
     };
     replay();
