@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KeyRound, Trash2, Pencil, Plus, Loader2, Eye, EyeOff } from "lucide-react";
+import { KeyRound, Trash2, Pencil, Plus, Loader2, Eye, EyeOff, Globe, User } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +18,7 @@ import {
   saveIntegrationKey,
   deleteIntegrationKey,
 } from "@/lib/api";
-import type { VaultKeyEntry } from "@/lib/api";
+import type { VaultKeyEntry } from "@/lib/types";
 
 function timeAgo(ts?: number): string {
   if (!ts) return "";
@@ -34,7 +33,7 @@ function timeAgo(ts?: number): string {
 }
 
 type EditorState =
-  | { mode: "add" }
+  | { mode: "add"; defaultScope: "personal" | "global" }
   | { mode: "edit"; entry: VaultKeyEntry };
 
 export default function VaultPage() {
@@ -42,7 +41,6 @@ export default function VaultPage() {
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [showEnv, setShowEnv] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -57,21 +55,16 @@ export default function VaultPage() {
     refresh();
   }, []);
 
-  const onDelete = (key: string) => {
-    setDeleteTarget(key);
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const key = deleteTarget;
-    setDeleteTarget(null);
-    setKeys((prev) => prev?.filter((k) => k.key !== key) ?? null);
-    await deleteIntegrationKey(key);
+  const onDelete = async (entry: VaultKeyEntry) => {
+    setKeys((prev) => prev?.filter((k) => k.key !== entry.key || k.scope !== entry.scope) ?? null);
+    await deleteIntegrationKey(entry.key, entry.scope);
     await refresh();
   };
 
-  const vaultKeys = keys?.filter((k) => k.source !== "env") ?? [];
+  const globalKeys = keys?.filter((k) => k.scope === "global" && k.source !== "env") ?? [];
+  const personalKeys = keys?.filter((k) => k.scope === "personal" && k.source !== "env") ?? [];
   const envKeys = keys?.filter((k) => k.source === "env") ?? [];
+  const empty = globalKeys.length === 0 && personalKeys.length === 0;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -83,15 +76,11 @@ export default function VaultPage() {
             <h1 className="text-sm font-semibold">Vault</h1>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => setEditor({ mode: "add" })}>
-              <Plus className="size-4" />
-              Add secret
-            </Button>
             <ThemeToggle />
           </div>
         </header>
 
-        <main id="main-content" className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-6">
           {error && (
             <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {error}
@@ -100,55 +89,124 @@ export default function VaultPage() {
 
           {keys === null && !error && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+              <Loader2 className="size-4 animate-spin" />
               Loading…
             </div>
           )}
 
-          {keys !== null && vaultKeys.length === 0 && (
+          {keys !== null && empty && (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
               <KeyRound className="size-10 text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">No secrets stored yet.</p>
-              <Button size="sm" onClick={() => setEditor({ mode: "add" })}>
+              <Button size="sm" onClick={() => setEditor({ mode: "add", defaultScope: "personal" })}>
                 <Plus className="size-4" />
                 Add your first secret
               </Button>
             </div>
           )}
 
-          {vaultKeys.length > 0 && (
-            <div className="max-w-2xl space-y-2">
-              {vaultKeys.map((entry) => (
-                <SecretRow
-                  key={entry.key}
-                  entry={entry}
-                  onEdit={() => setEditor({ mode: "edit", entry })}
-                  onDelete={() => onDelete(entry.key)}
-                />
-              ))}
-            </div>
-          )}
-
-          {keys !== null && envKeys.length > 0 && (
-            <div className="mt-6 max-w-2xl">
-              <button
-                onClick={() => setShowEnv((v) => !v)}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 rounded"
-                aria-expanded={showEnv}
-              >
-                <span>{showEnv ? "▾" : "▸"}</span>
-                <span>{envKeys.length} environment variable{envKeys.length !== 1 ? "s" : ""} available as secrets</span>
-              </button>
-              {showEnv && (
-                <div className="mt-2 space-y-1.5">
-                  {envKeys.map((entry) => (
-                    <SecretRow
-                      key={entry.key}
-                      entry={entry}
-                      onEdit={() => setEditor({ mode: "edit", entry })}
-                    />
-                  ))}
+          {keys !== null && !empty && (
+            <div className="max-w-2xl space-y-6">
+              {/* Global Keys */}
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Globe className="size-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Global Keys
+                    </span>
+                    <span className="text-xs text-muted-foreground">(admin-managed, visible to all users)</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => setEditor({ mode: "add", defaultScope: "global" })}
+                  >
+                    <Plus className="size-3" />
+                    Add global key
+                  </Button>
                 </div>
+                {globalKeys.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
+                    No global keys yet.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {globalKeys.map((entry) => (
+                      <SecretRow
+                        key={`global:${entry.key}`}
+                        entry={entry}
+                        onEdit={() => setEditor({ mode: "edit", entry })}
+                        onDelete={() => onDelete(entry)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Personal Keys */}
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <User className="size-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      My Keys
+                    </span>
+                    <span className="text-xs text-muted-foreground">(only you can see these)</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => setEditor({ mode: "add", defaultScope: "personal" })}
+                  >
+                    <Plus className="size-3" />
+                    Add my key
+                  </Button>
+                </div>
+                {personalKeys.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border px-4 py-3 text-xs text-muted-foreground">
+                    No personal keys yet.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {personalKeys.map((entry) => (
+                      <SecretRow
+                        key={`personal:${entry.key}`}
+                        entry={entry}
+                        onEdit={() => setEditor({ mode: "edit", entry })}
+                        onDelete={() => onDelete(entry)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Environment variables (read-only) */}
+              {envKeys.length > 0 && (
+                <section>
+                  <button
+                    onClick={() => setShowEnv((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <span>{showEnv ? "▾" : "▸"}</span>
+                    <span>
+                      {envKeys.length} environment variable{envKeys.length !== 1 ? "s" : ""} available as secrets
+                    </span>
+                  </button>
+                  {showEnv && (
+                    <div className="mt-2 space-y-1.5">
+                      {envKeys.map((entry) => (
+                        <SecretRow
+                          key={`env:${entry.key}`}
+                          entry={entry}
+                          onEdit={() => setEditor({ mode: "edit", entry })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
               )}
             </div>
           )}
@@ -163,21 +221,6 @@ export default function VaultPage() {
           refresh();
         }}
       />
-
-      <Dialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete secret</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Delete <span className="font-mono font-medium text-foreground">{deleteTarget}</span>? This cannot be undone.
-          </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" size="sm" onClick={() => void confirmDelete()}>Delete</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -195,14 +238,33 @@ function SecretRow({
   const hasTimestamp = (entry.updated_at ?? 0) > 0;
 
   return (
-    <div className={`group flex items-center justify-between rounded-lg border px-4 py-3 ${isEnv ? "border-border/50 bg-muted/20" : "border-border bg-card"}`}>
+    <div
+      className={`group flex items-center justify-between rounded-lg border px-4 py-3 ${
+        isEnv ? "border-border/50 bg-muted/20" : "border-border bg-card"
+      }`}
+    >
       <div className="min-w-0 flex-1">
-        <div className={`font-mono text-sm font-medium ${isEnv ? "text-muted-foreground" : ""}`}>{entry.key}</div>
+        <div className={`font-mono text-sm font-medium ${isEnv ? "text-muted-foreground" : ""}`}>
+          {entry.key}
+        </div>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono tracking-widest">••••••••</span>
           {hasTimestamp && <span>· updated {timeAgo(entry.updated_at)}</span>}
           {isEnv && (
-            <span className="rounded bg-muted px-1 py-0.5 text-[10px] uppercase tracking-wide">env</span>
+            <span className="rounded bg-muted px-1 py-0.5 text-[10px] uppercase tracking-wide">
+              env
+            </span>
+          )}
+          {!isEnv && (
+            <span
+              className={`rounded px-1 py-0.5 text-[10px] uppercase tracking-wide ${
+                entry.scope === "global"
+                  ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {entry.scope}
+            </span>
           )}
         </div>
       </div>
@@ -243,6 +305,7 @@ function VaultEditor({
 }) {
   const [keyName, setKeyName] = useState("");
   const [value, setValue] = useState("");
+  const [scope, setScope] = useState<"personal" | "global">("personal");
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -253,8 +316,10 @@ function VaultEditor({
   useEffect(() => {
     if (state?.mode === "edit") {
       setKeyName(state.entry.key);
-    } else {
+      setScope(state.entry.scope);
+    } else if (state?.mode === "add") {
       setKeyName("");
+      setScope(state.defaultScope);
     }
     setValue("");
     setReveal(false);
@@ -268,7 +333,7 @@ function VaultEditor({
     setSaving(true);
     setError(null);
     try {
-      await saveIntegrationKey(k, v);
+      await saveIntegrationKey(k, v, scope);
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -290,13 +355,49 @@ function VaultEditor({
         </DialogHeader>
 
         <div className="space-y-4">
+          {/* Scope selector — only shown when adding */}
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Scope
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScope("personal")}
+                  className={`flex flex-1 items-center gap-1.5 rounded-md border px-3 py-2 text-xs transition-colors ${
+                    scope === "personal"
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border text-muted-foreground hover:border-foreground/30"
+                  }`}
+                >
+                  <User className="size-3.5" />
+                  My key
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScope("global")}
+                  className={`flex flex-1 items-center gap-1.5 rounded-md border px-3 py-2 text-xs transition-colors ${
+                    scope === "global"
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border text-muted-foreground hover:border-foreground/30"
+                  }`}
+                >
+                  <Globe className="size-3.5" />
+                  Global (admin)
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <Label htmlFor="vault-key-name" className="text-xs font-medium uppercase tracking-wide">Key name</Label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Key name
+            </label>
             <Input
-              id="vault-key-name"
               value={keyName}
               onChange={(e) => setKeyName(e.target.value)}
-              placeholder="e.g. GITHUB_TOKEN"
+              placeholder="e.g. GMAIL_API_KEY"
               className="font-mono"
               disabled={isEdit}
               autoComplete="off"
@@ -305,10 +406,11 @@ function VaultEditor({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="vault-key-value" className="text-xs font-medium uppercase tracking-wide">Value</Label>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Value
+            </label>
             <div className="relative">
               <Input
-                id="vault-key-value"
                 type={reveal ? "text" : "password"}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
@@ -340,7 +442,7 @@ function VaultEditor({
           >
             {saving ? (
               <>
-                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                <Loader2 className="size-4 animate-spin" />
                 Saving…
               </>
             ) : isEdit ? (

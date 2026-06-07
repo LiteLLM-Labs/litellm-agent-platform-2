@@ -10,6 +10,7 @@ import type {
   PlatformMcp,
   Skill,
   SpendLog,
+  VaultKeyEntry,
 } from "./types";
 
 const BASE = "";
@@ -737,12 +738,15 @@ function fallbackList(): string[] {
 export async function saveIntegrationKey(
   envKey: string,
   value: string,
+  scope: "personal" | "global" = "personal",
 ): Promise<"vault" | "session"> {
   try {
-    const res = await req(`/api/vault/${VAULT_USER}`, {
+    const endpoint =
+      scope === "global" ? `/api/vault/global` : `/api/vault/${VAULT_USER}`;
+    const res = await req(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: envKey, value }),
+      body: JSON.stringify({ key: envKey, value, scope }),
     });
     if (res.ok) return "vault";
   } catch {
@@ -752,12 +756,17 @@ export async function saveIntegrationKey(
   return "session";
 }
 
-/** Remove a stored integration key from both vault and sessionStorage. */
-export async function deleteIntegrationKey(envKey: string): Promise<void> {
+/** Remove a stored integration key from vault and sessionStorage. */
+export async function deleteIntegrationKey(
+  envKey: string,
+  scope: "personal" | "global" = "personal",
+): Promise<void> {
   try {
-    await req(`/api/vault/${VAULT_USER}/${encodeURIComponent(envKey)}`, {
-      method: "DELETE",
-    });
+    const endpoint =
+      scope === "global"
+        ? `/api/vault/global/${encodeURIComponent(envKey)}`
+        : `/api/vault/${VAULT_USER}/${encodeURIComponent(envKey)}`;
+    await req(endpoint, { method: "DELETE" });
   } catch {
     /* noop */
   }
@@ -779,15 +788,15 @@ export async function listIntegrationKeys(): Promise<string[]> {
   return [...keys];
 }
 
-export interface VaultKeyEntry {
-  key: string;
-  updated_at?: number;
-  source?: string;
-}
+// VaultKeyEntry is defined in types.ts
+export type { VaultKeyEntry } from "./types";
 
-/** List all vault keys with metadata (no values). */
+/** List all vault keys with metadata for the current user (personal + global). */
 export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
-  const fallback: VaultKeyEntry[] = fallbackList().map((k) => ({ key: k }));
+  const fallback: VaultKeyEntry[] = fallbackList().map((k) => ({
+    key: k,
+    scope: "personal" as const,
+  }));
   const byKey = new Map<string, VaultKeyEntry>(fallback.map((e) => [e.key, e]));
   try {
     const res = await req(`/api/vault/${VAULT_USER}`);

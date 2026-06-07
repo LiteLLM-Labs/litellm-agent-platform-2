@@ -25,7 +25,7 @@ import {
   updateAgent,
   deleteAgent,
   listSkills,
-  listIntegrationKeys,
+  listVaultKeys,
   listPlatformMcps,
   saveIntegrationKey,
   deleteIntegrationKey,
@@ -34,7 +34,7 @@ import {
   deleteMemory,
 } from "@/lib/api";
 import { DEFAULT_TIMEZONE, scheduleLabel } from "@/lib/schedule";
-import type { Agent, Skill, Memory, PlatformMcp } from "@/lib/types";
+import type { Agent, Skill, Memory, VaultKeyEntry, PlatformMcp } from "@/lib/types";
 import {
   slackActionClass,
   slackActionLabel,
@@ -87,10 +87,9 @@ export default function AgentsPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [vaultKeyInput, setVaultKeyInput] = useState("");
   const [vaultValues, setVaultValues] = useState<Record<string, string>>({});
-  const [storedKeys, setStoredKeys] = useState<string[]>([]);
+  const [storedKeyEntries, setStoredKeyEntries] = useState<VaultKeyEntry[]>([]);
   const [memories, setMemories] = useState<Memory[] | null>(null);
   const [memKey, setMemKey] = useState("");
   const [memValue, setMemValue] = useState("");
@@ -108,7 +107,7 @@ export default function AgentsPage() {
     load();
     listSkills().then(setSkills).catch(() => setSkills([]));
     listPlatformMcps().then(setPlatformMcps).catch(() => setPlatformMcps([]));
-    listIntegrationKeys().then(setStoredKeys).catch(() => setStoredKeys([]));
+    listVaultKeys().then(setStoredKeyEntries).catch(() => setStoredKeyEntries([]));
   }, []);
 
   const addVaultKey = () => {
@@ -119,15 +118,21 @@ export default function AgentsPage() {
   };
   const removeVaultKey = (k: string) => {
     setForm((f) => ({ ...f, vault_keys: f.vault_keys.filter((x) => x !== k) }));
-    deleteIntegrationKey(k).then(() => setStoredKeys((p) => p.filter((x) => x !== k))).catch(() => {});
+    deleteIntegrationKey(k).then(() =>
+      setStoredKeyEntries((p) => p.filter((x) => x.key !== k))
+    ).catch(() => {});
     setVaultValues(({ [k]: _drop, ...rest }) => rest);
   };
   const saveVaultValue = async (k: string) => {
     const v = vaultValues[k];
     if (!v) return;
     try {
-      await saveIntegrationKey(k, v);
-      setStoredKeys((p) => (p.includes(k) ? p : [...p, k]));
+      await saveIntegrationKey(k, v, "personal");
+      setStoredKeyEntries((p) =>
+        p.some((x) => x.key === k)
+          ? p
+          : [...p, { key: k, scope: "personal" }]
+      );
       setVaultValues(({ [k]: _drop, ...rest }) => rest);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
@@ -238,13 +243,7 @@ export default function AgentsPage() {
   };
 
   const remove = async (ag: Agent) => {
-    setDeleteTarget(ag);
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    const ag = deleteTarget;
-    setDeleteTarget(null);
+    if (!confirm(`Delete agent "${String(ag.name)}"?`)) return;
     setAgents((prev) => prev?.filter((x) => x.id !== ag.id) ?? null);
     try {
       await deleteAgent(ag.id);
@@ -273,7 +272,7 @@ export default function AgentsPage() {
           </div>
         </header>
 
-        <main id="main-content" className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 py-6 flex flex-col gap-3">
             {error && (
               <Card className="border-destructive p-3">
@@ -281,26 +280,11 @@ export default function AgentsPage() {
               </Card>
             )}
             {!agents && !error && (
-              <div className="flex flex-col gap-3">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="border border-border rounded-lg p-4 flex flex-col gap-2">
-                    <div className="h-4 w-1/3 bg-muted rounded animate-pulse motion-reduce:animate-none" />
-                    <div className="h-3 w-2/3 bg-muted rounded animate-pulse motion-reduce:animate-none" />
-                  </div>
-                ))}
-              </div>
+              <div className="text-sm text-muted-foreground">Loading…</div>
             )}
             {agents && agents.length === 0 && (
-              <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-                <Brain className="size-10 text-muted-foreground/40" />
-                <div className="flex flex-col gap-1">
-                  <p className="text-sm font-medium">No agents yet</p>
-                  <p className="text-xs text-muted-foreground">Start with a template or draft one from a prompt.</p>
-                </div>
-                <Button size="sm" onClick={() => router.push("/agents/new/")}>
-                  <Plus className="size-4" />
-                  Create agent
-                </Button>
+              <div className="text-center text-sm text-muted-foreground py-16">
+                No agents yet. Start with a template or draft one from a prompt.
               </div>
             )}
             {agents?.map((ag) => {
@@ -323,7 +307,7 @@ export default function AgentsPage() {
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{String(ag.description)}</p>
                   )}
                   {Boolean(ag.prompt) && (
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1 font-mono">{String(ag.prompt)}</p>
+                    <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-1 font-mono">{String(ag.prompt)}</p>
                   )}
                   <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1.5">
                     <Clock className="size-3" />
@@ -381,21 +365,6 @@ export default function AgentsPage() {
           </div>
         </main>
       </div>
-
-      <Dialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete agent</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Delete <span className="font-medium text-foreground">"{String(deleteTarget?.name)}"</span>? This cannot be undone.
-          </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" size="sm" onClick={() => void confirmDelete()}>Delete</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[92vw] sm:max-w-2xl max-h-[88vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 p-0">
@@ -539,12 +508,18 @@ export default function AgentsPage() {
               {form.vault_keys.length > 0 && (
                 <div className="rounded-md border border-border divide-y divide-border">
                   {form.vault_keys.map((k) => {
-                    const isSet = storedKeys.includes(k);
+                    const entry = storedKeyEntries.find((x) => x.key === k);
+                    const isSet = !!entry;
+                    const badgeLabel = isSet
+                      ? entry.scope === "global"
+                        ? "set (global)"
+                        : "set (personal)"
+                      : "no value";
                     return (
                       <div key={k} className="flex items-center gap-2 px-2.5 py-1.5">
                         <span className="text-xs font-mono min-w-0 flex-1 truncate">{k}</span>
                         <Badge variant={isSet ? "secondary" : "outline"} className="text-[10px]">
-                          {isSet ? "set" : "no value"}
+                          {badgeLabel}
                         </Badge>
                         <Input
                           type="password"
