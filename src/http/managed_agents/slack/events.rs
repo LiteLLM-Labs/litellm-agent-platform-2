@@ -52,8 +52,7 @@ pub async fn events(
             super::authorize_slack_invocation(&pool, &agent_id, user_id, team_id).await
         {
             if !user_id.is_empty() {
-                if let Ok(bot_token) =
-                    load_secret(&state, &bot_token_key(&agent.id, &config)).await
+                if let Ok(bot_token) = load_secret(&state, &bot_token_key(&agent.id, &config)).await
                 {
                     let channel_id = payload
                         .get("event")

@@ -1,8 +1,8 @@
-use sqlx::PgPool;
 use crate::{
     db::managed_agents::channels::{repository as channels_repo, schema::SlackChannelConfig},
     errors::GatewayError,
 };
+use sqlx::PgPool;
 
 #[derive(Debug)]
 pub enum SlackAuthError {
@@ -40,8 +40,7 @@ pub async fn authorize_slack_invocation(
         return Err(SlackAuthError::ChannelDisabled);
     }
 
-    let config: SlackChannelConfig = serde_json::from_value(channel.config)
-        .unwrap_or_default();
+    let config: SlackChannelConfig = serde_json::from_value(channel.config).unwrap_or_default();
 
     if let Some(ref stored_team) = config.team_id {
         if stored_team != team_id {

@@ -123,7 +123,13 @@ async fn store_oauth_result(
         "allowed_user_ids": authed_user_id.as_ref().map(|id| vec![id.clone()]).unwrap_or_default(),
         "authed_user_id": authed_user_id,
     });
-    crate::db::managed_agents::channels::repository::upsert(pool, &agent.id, "slack", channel_config).await?;
+    crate::db::managed_agents::channels::repository::upsert(
+        pool,
+        &agent.id,
+        "slack",
+        channel_config,
+    )
+    .await?;
 
     Ok(Redirect::to("/agents/?slack=connected"))
 }

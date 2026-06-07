@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use axum::{extract::{Path, State}, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 
 use crate::{errors::GatewayError, proxy::state::AppState};
 
@@ -18,7 +22,8 @@ pub async fn members(
     let agent = load_agent(pool, &agent_id).await?;
     let config = slack_config(&agent)?;
     let bot_token = load_secret(&state, &bot_token_key(&agent.id, &config)).await?;
-    let users = web_api::list_users(&state.http, &state.config.slack.api_base_url, &bot_token).await?;
+    let users =
+        web_api::list_users(&state.http, &state.config.slack.api_base_url, &bot_token).await?;
     Ok(Json(serde_json::json!({ "members": users })))
 }
 
@@ -44,6 +49,7 @@ pub async fn update_access(
         "access": body.access,
         "allowed_user_ids": body.allowed_user_ids.unwrap_or_default(),
     });
-    crate::db::managed_agents::channels::repository::update_config(pool, &agent_id, "slack", patch).await?;
+    crate::db::managed_agents::channels::repository::update_config(pool, &agent_id, "slack", patch)
+        .await?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
