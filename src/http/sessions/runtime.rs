@@ -216,7 +216,7 @@ async fn resolve_agent_vault_keys(
     }
     let enc_key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
-    let owner_id = agent.owner_id.as_deref().unwrap_or("local");
+    let owner_id = agent.owner_id.as_deref().unwrap_or("");
     let env_obj = environment.as_object_mut().ok_or_else(|| {
         GatewayError::InvalidJsonMessage("environment must be an object".to_owned())
     })?;
