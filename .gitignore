@@ -5,3 +5,4 @@
 src/ui/out/
 src/ui/.next/
 src/ui/mcp-admin-flow.mjs
+src/ui/composio-nav.mjs

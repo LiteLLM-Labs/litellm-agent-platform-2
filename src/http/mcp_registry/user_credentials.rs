@@ -100,7 +100,9 @@ pub async fn store(
 /// DELETE /v1/mcp/server/{server_id}/user-credential
 ///
 /// Remove the caller's personal credential for a BYOK MCP server.
-/// Returns 200 if deleted, 404 if no credential was found.
+/// Deletes both the legacy `mcp_user:{server_id}:{user_id}` key and any
+/// per-variable `mcp_var:{server_id}:*` keys stored for this user.
+/// Returns 200 if at least one credential was deleted, 404 if none found.
 pub async fn delete_credential(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -111,9 +113,31 @@ pub async fn delete_credential(
     let user_id = caller_user_id(&headers, &state);
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    let k = key_name(&server_id, &user_id);
-    let deleted = credentials::delete_vault_key(pool, &k, "personal", Some(&user_id)).await?;
 
+    // Delete the legacy single-credential key.
+    let k = key_name(&server_id, &user_id);
+    let deleted_legacy =
+        credentials::delete_vault_key(pool, &k, "personal", Some(&user_id)).await?;
+
+    // Also delete all per-variable keys (`mcp_var:{server_id}:*`) for this user.
+    let mcp_var_prefix = format!("mcp_var:{}:", server_id);
+    let deleted_vars = sqlx::query(
+        r#"
+        DELETE FROM "LiteLLM_CredentialsTable"
+        WHERE credential_name LIKE $1
+          AND scope = 'personal'
+          AND owner_id = $2
+        "#,
+    )
+    .bind(format!("{}%", mcp_var_prefix))
+    .bind(&user_id)
+    .execute(pool)
+    .await
+    .map_err(GatewayError::Database)?
+    .rows_affected()
+        > 0;
+
+    let deleted = deleted_legacy || deleted_vars;
     let status = if deleted {
         StatusCode::OK
     } else {
@@ -136,6 +160,10 @@ pub async fn list(
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
 
+    // Fetch both legacy `mcp_user:{server_id}:{user_id}` keys and per-variable
+    // `mcp_var:{server_id}:{var_name}` keys.  Both share scope='personal' and
+    // owner_id = calling user.  We deduplicate by server_id, keeping the most
+    // recently updated timestamp.
     let rows = sqlx::query_as::<_, credentials::VaultKeyRow>(
         r#"
         SELECT
@@ -145,7 +173,10 @@ pub async fn list(
             CAST(EXTRACT(EPOCH FROM updated_at) * 1000 AS BIGINT) AS updated_at_ms
         FROM "LiteLLM_CredentialsTable"
         WHERE owner_id = $1
-          AND credential_name LIKE 'mcp_user:%'
+          AND (
+                credential_name LIKE 'mcp_user:%'
+             OR credential_name LIKE 'mcp_var:%'
+          )
           AND scope = 'personal'
         ORDER BY credential_name ASC
         "#,
@@ -155,20 +186,31 @@ pub async fn list(
     .await
     .map_err(GatewayError::Database)?;
 
-    let data = rows
-        .into_iter()
-        .map(|r| {
-            // key format: mcp_user:{server_id}:{user_id}
-            // The user_id portion may itself contain ':', so we only split at
-            // the first two colons and take the middle part as server_id.
-            let parts: Vec<&str> = r.credential_name.splitn(3, ':').collect();
-            let server_id = parts.get(1).copied().unwrap_or("").to_owned();
-            UserCredentialEntry {
-                server_id,
-                updated_at: r.updated_at_ms,
+    // Deduplicate: for per-variable keys (mcp_var:{server_id}:{var_name}) multiple
+    // rows share the same server_id.  Keep the most-recent updated_at per server.
+    use std::collections::HashMap;
+    let mut by_server: HashMap<String, Option<i64>> = HashMap::new();
+    for r in &rows {
+        // Both key formats store server_id as the second colon-separated segment.
+        let parts: Vec<&str> = r.credential_name.splitn(3, ':').collect();
+        let server_id = parts.get(1).copied().unwrap_or("").to_owned();
+        let entry = by_server.entry(server_id).or_insert(None);
+        // Keep the maximum (most recent) timestamp across all rows for this server.
+        match (entry, r.updated_at_ms) {
+            (slot, Some(ts)) if slot.is_none_or(|prev| ts > prev) => {
+                *slot = Some(ts);
             }
+            _ => {}
+        }
+    }
+
+    let data = by_server
+        .into_iter()
+        .map(|(server_id, updated_at)| UserCredentialEntry {
+            server_id,
+            updated_at,
         })
-        .collect();
+        .collect::<Vec<_>>();
 
     Ok(Json(ListUserCredentialsResponse { data }))
 }

@@ -108,13 +108,17 @@ export function IntegrationDialog({
     setError(null);
     try {
       if (hasPerUserVars) {
+        // Require all per-user variables to be filled before saving.
+        const missing = perUserVars.filter((v) => !varValues[v.name]?.trim());
+        if (missing.length > 0) {
+          setError(`Please fill in all required fields: ${missing.map((v) => v.name).join(", ")}`);
+          return;
+        }
         // Store each per-user variable separately in the vault.
         await Promise.all(
-          perUserVars.map((v) => {
-            const val = varValues[v.name]?.trim() ?? "";
-            if (!val) return Promise.resolve();
-            return storeMcpVarCredential(server.server_id, v.name, val);
-          }),
+          perUserVars.map((v) =>
+            storeMcpVarCredential(server.server_id, v.name, varValues[v.name].trim()),
+          ),
         );
       } else {
         // Legacy: single API key credential.
