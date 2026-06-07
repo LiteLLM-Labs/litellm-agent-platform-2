@@ -27,7 +27,7 @@ pub async fn get_by_name(
         r#"
         SELECT credential_values
         FROM "LiteLLM_CredentialsTable"
-        WHERE credential_name = $1 AND scope = 'global'
+        WHERE credential_name = $1
         "#,
     )
     .bind(credential_name)
