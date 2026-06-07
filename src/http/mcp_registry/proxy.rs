@@ -14,7 +14,7 @@ use futures_util::TryStreamExt;
 use crate::{
     db::{credentials, mcp_servers::repository},
     errors::GatewayError,
-    proxy::{credential_crypto, state::AppState},
+    proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
 
 /// `GET|POST|PUT|DELETE|PATCH /{mcp_server_name}/mcp`
@@ -29,6 +29,8 @@ pub async fn dynamic_mcp(
     method: Method,
     body: Bytes,
 ) -> Result<Response, GatewayError> {
+    require_any_gateway_key(&headers, &state)?;
+
     // ── 1. Resolve server ─────────────────────────────────────────────────────
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let server = repository::get_by_name(pool, &server_name)

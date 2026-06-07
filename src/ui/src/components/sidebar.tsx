@@ -140,6 +140,12 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           icon: ServerCog,
           active: (path) => path.startsWith("/runtimes"),
         },
+        {
+          label: "MCP Servers",
+          href: "/mcp-servers/",
+          icon: Server,
+          active: (path) => path.startsWith("/mcp-servers"),
+        },
       ],
     },
     {
@@ -184,12 +190,6 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           href: "/vault/",
           icon: KeyRound,
           active: (path) => path.startsWith("/vault"),
-        },
-        {
-          label: "MCP Servers",
-          href: "/mcp-servers/",
-          icon: Server,
-          active: (path) => path.startsWith("/mcp-servers"),
         },
       ],
     },

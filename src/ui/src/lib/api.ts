@@ -702,7 +702,7 @@ export async function resolveInboxItem(id: string, note?: string): Promise<void>
 //   "personal" — stored under the current user's namespace (default)
 //   "global"   — admin-managed keys visible to all users
 
-const VAULT_USER = "default";
+const VAULT_USER = "local";
 const VAULT_FALLBACK_PREFIX = "lite-harness-integration:";
 
 function fallbackSet(key: string, value: string): void {
@@ -802,12 +802,14 @@ export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
     key: k,
     scope: "personal" as const,
   }));
-  const byKey = new Map<string, VaultKeyEntry>(fallback.map((e) => [e.key, e]));
+  const byKey = new Map<string, VaultKeyEntry>(
+    fallback.map((e) => [`${e.scope}:${e.key}`, e]),
+  );
   try {
     const res = await req(`/api/vault/${VAULT_USER}`);
     if (res.ok) {
       const data = (await res.json()) as { keys?: VaultKeyEntry[] };
-      for (const k of data.keys ?? []) byKey.set(k.key, k);
+      for (const k of data.keys ?? []) byKey.set(`${k.scope}:${k.key}`, k);
     }
   } catch {
     /* vault unavailable — sessionStorage only */

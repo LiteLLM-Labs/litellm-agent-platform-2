@@ -1,14 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::credentials,
+    db::{credentials, mcp_servers::repository},
     errors::GatewayError,
     proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
@@ -74,14 +74,18 @@ pub struct ListUserCredentialsResponse {
 pub async fn store(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
     Path(server_id): Path<String>,
     Json(input): Json<SaveUserCredentialRequest>,
 ) -> Result<Json<SaveUserCredentialResponse>, GatewayError> {
     require_any_gateway_key(&headers, &state)?;
 
-    // Validate the server exists.
-    state.mcp_servers.resolve(&server_id)?;
+    let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
+
+    // Validate the server exists in the DB registry.
+    let server_exists = repository::get(pool, &server_id).await?.is_some();
+    if !server_exists {
+        return Err(GatewayError::UnknownMcpServer(server_id));
+    }
 
     let raw_value = input
         .value()
@@ -90,13 +94,7 @@ pub async fn store(
             GatewayError::InvalidJsonMessage("credential or api_key is required".to_owned())
         })?;
 
-    let user_id = query
-        .get("user_id")
-        .filter(|s| !s.trim().is_empty())
-        .cloned()
-        .unwrap_or_else(|| extract_user_id(&headers));
-
-    let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
+    let user_id = extract_user_id(&headers);
     let enc_key =
         credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
     let encrypted = credential_crypto::encrypt_value(raw_value.trim(), &enc_key)?;
@@ -115,16 +113,11 @@ pub async fn store(
 pub async fn delete_credential(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
     Path(server_id): Path<String>,
 ) -> Result<(StatusCode, Json<DeleteUserCredentialResponse>), GatewayError> {
     require_any_gateway_key(&headers, &state)?;
 
-    let user_id = query
-        .get("user_id")
-        .filter(|s| !s.trim().is_empty())
-        .cloned()
-        .unwrap_or_else(|| extract_user_id(&headers));
+    let user_id = extract_user_id(&headers);
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let k = key_name(&server_id, &user_id);
@@ -145,15 +138,10 @@ pub async fn delete_credential(
 pub async fn list(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<ListUserCredentialsResponse>, GatewayError> {
     require_any_gateway_key(&headers, &state)?;
 
-    let user_id = query
-        .get("user_id")
-        .filter(|s| !s.trim().is_empty())
-        .cloned()
-        .unwrap_or_else(|| extract_user_id(&headers));
+    let user_id = extract_user_id(&headers);
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
 
@@ -180,9 +168,8 @@ pub async fn list(
         .into_iter()
         .map(|r| {
             // key format: mcp_user:{server_id}:{user_id}
-            // Split on ':' — take the second segment as server_id.
             // The user_id portion may itself contain ':', so we only split at
-            // the first two colons and take the middle part.
+            // the first two colons and take the middle part as server_id.
             let parts: Vec<&str> = r.credential_name.splitn(3, ':').collect();
             let server_id = parts.get(1).copied().unwrap_or("").to_owned();
             UserCredentialEntry {
