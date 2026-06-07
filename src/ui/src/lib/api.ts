@@ -819,9 +819,19 @@ export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
 
 // ── MCP Server Registry ───────────────────────────────────────────────────────
 
-/** List all MCP servers (admin). */
+/** List all MCP servers (admin). Returns full rows including server-side secrets. */
 export async function listMcpServers(): Promise<McpServer[]> {
   const res = await req("/v1/mcp/server");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+/**
+ * List MCP servers for the user connect flow via the public hub.
+ * Server-side secrets (credentials, static_headers, env) are stripped by the backend.
+ */
+export async function listPublicMcpServers(): Promise<McpServer[]> {
+  const res = await req("/public/mcp_hub");
   const data = await jsonOrThrow<{ data: McpServer[] }>(res);
   return data.data ?? [];
 }

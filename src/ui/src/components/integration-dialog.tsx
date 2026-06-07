@@ -65,6 +65,7 @@ export function IntegrationDialog({
   const allVars = (server.mcp_info as { variables?: McpVariable[] } | undefined)?.variables ?? [];
   const perUserVars: McpVariable[] = allVars.filter((v) => v.scope === "per_user");
   const hasPerUserVars = perUserVars.length > 0;
+  const needsCredentials = hasPerUserVars || server.is_byok;
 
   const reset = () => {
     setApiKey("");
@@ -235,7 +236,7 @@ export function IntegrationDialog({
             )}
           </div>
 
-        {server.is_byok && (
+        {needsCredentials && (
           <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
             <Info className="mt-0.5 size-4 shrink-0" />
             <span>
@@ -257,7 +258,7 @@ export function IntegrationDialog({
           </div>
         )}
 
-        {server.is_byok ? (
+        {needsCredentials ? (
           <div className="space-y-2">
             {hasPerUserVars ? (
               // Per-variable inputs

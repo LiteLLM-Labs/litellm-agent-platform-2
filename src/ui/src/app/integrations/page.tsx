@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IntegrationDialog } from "@/components/integration-dialog";
 import { BrandIcon } from "@/components/brand-icons";
-import { listMcpServers, listMcpUserCredentials } from "@/lib/api";
+import { listPublicMcpServers, listMcpUserCredentials } from "@/lib/api";
 import type { McpServer } from "@/lib/types";
 
 /** Derive a display name from an MCP server record. */
@@ -53,7 +53,7 @@ export default function IntegrationsPage() {
 
   const refresh = async () => {
     const [srvs, creds] = await Promise.all([
-      listMcpServers().catch(() => [] as McpServer[]),
+      listPublicMcpServers().catch(() => [] as McpServer[]),
       listMcpUserCredentials().catch(() => [] as { server_id: string }[]),
     ]);
     setServers(srvs);

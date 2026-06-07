@@ -86,7 +86,7 @@ const EMPTY_FORM: FormState = {
   static_headers: [],
   allowed_tools: [],
   allowed_tools_text: "",
-  available_on_public_internet: false,
+  available_on_public_internet: true,
 };
 
 function serverToForm(s: McpServer): FormState {
@@ -136,7 +136,7 @@ function serverToForm(s: McpServer): FormState {
     static_headers,
     allowed_tools: tools,
     allowed_tools_text: tools.join(", "),
-    available_on_public_internet: s.available_on_public_internet ?? false,
+    available_on_public_internet: s.available_on_public_internet ?? true,
   };
 }
 
@@ -193,7 +193,7 @@ function formToPayload(f: FormState, discoveredTools: McpToolDef[] | null): Part
     mcp_info,
     credentials: Object.keys(credentials).length ? credentials : undefined,
     static_headers: Object.keys(static_headers).length ? static_headers : undefined,
-    allowed_tools: tools.length ? tools : undefined,
+    allowed_tools: tools,
     available_on_public_internet: f.available_on_public_internet,
   } as Partial<McpServer>;
 }
