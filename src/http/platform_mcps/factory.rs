@@ -7,10 +7,11 @@ use crate::{
         schema::{CreateManagedAgent, UpdateManagedAgent},
     },
     errors::GatewayError,
+    proxy::state::AppState,
 };
 
 use super::{
-    required_str, CONNECT_AGENT_TO_SLACK_MCP_ID, CREATE_MANAGED_AGENT_MCP_ID,
+    public_base_url, required_str, CONNECT_AGENT_TO_SLACK_MCP_ID, CREATE_MANAGED_AGENT_MCP_ID,
     LIST_SLACK_AGENT_BINDINGS_MCP_ID,
 };
 
@@ -20,7 +21,7 @@ pub fn tool_defs() -> Vec<Value> {
     vec![
         json!({
             "name": CREATE_MANAGED_AGENT_MCP_ID,
-            "description": "Create a DB-backed Claude managed agent.",
+            "description": "Create a DB-backed Claude managed agent. If the user asked to add/install/connect it to Slack, call connect_agent_to_slack immediately after this tool returns.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -35,7 +36,7 @@ pub fn tool_defs() -> Vec<Value> {
         }),
         json!({
             "name": CONNECT_AGENT_TO_SLACK_MCP_ID,
-            "description": "Connect a managed agent to the current Slack workspace/channel.",
+            "description": "Install or bind a managed agent to the current Slack workspace/channel. Use the Slack context values provided in the prompt for team_id, channel_id, dm_user_id, and requested_by instead of asking the user.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -56,11 +57,19 @@ pub fn tool_defs() -> Vec<Value> {
     ]
 }
 
-pub async fn create_managed_agent(pool: &PgPool, arguments: Value) -> Result<Value, GatewayError> {
+pub async fn create_managed_agent(
+    state: &AppState,
+    pool: &PgPool,
+    arguments: Value,
+) -> Result<Value, GatewayError> {
     let input = create_agent_input(&arguments)?;
     let row = registry::repository::create(pool, input).await?;
     let row = activate_factory_agent(pool, row).await?;
-    Ok(json!({ "agent": row, "status": "created" }))
+    Ok(json!({
+        "agent_url": agent_url(state, &row.id)?,
+        "agent": row,
+        "status": "created"
+    }))
 }
 
 fn create_agent_input(arguments: &Value) -> Result<CreateManagedAgent, GatewayError> {
@@ -129,4 +138,12 @@ fn optional_string(arguments: &Value, field: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
+}
+
+pub(super) fn agent_url(state: &AppState, agent_id: &str) -> Result<String, GatewayError> {
+    Ok(format!(
+        "{}/agents/detail/?id={}",
+        public_base_url(state)?.trim_end_matches('/'),
+        agent_id
+    ))
 }

@@ -17,7 +17,10 @@ use crate::{
     proxy::state::AppState,
 };
 
-use super::{factory::FACTORY_RUNTIME, public_base_url, required_str};
+use super::{
+    factory::{agent_url, FACTORY_RUNTIME},
+    public_base_url, required_str,
+};
 
 const SLACK_SCOPES: &str = "app_mentions:read,channels:history,channels:read,chat:write,groups:history,groups:read,im:history,im:read,im:write,mpim:history,mpim:read,reactions:write,team:read,users:read";
 
@@ -33,8 +36,15 @@ pub async fn connect_agent_to_slack(
     let child = load_agent(pool, agent_id).await?;
     let config = slack_config(&platform)?;
     if is_connected(&config) {
-        return connect_existing(pool, platform_agent_id, child, &platform.config, &arguments)
-            .await;
+        return connect_existing(
+            state,
+            pool,
+            platform_agent_id,
+            child,
+            &platform.config,
+            &arguments,
+        )
+        .await;
     }
     create_install(
         state,
@@ -57,6 +67,7 @@ pub async fn list_slack_bindings(
 }
 
 async fn connect_existing(
+    state: &AppState,
     pool: &PgPool,
     platform_agent_id: &str,
     child: ManagedAgentRow,
@@ -74,7 +85,12 @@ async fn connect_existing(
         optional_str(arguments, "requested_by"),
     )
     .await?;
-    Ok(json!({ "status": "connected", "binding": binding, "agent": child }))
+    Ok(json!({
+        "status": "connected",
+        "agent_url": agent_url(state, &child.id)?,
+        "binding": binding,
+        "agent": child
+    }))
 }
 
 async fn create_install(
@@ -108,6 +124,7 @@ async fn create_install(
     .await?;
     Ok(json!({
         "status": "install_required",
+        "agent_url": agent_url(state, agent_id)?,
         "install_url": install_url(state, &client_id, &provider_id, &oauth_state)?,
         "pending_install": pending
     }))

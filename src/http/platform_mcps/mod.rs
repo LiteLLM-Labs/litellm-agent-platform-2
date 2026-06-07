@@ -227,7 +227,9 @@ async fn call_tool(
         SEND_SLACK_MESSAGE_MCP_ID => {
             slack::send_message(state.as_ref(), pool, agent_id, arguments).await?
         }
-        CREATE_MANAGED_AGENT_MCP_ID => factory::create_managed_agent(pool, arguments).await?,
+        CREATE_MANAGED_AGENT_MCP_ID => {
+            factory::create_managed_agent(state.as_ref(), pool, arguments).await?
+        }
         CONNECT_AGENT_TO_SLACK_MCP_ID => {
             factory_slack::connect_agent_to_slack(state.as_ref(), pool, agent_id, arguments).await?
         }

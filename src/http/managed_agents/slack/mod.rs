@@ -3,6 +3,7 @@ mod dispatch;
 mod events;
 mod form;
 mod interactivity;
+mod message;
 mod oauth;
 mod replies;
 mod reply_format;

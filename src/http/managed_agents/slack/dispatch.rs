@@ -29,7 +29,7 @@ pub async fn route_agent(
     Ok((child, child_config))
 }
 
-fn is_factory_prompt(prompt: &str) -> bool {
+pub(super) fn is_factory_prompt(prompt: &str) -> bool {
     let prompt = prompt.to_ascii_lowercase();
     prompt.contains("make me an agent")
         || prompt.contains("create an agent")

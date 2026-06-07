@@ -38,6 +38,10 @@ async fn create_child_agent(fixture: &AppFixture, platform_agent_id: &str) -> St
         created["agent"]["config"]["runtime"],
         "claude_managed_agents"
     );
+    assert!(created["agent_url"]
+        .as_str()
+        .unwrap()
+        .starts_with("http://localhost/agents/detail/?id=agent_"));
     created["agent"]["id"].as_str().unwrap().to_owned()
 }
 
@@ -64,6 +68,10 @@ async fn connect_child_agent(fixture: &AppFixture, platform_agent_id: &str, chil
     let connected = content_json(&connected);
     assert_eq!(connected["status"], "connected");
     assert_eq!(connected["binding"]["agent_id"], child_id);
+    assert_eq!(
+        connected["agent_url"].as_str().unwrap(),
+        format!("http://localhost/agents/detail/?id={child_id}")
+    );
     assert!(listed_bindings(fixture, platform_agent_id)
         .await
         .contains("C-factory"));
@@ -152,6 +160,10 @@ async fn assert_pending_install_url(
     let install = rpc(fixture, platform_agent_id, install_call(child_agent_id)).await;
     let install = content_json(&install);
     assert_eq!(install["status"], "install_required");
+    assert_eq!(
+        install["agent_url"].as_str().unwrap(),
+        format!("http://localhost/agents/detail/?id={child_agent_id}")
+    );
     let install_url = install["install_url"].as_str().unwrap();
     assert!(install_url.starts_with("https://slack.com/oauth/v2/authorize?"));
     assert!(install_url.contains("redirect_uri=http%3A%2F%2Flocalhost%2Fhost-oauth-callback"));

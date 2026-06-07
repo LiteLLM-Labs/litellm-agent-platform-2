@@ -22,6 +22,8 @@ pub(super) struct SlackIncomingMessage {
     pub channel: String,
     pub thread_ts: String,
     pub reply_thread_ts: String,
+    pub team_id: Option<String>,
+    pub user_id: Option<String>,
     pub prompt: String,
     pub requires_existing_thread: bool,
 }
