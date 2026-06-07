@@ -867,6 +867,20 @@ export async function listMcpServerTools(server_id: string): Promise<McpToolDef[
   return data.tools ?? data.data ?? [];
 }
 
+/** Test tools discovery with caller-supplied variable values (for admin test panel). */
+export async function testMcpServerTools(
+  server_id: string,
+  variables: Record<string, string>,
+): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ variables }),
+  });
+  const data = await jsonOrThrow<{ tools?: McpToolDef[] }>(res);
+  return data.tools ?? [];
+}
+
 /** Discover tools from an arbitrary MCP server URL (new-server flow). */
 export async function discoverMcpToolsFromUrl(url: string): Promise<McpToolDef[]> {
   const base = url.replace(/\/+$/, "");

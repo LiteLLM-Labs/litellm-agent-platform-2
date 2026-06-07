@@ -117,7 +117,8 @@ fn mcp_registry_routes() -> Router<Arc<AppState>> {
     Router::new()
         // Public (no auth)
         .route("/public/mcp_hub", get(public::mcp_hub))
-        .route("/v1/mcp/server/{server_id}/tools", get(public::list_tools))
+        .route("/v1/mcp/server/{server_id}/tools",
+            get(public::list_tools).post(public::test_tools))
         // Admin CRUD
         .route(
             "/v1/mcp/server",

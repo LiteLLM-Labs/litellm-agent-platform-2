@@ -32,6 +32,7 @@ import {
   updateMcpServer,
   deleteMcpServer,
   listMcpServerTools,
+  testMcpServerTools,
   discoverMcpToolsFromUrl,
 } from "@/lib/api";
 import type { McpToolDef } from "@/lib/api";
@@ -663,7 +664,8 @@ function TestConnectionPanel({
     setLoading(true);
     setResult(null);
     try {
-      const tools = await listMcpServerTools(serverId);
+      // Use POST with test values so per-user vars are substituted without vault lookup
+      const tools = await testMcpServerTools(serverId, testValues);
       setResult({ tools });
     } catch (e) {
       setResult({ error: e instanceof Error ? e.message : String(e) });

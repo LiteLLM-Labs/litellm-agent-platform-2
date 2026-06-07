@@ -267,6 +267,94 @@ pub async fn list_tools(
     }))
 }
 
+/// POST /v1/mcp/server/{server_id}/tools — test with caller-supplied variable values.
+/// Body: `{"variables": {"VAR_NAME": "value", ...}}`
+/// Overrides vault lookup with the provided test values. For admin "Run test" flow.
+#[derive(Deserialize)]
+pub struct TestToolsRequest {
+    pub variables: HashMap<String, String>,
+}
+
+pub async fn test_tools(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(server_id): Path<String>,
+    Json(body): Json<TestToolsRequest>,
+) -> Result<Json<ToolsResponse>, GatewayError> {
+    require_any_gateway_key(&headers, &state)?;
+    let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
+    let server = repository::get(pool, &server_id)
+        .await?
+        .ok_or_else(|| GatewayError::NotFound(format!("MCP server not found: {server_id}")))?;
+
+    let url = server
+        .url
+        .as_deref()
+        .filter(|u| !u.trim().is_empty())
+        .ok_or_else(|| GatewayError::InvalidConfig("MCP server has no URL configured".to_owned()))?;
+
+    // Merge caller-supplied test values with any instance variables from credentials
+    let enc_key_opt = credential_crypto::encryption_key(
+        state.config.general_settings.master_key.as_deref()
+    ).ok();
+
+    let mut vars = if let Some(key) = enc_key_opt.as_deref() {
+        // Start with instance variables from server credentials
+        let mut m = HashMap::new();
+        if let Some(vars_def) = server.mcp_info.get("variables").and_then(|v| v.as_array()) {
+            for var in vars_def {
+                let name = match var.get("name").and_then(|v| v.as_str()) { Some(n) => n, None => continue };
+                if var.get("scope").and_then(|v| v.as_str()) != Some("per_user") {
+                    if let Some(raw) = server.credentials.get(name).and_then(|v| v.as_str()) {
+                        let val = credential_crypto::decrypt_value(raw, key).unwrap_or_else(|_| raw.to_owned());
+                        m.insert(name.to_owned(), val);
+                    }
+                }
+            }
+        }
+        m
+    } else {
+        HashMap::new()
+    };
+    // Test values override everything
+    vars.extend(body.variables);
+
+    let tools_url = url.trim_end_matches('/').to_owned();
+    let mut req = state.http.post(&tools_url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream");
+
+    if let Some(obj) = server.static_headers.as_object() {
+        for (name, val) in obj {
+            if let Some(template) = val.as_str() {
+                let resolved = substitute_vars(template, &vars);
+                if let (Ok(n), Ok(hv)) = (
+                    axum::http::HeaderName::from_bytes(name.as_bytes()),
+                    axum::http::HeaderValue::from_str(&resolved),
+                ) {
+                    req = req.header(n, hv);
+                }
+            }
+        }
+    }
+
+    let res = req
+        .json(&serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}))
+        .send()
+        .await
+        .map_err(GatewayError::Upstream)?;
+
+    let tools = if res.status().is_success() {
+        let ct = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
+        let text = res.text().await.map_err(GatewayError::Upstream)?;
+        extract_tools_from_response(&text, &ct)
+    } else {
+        vec![]
+    };
+
+    Ok(Json(ToolsResponse { server_id, tools }))
+}
+
 /// Build a variable substitution map from a server's `mcp_info["variables"]` array.
 ///
 /// - `scope = "instance"`: decrypt from `server.credentials[name]`, fall back to plaintext.
