@@ -118,10 +118,12 @@ export default function NewAgentPage() {
       if (generatedDraft.error) throw new Error(generatedDraft.error);
       openConfig(generatedDraft.draft, templateId, { request: trimmed });
     } catch (err) {
-      const isApiError = err instanceof Error && err.message.startsWith("HTTP ");
+      const isServiceError =
+        err instanceof Error &&
+        (err.message.startsWith("HTTP ") || err.name === "TypeError" || err.name === "AbortError");
       openConfig(withRuntimeDefaultTools(buildAgentDraftFromPrompt(trimmed), runtimes), templateId, {
         request: trimmed,
-        notice: isApiError
+        notice: isServiceError
           ? "Model drafting failed — using a local starter config instead."
           : "Model couldn't generate a valid config for this request, so a local starter config was generated.",
       });

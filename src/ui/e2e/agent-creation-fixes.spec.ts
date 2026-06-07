@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const MASTER_KEY = "sk-litellm-0bcf8c113e3a18c5e2a5cb78d5c65749898db39ca132b71d";
+const MASTER_KEY = process.env.E2E_MASTER_KEY ?? "";
 
 async function login(page: import("@playwright/test").Page) {
   await page.goto("/login/");
