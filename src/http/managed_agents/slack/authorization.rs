@@ -1,4 +1,6 @@
-use crate::db::managed_agents::channels::{repository as channels_repo, schema::SlackChannelConfig};
+use crate::db::managed_agents::channels::{
+    repository as channels_repo, schema::SlackChannelConfig,
+};
 use sqlx::PgPool;
 
 pub async fn authorize_slack_invocation(
