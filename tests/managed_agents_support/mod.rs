@@ -47,9 +47,7 @@ impl AppFixture {
             .filter(|url| !url.trim().is_empty())?;
         let pool = managed_agents_pool::connect(&database_url).await.unwrap();
         MIGRATED
-            .get_or_init(|| async {
-                managed_agents_pool::migrate_fresh(&pool).await.unwrap();
-            })
+            .get_or_init(|| async { managed_agents_pool::migrate_fresh(&pool).await.unwrap() })
             .await;
         reset_tables(&pool).await;
         let e2b = mock_e2b().await;
