@@ -153,13 +153,6 @@ impl SessionEvents<'_> {
             .unwrap_or_else(|| session_id.to_owned()))
     }
 
-    fn cursor_agent_id(&self, session_id: &str) -> Result<String, AgentSdkError> {
-        Ok(cursor_agent_id_from_context(
-            session_id,
-            self.client.context_for_session(session_id)?.as_ref(),
-        ))
-    }
-
     async fn latest_cursor_run_id(&self, agent_id: &str) -> Result<String, AgentSdkError> {
         let response = self
             .client
