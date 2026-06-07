@@ -9,6 +9,7 @@ pub async fn exercise_platform_mcps(fixture: &AppFixture, agent_id: &str) {
     assert_memory_write(fixture, agent_id).await;
     assert_session_read(fixture, agent_id).await;
     assert_session_send(fixture, agent_id).await;
+    super::platform_factory::assert_agent_factory(fixture, agent_id).await;
 }
 
 async fn assert_catalog(fixture: &AppFixture) {
@@ -25,7 +26,10 @@ async fn assert_catalog(fixture: &AppFixture) {
             "read_platform_session",
             "send_platform_session_message",
             "agent_memory",
-            "send_slack_message"
+            "send_slack_message",
+            "create_managed_agent",
+            "connect_agent_to_slack",
+            "list_slack_agent_bindings"
         ]
     );
 }

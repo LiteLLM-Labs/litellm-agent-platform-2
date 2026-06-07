@@ -6,8 +6,14 @@ use wiremock::{
 
 pub async fn mock_slack() -> MockServer {
     let server = MockServer::start().await;
+    mount_standard_methods(&server).await;
+    mount_factory_methods(&server).await;
+    server
+}
+
+async fn mount_standard_methods(server: &MockServer) {
     mount(
-        &server,
+        server,
         "/chat.postMessage",
         json!({
             "ok": true,
@@ -16,9 +22,9 @@ pub async fn mock_slack() -> MockServer {
         }),
     )
     .await;
-    mount(&server, "/chat.update", json!({ "ok": true })).await;
+    mount(server, "/chat.update", json!({ "ok": true })).await;
     mount(
-        &server,
+        server,
         "/conversations.open",
         json!({
             "ok": true,
@@ -27,7 +33,7 @@ pub async fn mock_slack() -> MockServer {
     )
     .await;
     mount(
-        &server,
+        server,
         "/users.lookupByEmail",
         json!({
             "ok": true,
@@ -35,9 +41,12 @@ pub async fn mock_slack() -> MockServer {
         }),
     )
     .await;
-    mount(&server, "/reactions.add", json!({ "ok": true })).await;
+    mount(server, "/reactions.add", json!({ "ok": true })).await;
+}
+
+async fn mount_factory_methods(server: &MockServer) {
     mount(
-        &server,
+        server,
         "/oauth.v2.access",
         json!({
             "ok": true,
@@ -47,7 +56,22 @@ pub async fn mock_slack() -> MockServer {
         }),
     )
     .await;
-    server
+    mount(
+        server,
+        "/apps.manifest.create",
+        json!({
+            "ok": true,
+            "app_id": "A-child-agent",
+            "credentials": {
+                "client_id": "child-client-id",
+                "client_secret": "child-client-secret",
+                "verification_token": "verification-token",
+                "signing_secret": "child-signing-secret"
+            },
+            "oauth_authorize_url": "https://slack.com/oauth/v2/authorize?client_id=child-client-id"
+        }),
+    )
+    .await;
 }
 
 async fn mount(server: &MockServer, url_path: &'static str, body: Value) {

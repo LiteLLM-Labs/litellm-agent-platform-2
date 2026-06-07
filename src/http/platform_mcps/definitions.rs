@@ -1,14 +1,16 @@
 use serde_json::{json, Value};
 
-use super::{session_management, AGENT_MEMORY_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID};
+use super::{factory, session_management, AGENT_MEMORY_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID};
 
 pub fn tool_defs() -> Vec<Value> {
-    vec![
+    let mut tools = vec![
         session_management::read_tool_def(),
         session_management::send_tool_def(),
         agent_memory_tool(),
         send_slack_message_tool(),
-    ]
+    ];
+    tools.extend(factory::tool_defs());
+    tools
 }
 
 fn agent_memory_tool() -> Value {

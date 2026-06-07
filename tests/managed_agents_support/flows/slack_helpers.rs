@@ -88,7 +88,7 @@ pub(super) fn now_seconds() -> i64 {
         .as_secs() as i64
 }
 
-async fn slack_api_call_count(fixture: &AppFixture, path: &str) -> usize {
+pub(super) async fn slack_api_call_count(fixture: &AppFixture, path: &str) -> usize {
     fixture
         .slack
         .received_requests()

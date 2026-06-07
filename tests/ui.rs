@@ -25,12 +25,14 @@ async fn serves_static_ui() {
     let app = router(build_state(&test_config()));
 
     assert_redirects_to_sessions(app.clone()).await;
-    assert_serves_sessions_html(app).await;
+    assert_serves_sessions_html(app.clone()).await;
+    assert_serves_spa_deep_links(app).await;
 }
 
 fn write_ui_fixture() -> TempDir {
     let ui_dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(ui_dir.path().join("sessions")).unwrap();
+    fs::write(ui_dir.path().join("index.html"), "<html>app shell</html>").unwrap();
     fs::write(
         ui_dir.path().join("sessions/index.html"),
         "<html>sessions</html>",
@@ -54,6 +56,13 @@ async fn assert_serves_sessions_html(app: axum::Router) {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), 1024).await.unwrap();
     assert!(std::str::from_utf8(&body).unwrap().contains("sessions"));
+}
+
+async fn assert_serves_spa_deep_links(app: axum::Router) {
+    let response = get(app, "/agents/detail/?id=agent_123").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), 1024).await.unwrap();
+    assert!(std::str::from_utf8(&body).unwrap().contains("app shell"));
 }
 
 async fn get(app: axum::Router, uri: &str) -> axum::response::Response {
