@@ -14,7 +14,8 @@ use crate::{
 };
 
 use super::{
-    config::{bot_token_key, load_agent, load_secret, signing_secret_key, slack_config},
+    authorization,
+    config::{load_agent, load_secret, signing_secret_key, slack_config},
     replies::spawn_slack_prompt,
     signature,
     types::{SlackAgentConfig, SlackIncomingMessage},
@@ -48,30 +49,11 @@ pub async fn events(
             .and_then(Value::as_str)
             .unwrap_or("");
 
-        if let Err(_auth_err) =
-            super::authorize_slack_invocation(&pool, &agent_id, user_id, team_id).await
+        if super::authorize_slack_invocation(&pool, &agent_id, user_id, team_id)
+            .await
+            .is_err()
         {
-            if !user_id.is_empty() {
-                if let Ok(bot_token) = load_secret(&state, &bot_token_key(&agent.id, &config)).await
-                {
-                    let channel_id = payload
-                        .get("event")
-                        .and_then(|e| e.get("channel"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    if !channel_id.is_empty() {
-                        let _ = super::web_api::post_ephemeral(
-                            &state.http,
-                            &state.config.slack.api_base_url,
-                            &bot_token,
-                            channel_id,
-                            user_id,
-                            "You don't have permission to use this agent.",
-                        )
-                        .await;
-                    }
-                }
-            }
+            authorization::deny_with_ephemeral(&state, &agent, &config, &payload, user_id).await;
             return Ok(StatusCode::OK.into_response());
         }
 

@@ -1,8 +1,18 @@
 use crate::{
-    db::managed_agents::channels::{repository as channels_repo, schema::SlackChannelConfig},
+    db::managed_agents::{
+        channels::{repository as channels_repo, schema::SlackChannelConfig},
+        registry::schema::ManagedAgentRow,
+    },
     errors::GatewayError,
+    proxy::state::AppState,
 };
+use serde_json::Value;
 use sqlx::PgPool;
+
+use super::{
+    config::{bot_token_key, load_secret},
+    types::SlackAgentConfig,
+};
 
 #[derive(Debug)]
 pub enum SlackAuthError {
@@ -58,5 +68,36 @@ pub async fn authorize_slack_invocation(
                 Err(SlackAuthError::NotAllowed)
             }
         }
+    }
+}
+
+pub(super) async fn deny_with_ephemeral(
+    state: &AppState,
+    agent: &ManagedAgentRow,
+    config: &SlackAgentConfig,
+    payload: &Value,
+    user_id: &str,
+) {
+    if user_id.is_empty() {
+        return;
+    }
+    let Ok(bot_token) = load_secret(state, &bot_token_key(&agent.id, config)).await else {
+        return;
+    };
+    let channel_id = payload
+        .get("event")
+        .and_then(|e| e.get("channel"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !channel_id.is_empty() {
+        let _ = super::web_api::post_ephemeral(
+            &state.http,
+            &state.config.slack.api_base_url,
+            &bot_token,
+            channel_id,
+            user_id,
+            "You don't have permission to use this agent.",
+        )
+        .await;
     }
 }
