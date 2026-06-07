@@ -128,7 +128,11 @@ pub async fn delete_personal(
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let deleted =
         credentials::delete_vault_key(pool, &key_name, "personal", Some(&user_id)).await?;
-    let status = if deleted { StatusCode::OK } else { StatusCode::NOT_FOUND };
+    let status = if deleted {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    };
     Ok((status, Json(DeleteVaultKeyResponse { ok: deleted })))
 }
 
@@ -174,7 +178,9 @@ pub async fn save_global(
     let key_name = input.key.trim();
     let value = input.value.trim();
     if key_name.is_empty() || value.is_empty() {
-        return Err(GatewayError::InvalidJsonMessage("key and value are required".to_owned()));
+        return Err(GatewayError::InvalidJsonMessage(
+            "key and value are required".to_owned(),
+        ));
     }
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let enc_key =
@@ -192,7 +198,11 @@ pub async fn delete_global(
     require_admin(&state, &headers)?;
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let deleted = credentials::delete_vault_key(pool, &key_name, "global", None).await?;
-    let status = if deleted { StatusCode::OK } else { StatusCode::NOT_FOUND };
+    let status = if deleted {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    };
     Ok((status, Json(DeleteVaultKeyResponse { ok: deleted })))
 }
 

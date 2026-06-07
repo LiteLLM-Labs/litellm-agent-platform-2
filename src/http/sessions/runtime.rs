@@ -8,16 +8,12 @@ use crate::{
         credentials,
         managed_agents::{
             registry::{self, schema::ManagedAgentRow},
-            runtime_refs::{self, schema::UpsertRuntimeRef},
             sessions::{self, schema::SessionRow},
         },
     },
     errors::GatewayError,
-    managed_agents::providers::{
-        base::{normalize_runtime, RuntimeCredential, RuntimeSessionInput},
-        provision_runtime,
-    },
-    proxy::{auth::master_key::require_master_key, credential_crypto, state::AppState},
+    http::agent_runtimes::RuntimeCredential,
+    proxy::{credential_crypto, state::AppState},
     sdk::providers,
 };
 

@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    db::{credentials, mcp_servers::{repository, schema::McpServerRow}},
+    db::{
+        credentials,
+        mcp_servers::{repository, schema::McpServerRow},
+    },
     errors::GatewayError,
     proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
@@ -173,9 +176,8 @@ pub async fn list_tools(
 
     // Resolve variables for header substitution
     let user_id = super::caller_user_id(&headers, &state);
-    let enc_key_opt = credential_crypto::encryption_key(
-        state.config.general_settings.master_key.as_deref()
-    ).ok();
+    let enc_key_opt =
+        credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref()).ok();
 
     // Build substitution map from mcp_info["variables"]
     let vars: HashMap<String, String> = if let Some(key) = enc_key_opt.as_deref() {
@@ -193,7 +195,10 @@ pub async fn list_tools(
         .header("Accept", "application/json, text/event-stream");
 
     // Inject static headers with variable substitution.
-    let has_static_headers = server.static_headers.as_object().map_or(false, |o| !o.is_empty());
+    let has_static_headers = server
+        .static_headers
+        .as_object()
+        .is_some_and(|o| !o.is_empty());
     if let Some(obj) = server.static_headers.as_object() {
         for (name, val) in obj {
             if let Some(template) = val.as_str() {
@@ -218,16 +223,21 @@ pub async fn list_tools(
                     .ok()
                     .flatten()
                     .and_then(|r| {
-                        r.credential_values.get("value")
+                        r.credential_values
+                            .get("value")
                             .and_then(|v| v.as_str())
                             .and_then(|enc| credential_crypto::decrypt_value(enc, key).ok())
                     })
                     .or_else(|| {
-                        server.credentials.get("value")
+                        server
+                            .credentials
+                            .get("value")
                             .and_then(|v| v.as_str())
                             .and_then(|enc| credential_crypto::decrypt_value(enc, key).ok())
                             .or_else(|| {
-                                server.credentials.get("api_key")
+                                server
+                                    .credentials
+                                    .get("api_key")
                                     .and_then(|v| v.as_str())
                                     .map(str::to_owned)
                             })
@@ -235,8 +245,8 @@ pub async fn list_tools(
             if let Some(cred) = credential {
                 req = match server.auth_type.as_deref().unwrap_or("bearer_token") {
                     "api_key" => req.header("x-api-key", cred),
-                    "basic"   => req.header("Authorization", format!("Basic {cred}")),
-                    _         => req.header("Authorization", format!("Bearer {cred}")),
+                    "basic" => req.header("Authorization", format!("Basic {cred}")),
+                    _ => req.header("Authorization", format!("Bearer {cred}")),
                 };
             }
         }
@@ -261,10 +271,7 @@ pub async fn list_tools(
         vec![]
     };
 
-    Ok(Json(ToolsResponse {
-        server_id,
-        tools,
-    }))
+    Ok(Json(ToolsResponse { server_id, tools }))
 }
 
 /// POST /v1/mcp/server/{server_id}/tools — test with caller-supplied variable values.
@@ -291,22 +298,27 @@ pub async fn test_tools(
         .url
         .as_deref()
         .filter(|u| !u.trim().is_empty())
-        .ok_or_else(|| GatewayError::InvalidConfig("MCP server has no URL configured".to_owned()))?;
+        .ok_or_else(|| {
+            GatewayError::InvalidConfig("MCP server has no URL configured".to_owned())
+        })?;
 
     // Merge caller-supplied test values with any instance variables from credentials
-    let enc_key_opt = credential_crypto::encryption_key(
-        state.config.general_settings.master_key.as_deref()
-    ).ok();
+    let enc_key_opt =
+        credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref()).ok();
 
     let mut vars = if let Some(key) = enc_key_opt.as_deref() {
         // Start with instance variables from server credentials
         let mut m = HashMap::new();
         if let Some(vars_def) = server.mcp_info.get("variables").and_then(|v| v.as_array()) {
             for var in vars_def {
-                let name = match var.get("name").and_then(|v| v.as_str()) { Some(n) => n, None => continue };
+                let name = match var.get("name").and_then(|v| v.as_str()) {
+                    Some(n) => n,
+                    None => continue,
+                };
                 if var.get("scope").and_then(|v| v.as_str()) != Some("per_user") {
                     if let Some(raw) = server.credentials.get(name).and_then(|v| v.as_str()) {
-                        let val = credential_crypto::decrypt_value(raw, key).unwrap_or_else(|_| raw.to_owned());
+                        let val = credential_crypto::decrypt_value(raw, key)
+                            .unwrap_or_else(|_| raw.to_owned());
                         m.insert(name.to_owned(), val);
                     }
                 }
@@ -320,7 +332,9 @@ pub async fn test_tools(
     vars.extend(body.variables);
 
     let tools_url = substitute_vars(url.trim_end_matches('/'), &vars);
-    let mut req = state.http.post(&tools_url)
+    let mut req = state
+        .http
+        .post(&tools_url)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json, text/event-stream");
 
@@ -345,7 +359,12 @@ pub async fn test_tools(
         .map_err(GatewayError::Upstream)?;
 
     let tools = if res.status().is_success() {
-        let ct = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_owned();
+        let ct = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
         let text = res.text().await.map_err(GatewayError::Upstream)?;
         extract_tools_from_response(&text, &ct)
     } else {
@@ -367,11 +386,7 @@ async fn build_vars_map(
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
 
-    let vars = match server
-        .mcp_info
-        .get("variables")
-        .and_then(|v| v.as_array())
-    {
+    let vars = match server.mcp_info.get("variables").and_then(|v| v.as_array()) {
         Some(arr) => arr.clone(),
         None => return map,
     };
@@ -381,7 +396,10 @@ async fn build_vars_map(
             Some(n) => n,
             None => continue,
         };
-        let scope = var.get("scope").and_then(|v| v.as_str()).unwrap_or("instance");
+        let scope = var
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .unwrap_or("instance");
 
         let value: Option<String> = if scope == "per_user" {
             let vault_key = format!("mcp_var:{}:{}", server.server_id, name);
@@ -421,20 +439,26 @@ fn extract_tools_from_response(text: &str, content_type: &str) -> Vec<Value> {
     if content_type.contains("event-stream") || text.starts_with("data:") {
         for line in text.lines() {
             let data = line.strip_prefix("data:").map(str::trim).unwrap_or("");
-            if data.is_empty() { continue; }
+            if data.is_empty() {
+                continue;
+            }
             if let Ok(v) = serde_json::from_str::<Value>(data) {
-                let tools = v.pointer("/result/tools")
+                let tools = v
+                    .pointer("/result/tools")
                     .or_else(|| v.get("tools"))
                     .and_then(Value::as_array)
                     .cloned();
-                if let Some(t) = tools { return t; }
+                if let Some(t) = tools {
+                    return t;
+                }
             }
         }
         return vec![];
     }
     // JSON: parse directly
     if let Ok(v) = serde_json::from_str::<Value>(text) {
-        return v.pointer("/result/tools")
+        return v
+            .pointer("/result/tools")
             .or_else(|| v.get("tools"))
             .and_then(Value::as_array)
             .cloned()

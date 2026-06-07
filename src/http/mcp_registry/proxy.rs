@@ -70,7 +70,10 @@ pub async fn dynamic_mcp(
     }
 
     // Inject static headers with variable substitution.
-    let has_static_headers = server.static_headers.as_object().map_or(false, |o| !o.is_empty());
+    let has_static_headers = server
+        .static_headers
+        .as_object()
+        .is_some_and(|o| !o.is_empty());
     if let Some(obj) = server.static_headers.as_object() {
         for (name, val) in obj {
             if let Some(template) = val.as_str() {
@@ -127,11 +130,7 @@ async fn resolve_variables(
 ) -> Result<HashMap<String, String>, GatewayError> {
     let mut map = HashMap::new();
 
-    let vars = match server
-        .mcp_info
-        .get("variables")
-        .and_then(|v| v.as_array())
-    {
+    let vars = match server.mcp_info.get("variables").and_then(|v| v.as_array()) {
         Some(arr) => arr.clone(),
         None => return Ok(map),
     };
@@ -141,7 +140,10 @@ async fn resolve_variables(
             Some(n) => n,
             None => continue,
         };
-        let scope = var.get("scope").and_then(|v| v.as_str()).unwrap_or("instance");
+        let scope = var
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .unwrap_or("instance");
 
         let value: Option<String> = if scope == "per_user" {
             // Fetch from personal vault: key = mcp_var:{server_id}:{var_name}
@@ -176,7 +178,6 @@ async fn resolve_variables(
 
     Ok(map)
 }
-
 
 /// Look up the personal vault key for this (server, user) pair and decrypt it.
 /// Key format: `mcp_user:{server_id}:{user_id}`
