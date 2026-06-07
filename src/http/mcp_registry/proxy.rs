@@ -130,10 +130,7 @@ async fn resolve_user_credential(
 /// Supports two shapes:
 /// - `{ "value": "<encrypted>" }` — decrypt with the platform key.
 /// - `{ "api_key": "<plaintext>" }` — use as-is.
-fn resolve_server_credential(
-    credentials: &serde_json::Value,
-    enc_key: &str,
-) -> Option<String> {
+fn resolve_server_credential(credentials: &serde_json::Value, enc_key: &str) -> Option<String> {
     let obj = credentials.as_object()?;
 
     if let Some(encrypted) = obj.get("value").and_then(|v| v.as_str()) {

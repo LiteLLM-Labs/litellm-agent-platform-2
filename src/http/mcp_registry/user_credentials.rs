@@ -10,11 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     db::credentials,
     errors::GatewayError,
-    proxy::{
-        auth::master_key::require_any_gateway_key,
-        credential_crypto,
-        state::AppState,
-    },
+    proxy::{auth::master_key::require_any_gateway_key, credential_crypto, state::AppState},
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -45,9 +41,7 @@ pub struct SaveUserCredentialRequest {
 
 impl SaveUserCredentialRequest {
     fn value(&self) -> Option<&str> {
-        self.credential
-            .as_deref()
-            .or(self.api_key.as_deref())
+        self.credential.as_deref().or(self.api_key.as_deref())
     }
 }
 
@@ -93,9 +87,7 @@ pub async fn store(
         .value()
         .filter(|v| !v.trim().is_empty())
         .ok_or_else(|| {
-            GatewayError::InvalidJsonMessage(
-                "credential or api_key is required".to_owned(),
-            )
+            GatewayError::InvalidJsonMessage("credential or api_key is required".to_owned())
         })?;
 
     let user_id = query
@@ -136,8 +128,7 @@ pub async fn delete_credential(
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
     let k = key_name(&server_id, &user_id);
-    let deleted =
-        credentials::delete_vault_key(pool, &k, "personal", Some(&user_id)).await?;
+    let deleted = credentials::delete_vault_key(pool, &k, "personal", Some(&user_id)).await?;
 
     let status = if deleted {
         StatusCode::OK

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    routing::{any, delete, get, patch, post, put},
+    routing::{any, delete, get, post, put},
     Router,
 };
 
@@ -88,14 +88,8 @@ fn vault_routes() -> Router<Arc<AppState>> {
             get(vault::list_global).post(vault::save_global),
         )
         .route("/api/vault/global/{key}", delete(vault::delete_global))
-        .route(
-            "/api/vault/{user_id}",
-            get(vault::list).post(vault::save),
-        )
-        .route(
-            "/api/vault/{user_id}/{key}",
-            delete(vault::delete_personal),
-        )
+        .route("/api/vault/{user_id}", get(vault::list).post(vault::save))
+        .route("/api/vault/{user_id}/{key}", delete(vault::delete_personal))
 }
 
 fn mcp_routes() -> Router<Arc<AppState>> {
@@ -126,8 +120,14 @@ fn mcp_registry_routes() -> Router<Arc<AppState>> {
         // Discovery (soft auth)
         .route("/v1/mcp/discover", get(public::discover))
         // Admin CRUD
-        .route("/v1/mcp/server", get(admin::list).post(admin::create).put(admin::update))
-        .route("/v1/mcp/server/{server_id}", get(admin::get_one).delete(admin::delete_one))
+        .route(
+            "/v1/mcp/server",
+            get(admin::list).post(admin::create).put(admin::update),
+        )
+        .route(
+            "/v1/mcp/server/{server_id}",
+            get(admin::get_one).delete(admin::delete_one),
+        )
         // User credentials (BYOK)
         .route(
             "/v1/mcp/server/{server_id}/user-credential",

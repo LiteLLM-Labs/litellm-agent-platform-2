@@ -8,7 +8,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::mcp_servers::{repository, schema::{CreateMcpServer, McpServerRow, UpdateMcpServer}},
+    db::mcp_servers::{
+        repository,
+        schema::{CreateMcpServer, McpServerRow, UpdateMcpServer},
+    },
     errors::GatewayError,
     proxy::{auth::master_key::require_master_key, state::AppState},
 };
@@ -94,7 +97,9 @@ pub async fn update(
     require_admin(&state, &headers)?;
     let row = repository::update(pool(&state)?, &body.server_id, body.update, ACTOR)
         .await?
-        .ok_or_else(|| GatewayError::NotFound(format!("MCP server '{}' not found", body.server_id)))?;
+        .ok_or_else(|| {
+            GatewayError::NotFound(format!("MCP server '{}' not found", body.server_id))
+        })?;
     Ok(Json(row))
 }
 

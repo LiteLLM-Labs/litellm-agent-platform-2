@@ -80,16 +80,23 @@ pub async fn save(
 
     let scope = input.scope.as_str();
     if scope == "global" {
-        require_master_key(&headers, state.config.general_settings.master_key.as_deref())?;
+        require_master_key(
+            &headers,
+            state.config.general_settings.master_key.as_deref(),
+        )?;
     }
 
     let key_name = input.key.trim();
     if key_name.is_empty() {
-        return Err(GatewayError::InvalidJsonMessage("key is required".to_owned()));
+        return Err(GatewayError::InvalidJsonMessage(
+            "key is required".to_owned(),
+        ));
     }
     let value = input.value.trim();
     if value.is_empty() {
-        return Err(GatewayError::InvalidJsonMessage("value is required".to_owned()));
+        return Err(GatewayError::InvalidJsonMessage(
+            "value is required".to_owned(),
+        ));
     }
 
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
