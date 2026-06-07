@@ -37,7 +37,7 @@ import {
   withRuntimeDefaultTools,
 } from "@/lib/agent-builder";
 import type { AgentDraft, AgentTemplate } from "@/lib/agent-builder";
-import { createAgent, draftAgentConfigWithModel, listAgentRuntimes } from "@/lib/api";
+import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes } from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
 import type { AgentRuntime } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -121,10 +121,11 @@ export default function NewAgentPage() {
       const isServiceError =
         err instanceof Error &&
         (err.message.startsWith("HTTP ") || err.name === "TypeError" || err.name === "AbortError");
+      const serviceError = apiErrorMessage(err, "Model drafting failed");
       openConfig(withRuntimeDefaultTools(buildAgentDraftFromPrompt(trimmed), runtimes), templateId, {
         request: trimmed,
         notice: isServiceError
-          ? "Model drafting failed — using a local starter config instead."
+          ? `Model drafting failed: ${serviceError}. Using a local starter config instead.`
           : "Model couldn't generate a valid config for this request, so a local starter config was generated.",
       });
     } finally {
