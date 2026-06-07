@@ -256,7 +256,8 @@ async fn mock_slack() -> MockServer {
             "ok": true,
             "access_token": "xoxb-oauth-token",
             "bot_user_id": "B123",
-            "team": { "name": "LiteLLM" }
+            "team": { "id": "T123", "name": "LiteLLM" },
+            "authed_user": { "id": "U123" }
         })))
         .mount(&server)
         .await;
