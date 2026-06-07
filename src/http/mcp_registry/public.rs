@@ -171,8 +171,8 @@ pub async fn list_tools(
             GatewayError::InvalidConfig("MCP server has no URL configured".to_owned())
         })?;
 
-    // Call tools/list on the MCP server
-    let tools_url = format!("{}/tools/list", url.trim_end_matches('/'));
+    // Call tools/list on the MCP server via the registered endpoint URL.
+    let tools_url = url.trim_end_matches('/').to_owned();
     let res = state
         .http
         .post(&tools_url)
