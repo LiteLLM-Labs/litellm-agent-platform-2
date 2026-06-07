@@ -10,9 +10,24 @@ use crate::proxy::state::AppState;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .merge(agent_routes())
+        .merge(mcp_server_routes())
         .merge(skill_routes())
         .merge(inbox_routes())
         .merge(slack_routes())
+}
+
+fn mcp_server_routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route(
+            "/api/mcp-servers",
+            post(super::mcp_servers::create).get(super::mcp_servers::list),
+        )
+        .route(
+            "/api/mcp-servers/{server_id}",
+            get(super::mcp_servers::get)
+                .patch(super::mcp_servers::update)
+                .delete(super::mcp_servers::delete),
+        )
 }
 
 fn agent_routes() -> Router<Arc<AppState>> {

@@ -53,7 +53,13 @@ pub async fn create(
         state.clone(),
         pool.clone(),
         agent_id.clone(),
-        managed_agent_definition(pool, &agent).await?,
+        managed_agent_definition(
+            pool,
+            &agent,
+            &gateway_origin(&headers),
+            state.config.general_settings.master_key.as_deref(),
+        )
+        .await?,
         prompt,
         run.id.clone(),
     );
@@ -73,4 +79,19 @@ pub async fn create(
             logs_url,
         })?),
     ))
+}
+
+fn gateway_origin(headers: &HeaderMap) -> String {
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("http");
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("localhost");
+    format!("{proto}://{host}")
 }

@@ -6,6 +6,7 @@ import type {
   AgentRuntimeId,
   HarnessMessage,
   Memory,
+  McpServer,
   OpencodeSession,
   Skill,
   SpendLog,
@@ -1013,6 +1014,31 @@ export async function updateAgent(id: string, fields: Partial<Agent>): Promise<A
     body: JSON.stringify(fields),
   });
   return jsonOrThrow<Agent>(res);
+}
+
+export async function listMcpServers(): Promise<McpServer[]> {
+  const res = await req("/api/mcp-servers");
+  const data = await jsonOrThrow<{ mcp_servers: McpServer[] }>(res);
+  return data.mcp_servers ?? [];
+}
+
+export async function createMcpServer(input: {
+  name: string;
+  url: string;
+  auth_type?: McpServer["auth_type"];
+  auth_value?: string;
+  description?: string;
+}): Promise<McpServer> {
+  const res = await req("/api/mcp-servers", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+export async function deleteMcpServer(id: string): Promise<void> {
+  await req(`/api/mcp-servers/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function createSlackOAuthState(agentId: string): Promise<string> {

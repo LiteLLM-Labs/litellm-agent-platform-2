@@ -281,6 +281,13 @@ export default function AgentsPage() {
                       ))}
                     </div>
                   )}
+                  {Array.isArray(ag.mcp_server_ids) && ag.mcp_server_ids.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      <Badge variant="outline" className="text-[10px]">
+                        {ag.mcp_server_ids.length} MCP{ag.mcp_server_ids.length === 1 ? "" : "s"}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <Button size="sm" variant="default" onClick={(e) => { e.stopPropagation(); openAgent(ag); }}>
@@ -301,7 +308,15 @@ export default function AgentsPage() {
                     <BrandIcon id="slack" className="size-3.5" />
                     {slackActionLabel(slack)}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); openEdit(ag); }} aria-label="Edit">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(`/agents/edit/?id=${encodeURIComponent(ag.id)}`);
+                    }}
+                    aria-label="Edit"
+                  >
                     <Pencil className="size-3.5" />
                   </Button>
                   <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); remove(ag); }} aria-label="Delete">

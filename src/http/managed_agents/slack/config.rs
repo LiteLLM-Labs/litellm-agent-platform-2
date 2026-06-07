@@ -87,6 +87,7 @@ pub(super) async fn update_slack_config(
             description: None,
             harness: None,
             skill_ids: None,
+            mcp_server_ids: None,
         },
     )
     .await?;

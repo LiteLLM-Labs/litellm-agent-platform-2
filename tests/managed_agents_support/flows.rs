@@ -157,6 +157,37 @@ pub async fn exercise_files(fixture: &AppFixture, agent_id: &str) {
     request_json(fixture.app.clone(), "DELETE", &file_path, None).await;
 }
 
+pub async fn exercise_mcp_servers(fixture: &AppFixture, agent_id: &str) {
+    let server = request_json(
+        fixture.app.clone(),
+        "POST",
+        "/api/mcp-servers",
+        Some(json!({
+            "name": "docs",
+            "url": "https://mcp.example.com/mcp",
+            "auth_type": "api_key",
+            "auth_value": "mcp-secret",
+            "description": "Docs tools"
+        })),
+    )
+    .await;
+    let server_id = server["id"].as_str().unwrap();
+    assert_eq!(server["name"], "docs");
+    assert!(server.get("auth_value").is_none());
+
+    let servers = request_json(fixture.app.clone(), "GET", "/api/mcp-servers", None).await;
+    assert_eq!(servers["mcp_servers"].as_array().unwrap().len(), 1);
+
+    let agent = request_json(
+        fixture.app.clone(),
+        "PATCH",
+        &format!("/api/agents/{agent_id}"),
+        Some(json!({"mcp_server_ids": [server_id]})),
+    )
+    .await;
+    assert_eq!(agent["mcp_server_ids"][0], server_id);
+}
+
 pub async fn exercise_runs(fixture: &AppFixture, agent_id: &str) {
     let run = request_json(
         fixture.app.clone(),

@@ -94,9 +94,20 @@ export interface Agent {
   owner_id?: string | null;
   /** IDs of DB-backed skills attached to this agent (agents.skill_ids). */
   skill_ids?: string[];
+  /** IDs of DB-backed MCP servers attached to this agent (agents.mcp_server_ids). */
+  mcp_server_ids?: string[];
   vault_keys?: string[];
   created_at?: number;
   [k: string]: unknown;
+}
+
+export interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  auth_type: "api_key" | "bearer_token" | "authorization" | "none" | string;
+  description?: string | null;
+  created_at: number;
 }
 
 export interface AgentFile {

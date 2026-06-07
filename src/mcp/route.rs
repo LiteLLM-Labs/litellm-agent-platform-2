@@ -8,8 +8,9 @@ use axum::{
 };
 
 use crate::{
+    db::managed_agents::mcp_servers::repository,
     errors::GatewayError,
-    mcp::registry::McpServerRegistry,
+    mcp::registry::{McpServer, McpServerRegistry},
     proxy::{auth::master_key::require_any_gateway_key, state::AppState},
 };
 
@@ -24,8 +25,15 @@ pub async fn streamable_http(
 ) -> Result<Response, GatewayError> {
     require_any_gateway_key(&headers, &state)?;
     let server_id = select_server_id(&state.mcp_servers, &headers, query.get("server"))?;
-    let server = state.mcp_servers.resolve(server_id)?;
-    crate::mcp::upstream::forward_streamable_http(&state.http, server, method, &headers, body).await
+    let server = resolve_server(&state, server_id).await?;
+    crate::mcp::upstream::forward_streamable_http(
+        &state.http,
+        server.as_ref(),
+        method,
+        &headers,
+        body,
+    )
+    .await
 }
 
 pub async fn streamable_http_server(
@@ -36,8 +44,34 @@ pub async fn streamable_http_server(
     body: Bytes,
 ) -> Result<Response, GatewayError> {
     require_any_gateway_key(&headers, &state)?;
-    let server = state.mcp_servers.resolve(&server_id)?;
-    crate::mcp::upstream::forward_streamable_http(&state.http, server, method, &headers, body).await
+    let server = resolve_server(&state, &server_id).await?;
+    crate::mcp::upstream::forward_streamable_http(
+        &state.http,
+        server.as_ref(),
+        method,
+        &headers,
+        body,
+    )
+    .await
+}
+
+async fn resolve_server<'a>(
+    state: &'a AppState,
+    server_id: &str,
+) -> Result<std::borrow::Cow<'a, McpServer>, GatewayError> {
+    match state.mcp_servers.resolve(server_id) {
+        Ok(server) => return Ok(std::borrow::Cow::Borrowed(server)),
+        Err(GatewayError::UnknownMcpServer(_)) => {}
+        Err(error) => return Err(error),
+    }
+
+    let Some(pool) = state.db.as_ref() else {
+        return Err(GatewayError::UnknownMcpServer(server_id.to_owned()));
+    };
+    let row = repository::get(pool, server_id)
+        .await?
+        .ok_or_else(|| GatewayError::UnknownMcpServer(server_id.to_owned()))?;
+    Ok(std::borrow::Cow::Owned(McpServer::from_managed_row(&row)?))
 }
 
 fn select_server_id<'a>(
