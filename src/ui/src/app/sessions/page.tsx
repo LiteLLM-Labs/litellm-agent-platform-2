@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowUp, Bot, Mic, Paperclip } from "lucide-react";
 import { BrandIcon } from "@/components/brand-icons";
@@ -393,7 +394,14 @@ function SessionsStart() {
               ? `${selectedAgent?.name} ready`
               : selectedRuntime?.connected
                 ? `${selectedRuntime.name} ready`
-                : "Runtime key missing"}
+                : (
+                    <span className="inline-flex items-center gap-2">
+                      Runtime API key missing
+                      <Link href="/runtimes/" className="font-medium text-foreground underline underline-offset-2">
+                        Add key
+                      </Link>
+                    </span>
+                  )}
           </div>
         </section>
       </main>

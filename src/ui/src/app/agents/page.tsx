@@ -641,8 +641,7 @@ export default function AgentsPage() {
             <div className="grid gap-1.5">
               <Label>Vault credentials</Label>
               <p className="text-[11px] text-muted-foreground -mt-1">
-                Secrets this agent can use. Reference them in the prompt as{" "}
-                <span className="font-mono">{"{{vault.KEY_NAME}}"}</span>.
+                Store secret values for backend integrations. Raw values are not sent to agent prompts or runtime resources.
               </p>
               <div className="flex gap-2">
                 <Input
