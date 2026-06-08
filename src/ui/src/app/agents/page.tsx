@@ -24,6 +24,7 @@ import {
   listAgents,
   updateAgent,
   deleteAgent,
+  listRules,
   listSkills,
   listIntegrationKeys,
   listPlatformMcps,
@@ -34,7 +35,7 @@ import {
   deleteMemory,
 } from "@/lib/api";
 import { DEFAULT_TIMEZONE, scheduleLabel } from "@/lib/schedule";
-import type { Agent, Skill, Memory, PlatformMcp } from "@/lib/types";
+import type { Agent, Rule, Skill, Memory, PlatformMcp } from "@/lib/types";
 import {
   slackActionClass,
   slackActionLabel,
@@ -46,6 +47,7 @@ interface FormState {
   name: string;
   description: string;
   prompt: string;
+  rule_ids: string[];
   skill_ids: string[];
   cron: string;
   timezone: string;
@@ -57,6 +59,7 @@ const EMPTY: FormState = {
   name: "",
   description: "",
   prompt: "",
+  rule_ids: [],
   skill_ids: [],
   cron: "",
   timezone: DEFAULT_TIMEZONE,
@@ -79,6 +82,7 @@ function platformMcpIds(agent: Agent): string[] {
 export default function AgentsPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[] | null>(null);
+  const [rules, setRules] = useState<Rule[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [platformMcps, setPlatformMcps] = useState<PlatformMcp[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +110,7 @@ export default function AgentsPage() {
   };
   useEffect(() => {
     load();
+    listRules().then(setRules).catch(() => setRules([]));
     listSkills().then(setSkills).catch(() => setSkills([]));
     listPlatformMcps().then(setPlatformMcps).catch(() => setPlatformMcps([]));
     listIntegrationKeys().then(setStoredKeys).catch(() => setStoredKeys([]));
@@ -142,6 +147,14 @@ export default function AgentsPage() {
         : [...f.skill_ids, id],
     }));
 
+  const toggleRule = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      rule_ids: f.rule_ids.includes(id)
+        ? f.rule_ids.filter((ruleId) => ruleId !== id)
+        : [...f.rule_ids, id],
+    }));
+
   const togglePlatformMcp = (id: string) =>
     setForm((f) => ({
       ...f,
@@ -151,6 +164,7 @@ export default function AgentsPage() {
     }));
 
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
+  const ruleName = (id: string) => rules.find((rule) => rule.id === id)?.name ?? id;
   const platformMcpName = (id: string) =>
     platformMcps.find((mcp) => mcp.id === id)?.name ?? id;
 
@@ -190,6 +204,7 @@ export default function AgentsPage() {
       name: ag.name ?? "",
       description: ag.description ?? "",
       prompt: ag.prompt ?? "",
+      rule_ids: Array.isArray(ag.rule_ids) ? ag.rule_ids : [],
       skill_ids: Array.isArray(ag.skill_ids) ? ag.skill_ids : [],
       cron: ag.cron ?? "",
       timezone: ag.timezone ?? DEFAULT_TIMEZONE,
@@ -222,6 +237,7 @@ export default function AgentsPage() {
         name: form.name,
         description: form.description,
         prompt: form.prompt,
+        rule_ids: form.rule_ids,
         skill_ids: form.skill_ids,
         cron: cron || null,
         timezone,
@@ -338,6 +354,15 @@ export default function AgentsPage() {
                       ))}
                     </div>
                   )}
+                  {Array.isArray(ag.rule_ids) && ag.rule_ids.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {ag.rule_ids.map((id) => (
+                        <Badge key={id} variant="outline" className="text-[10px]">
+                          {ruleName(id)}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   {attachedPlatformMcps.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {attachedPlatformMcps.map((id) => (
@@ -436,6 +461,46 @@ export default function AgentsPage() {
               timezone={form.timezone}
               onChange={(next) => setForm({ ...form, ...next })}
             />
+            <div className="grid gap-1.5">
+              <Label>Rules</Label>
+              {rules.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No rules available on this server.
+                </p>
+              ) : (
+                <div className="max-h-44 divide-y divide-border overflow-y-auto rounded-md border border-border">
+                  {rules.map((rule) => {
+                    const checked = form.rule_ids.includes(rule.id);
+                    return (
+                      <label
+                        key={rule.id}
+                        className="flex cursor-pointer items-start gap-2 px-2.5 py-1.5 hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={() => toggleRule(rule.id)}
+                        />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="text-xs font-medium">{rule.name}</span>
+                          {rule.description && (
+                            <span className="line-clamp-2 text-[11px] text-muted-foreground">
+                              {rule.description}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {form.rule_ids.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  {form.rule_ids.length} rule{form.rule_ids.length === 1 ? "" : "s"} attached
+                </p>
+              )}
+            </div>
             <div className="grid gap-1.5">
               <Label>Skills</Label>
               {skills.length === 0 ? (

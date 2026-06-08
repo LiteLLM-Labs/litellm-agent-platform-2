@@ -94,6 +94,7 @@ pub(crate) async fn update_slack_config(
             description: None,
             harness: None,
             skill_ids: None,
+            rule_ids: None,
         },
     )
     .await?;

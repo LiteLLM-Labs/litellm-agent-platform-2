@@ -881,6 +881,7 @@ function ConfigPreview({ draft }: { draft: AgentDraft }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <TokenList label="Vault keys" values={draft.vault_keys} />
           <TokenList label="Skill IDs" values={draft.skill_ids} />
+          <TokenList label="Rule IDs" values={draft.rule_ids} />
           <TokenList label="MCP integrations" values={draft.mcp_server_ids} />
         </div>
       </div>

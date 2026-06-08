@@ -215,6 +215,7 @@ mod tests {
             description: None,
             harness: "claude-code".to_owned(),
             skill_ids: json!([]),
+            rule_ids: json!([]),
         };
         let metadata = session_metadata(&agent, "ses_1", &"x".repeat(600));
         assert_eq!(metadata["initial_prompt"].chars().count(), 512);

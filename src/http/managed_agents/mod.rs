@@ -3,6 +3,7 @@ pub mod inbox;
 pub mod memory;
 pub mod registry;
 pub mod routes;
+pub mod rules;
 pub mod runs;
 pub mod skills;
 pub mod slack;
