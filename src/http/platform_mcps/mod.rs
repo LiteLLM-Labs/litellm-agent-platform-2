@@ -19,6 +19,7 @@ mod factory;
 mod factory_slack;
 pub(crate) mod factory_slack_app;
 mod factory_slack_manifest;
+mod selection;
 mod session_management;
 mod slack;
 mod tools;
@@ -31,6 +32,7 @@ pub const PLATFORM_MCP_SERVER_NAME: &str = "platform";
 pub const CREATE_MANAGED_AGENT_MCP_ID: &str = "create_managed_agent";
 pub const CONNECT_AGENT_TO_SLACK_MCP_ID: &str = "connect_agent_to_slack";
 pub const LIST_SLACK_AGENT_BINDINGS_MCP_ID: &str = "list_slack_agent_bindings";
+pub const RUN_SUB_AGENT_MCP_ID: &str = "run_sub_agent";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PlatformMcp {
@@ -77,23 +79,17 @@ pub fn platform_mcps() -> Vec<PlatformMcp> {
             name: "List Slack agent bindings",
             description: "List channel bindings created by this platform agent factory.",
         },
+        PlatformMcp {
+            id: RUN_SUB_AGENT_MCP_ID,
+            name: "Run sub-agent",
+            description:
+                "Run one of this agent's explicitly attached LAP sub-agents and return its session.",
+        },
     ]
 }
 
-pub fn selected_platform_mcp_ids(config: &Value) -> Vec<String> {
-    config
-        .get("platform_mcp_ids")
-        .or_else(|| config.get("platformMcpIds"))
-        .and_then(Value::as_array)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(Value::as_str)
-                .filter(|id| platform_mcps().iter().any(|mcp| mcp.id == *id))
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
+pub use selection::selected_platform_mcp_ids;
+pub(crate) use selection::sub_agent_ids;
 
 pub fn platform_mcp_servers(
     state: &AppState,
@@ -225,6 +221,9 @@ async fn call_tool(
         }
         LIST_SLACK_AGENT_BINDINGS_MCP_ID => {
             factory_slack::list_slack_bindings(pool, agent_id).await?
+        }
+        RUN_SUB_AGENT_MCP_ID => {
+            tools::run_sub_agent(state.clone(), pool.clone(), agent_id, arguments).await?
         }
         _ => {
             return Ok(json!({

@@ -1,12 +1,17 @@
+use std::sync::Arc;
+
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
     db::managed_agents::{memory, registry},
     errors::GatewayError,
+    proxy::state::AppState,
+    sdk::agents::{AgentEvent, AgentEventKind, AgentEventPayload},
 };
 
-use super::required_str;
+use super::{required_str, sub_agent_ids};
 
 pub async fn agent_memory(
     pool: &PgPool,
@@ -38,4 +43,109 @@ pub async fn agent_memory(
             "unsupported memory action: {action}"
         ))),
     }
+}
+
+pub async fn run_sub_agent(
+    state: Arc<AppState>,
+    pool: PgPool,
+    parent_agent_id: &str,
+    arguments: Value,
+) -> Result<Value, GatewayError> {
+    let child_agent_id = required_str(&arguments, "agent_id")?.to_owned();
+    let prompt = required_str(&arguments, "prompt")?.to_owned();
+    let parent = registry::repository::get(&pool, parent_agent_id)
+        .await?
+        .ok_or_else(|| GatewayError::UnknownAgent(parent_agent_id.to_owned()))?;
+    let allowed = sub_agent_ids(&parent.config);
+    if !allowed.iter().any(|id| id == &child_agent_id) {
+        return Ok(json!({
+            "isError": true,
+            "message": "sub-agent is not attached to this parent agent",
+            "allowed_sub_agents": allowed
+        }));
+    }
+    let child = registry::repository::get(&pool, &child_agent_id)
+        .await?
+        .ok_or_else(|| GatewayError::UnknownAgent(child_agent_id.clone()))?;
+    let runtime = child_runtime(&child);
+    let title = arguments
+        .get("title")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or("Sub-agent run")
+        .to_owned();
+    let session_id = crate::http::sessions::create_runtime_session_for_agent(
+        state.clone(),
+        &pool,
+        child_agent_id.clone(),
+        runtime.clone(),
+        title,
+        prompt,
+        json!({}),
+    )
+    .await?;
+    let output = collect_sub_agent_output(state.as_ref(), &pool, &session_id).await?;
+    Ok(json!({
+        "agent_id": child_agent_id,
+        "runtime": runtime,
+        "session_id": session_id,
+        "status": output.status,
+        "output": output.text
+    }))
+}
+
+fn child_runtime(agent: &registry::schema::ManagedAgentRow) -> String {
+    agent
+        .config
+        .get("runtime")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|runtime| !runtime.is_empty())
+        .unwrap_or(crate::sdk::agents::CLAUDE_MANAGED_AGENTS)
+        .to_owned()
+}
+
+struct SubAgentOutput {
+    status: &'static str,
+    text: String,
+}
+
+async fn collect_sub_agent_output(
+    state: &AppState,
+    pool: &PgPool,
+    session_id: &str,
+) -> Result<SubAgentOutput, GatewayError> {
+    let mut stream =
+        crate::http::sessions::runtime_event_stream_for_session(state, pool, session_id).await?;
+    let mut text = String::new();
+    let status: Result<&'static str, GatewayError> =
+        tokio::time::timeout(std::time::Duration::from_secs(300), async {
+            while let Some(event) = stream.next().await {
+                let event = event.map_err(|error| GatewayError::SandboxError(error.to_string()))?;
+                match event.kind() {
+                    AgentEventKind::AgentMessage => text.push_str(&message_text(&event)),
+                    AgentEventKind::SessionStatusIdle => return Ok("completed"),
+                    AgentEventKind::SessionError => return Ok("failed"),
+                    _ => {}
+                }
+            }
+            Ok("completed")
+        })
+        .await
+        .map_err(|_| GatewayError::SandboxError("sub-agent run timed out".to_owned()))?;
+    let status = status?;
+    Ok(SubAgentOutput { status, text })
+}
+
+fn message_text(event: &AgentEvent) -> String {
+    let AgentEventPayload::AgentMessage(message) = event.payload() else {
+        return String::new();
+    };
+    message
+        .content
+        .iter()
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("")
 }

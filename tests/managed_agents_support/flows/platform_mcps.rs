@@ -9,6 +9,7 @@ pub async fn exercise_platform_mcps(fixture: &AppFixture, agent_id: &str) {
     assert_memory_write(fixture, agent_id).await;
     assert_session_read(fixture, agent_id).await;
     assert_session_send(fixture, agent_id).await;
+    assert_sub_agent_allowlist(fixture, agent_id).await;
     super::platform_factory::assert_agent_factory(fixture, agent_id).await;
 }
 
@@ -29,7 +30,8 @@ async fn assert_catalog(fixture: &AppFixture) {
             "send_slack_message",
             "create_managed_agent",
             "connect_agent_to_slack",
-            "list_slack_agent_bindings"
+            "list_slack_agent_bindings",
+            "run_sub_agent"
         ]
     );
 }
@@ -122,6 +124,41 @@ async fn assert_session_send(fixture: &AppFixture, agent_id: &str) {
     let content = content_text(&read);
     assert!(content.contains("continue from mcp"));
     assert!(content.contains("hello from managed agent"));
+}
+
+async fn assert_sub_agent_allowlist(fixture: &AppFixture, agent_id: &str) {
+    request_json(
+        fixture.app.clone(),
+        "PATCH",
+        &format!("/api/agents/{agent_id}"),
+        Some(json!({
+            "config": {
+                "runtime": "claude_managed_agents",
+                "sub_agents": [{ "agent_id": "agent_allowed_child" }]
+            }
+        })),
+    )
+    .await;
+    let denied = rpc(
+        fixture,
+        agent_id,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "run_sub_agent",
+                "arguments": {
+                    "agent_id": "agent_not_attached",
+                    "prompt": "do focused work"
+                }
+            }
+        }),
+    )
+    .await;
+    let content = content_text(&denied);
+    assert!(content.contains("sub-agent is not attached"));
+    assert!(content.contains("agent_allowed_child"));
 }
 
 async fn seed_session_message(fixture: &AppFixture, agent_id: &str) -> String {

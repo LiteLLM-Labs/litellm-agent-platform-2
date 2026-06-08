@@ -1,6 +1,9 @@
 use serde_json::{json, Value};
 
-use super::{factory, session_management, AGENT_MEMORY_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID};
+use super::{
+    factory, session_management, AGENT_MEMORY_MCP_ID, RUN_SUB_AGENT_MCP_ID,
+    SEND_SLACK_MESSAGE_MCP_ID,
+};
 
 pub fn tool_defs() -> Vec<Value> {
     let mut tools = vec![
@@ -8,9 +11,35 @@ pub fn tool_defs() -> Vec<Value> {
         session_management::send_tool_def(),
         agent_memory_tool(),
         send_slack_message_tool(),
+        run_sub_agent_tool(),
     ];
     tools.extend(factory::tool_defs());
     tools
+}
+
+fn run_sub_agent_tool() -> Value {
+    json!({
+        "name": RUN_SUB_AGENT_MCP_ID,
+        "description": "Run one of this agent's configured LAP sub-agents. Only agent IDs attached to this parent agent are allowed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "The LAP agent ID from this parent agent's sub_agents list."
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "The complete task, context, paths, and expected output for the sub-agent."
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional session title."
+                }
+            },
+            "required": ["agent_id", "prompt"]
+        }
+    })
 }
 
 fn agent_memory_tool() -> Value {
