@@ -41,6 +41,58 @@ impl SessionEvents<'_> {
         }
     }
 
+    pub async fn interrupt(&self, session_id: &str) -> Result<(), AgentSdkError> {
+        let runtime = self.client.runtime_for_session(session_id)?;
+        match runtime {
+            AgentRuntime::ClaudeManagedAgents => self.interrupt_claude_session(session_id).await,
+            AgentRuntime::Cursor => self.cancel_cursor_run(session_id).await,
+            AgentRuntime::OpenCode => self.abort_opencode_session(session_id).await,
+        }
+    }
+
+    async fn interrupt_claude_session(&self, session_id: &str) -> Result<(), AgentSdkError> {
+        let provider_session_id = self.provider_session_id(session_id)?;
+        self.client
+            .post(
+                AgentRuntime::ClaudeManagedAgents,
+                &format!("/v1/sessions/{provider_session_id}/events"),
+                &SendEventsParams {
+                    events: vec![json!({ "type": "user.interrupt" })],
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn cancel_cursor_run(&self, session_id: &str) -> Result<(), AgentSdkError> {
+        let context = self.client.context_for_session(session_id)?;
+        let agent_id = cursor_agent_id_from_context(session_id, context.as_ref());
+        let run_id = match context.and_then(|context| context.run_id) {
+            Some(run_id) => run_id,
+            None => self.latest_cursor_run_id(&agent_id).await?,
+        };
+        self.client
+            .post(
+                AgentRuntime::Cursor,
+                &format!("/v1/agents/{agent_id}/runs/{run_id}/cancel"),
+                &json!({}),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn abort_opencode_session(&self, session_id: &str) -> Result<(), AgentSdkError> {
+        let provider_session_id = self.provider_session_id(session_id)?;
+        self.client
+            .post(
+                AgentRuntime::OpenCode,
+                &format!("/session/{provider_session_id}/abort"),
+                &json!({}),
+            )
+            .await?;
+        Ok(())
+    }
+
     pub async fn list(&self, session_id: &str) -> Result<Value, AgentSdkError> {
         let runtime = self.client.runtime_for_session(session_id)?;
         match runtime {

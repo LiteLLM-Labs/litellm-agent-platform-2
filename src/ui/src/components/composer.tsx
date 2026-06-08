@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { sendMessage } from "@/lib/api";
 
 export function Composer({
@@ -10,6 +10,7 @@ export function Composer({
   onSent,
   onSend,
   onSendStart,
+  onAbort,
   disabled = false,
 }: {
   sessionId: string;
@@ -17,6 +18,7 @@ export function Composer({
   onSent?: () => void;
   onSend?: (text: string) => Promise<void>;
   onSendStart?: (text: string) => void;
+  onAbort?: () => void;
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
@@ -81,16 +83,28 @@ export function Composer({
                 )}
               </span>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void handleSend()}
-                  disabled={!canSend}
-                  className="rounded-full bg-foreground p-1.5 text-background transition-colors hover:bg-foreground/90 disabled:opacity-30 disabled:hover:bg-foreground"
-                  aria-label="Send"
-                  title="Send (Enter)"
-                >
-                  <ArrowUp className="w-3.5 h-3.5" />
-                </button>
+                {disabled && onAbort ? (
+                  <button
+                    type="button"
+                    onClick={onAbort}
+                    className="rounded-full bg-red-600 p-1.5 text-white transition-colors hover:bg-red-700"
+                    aria-label="Stop agent"
+                    title="Stop (interrupt agent)"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleSend()}
+                    disabled={!canSend}
+                    className="rounded-full bg-foreground p-1.5 text-background transition-colors hover:bg-foreground/90 disabled:opacity-30 disabled:hover:bg-foreground"
+                    aria-label="Send"
+                    title="Send (Enter)"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           </div>

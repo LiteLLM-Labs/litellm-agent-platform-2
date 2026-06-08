@@ -28,6 +28,7 @@ pub(crate) use runtime::create_runtime_session_for_agent;
 use runtime::{create_runtime_session, execute_runtime_prompt};
 pub(crate) use runtime_events_api::runtime_event_stream_for_session;
 pub use runtime_events_api::{runtime_event_list, runtime_events};
+use runtime_sdk::{register_runtime_session, runtime_sdk_client};
 use storage::{db, persist_message, resolve_session_request, session};
 pub use types::{CreateSessionRequest, MessageResponse, PromptRequest, SessionResponse};
 
@@ -162,7 +163,16 @@ pub async fn abort(
     headers: HeaderMap,
     Path(session_id): Path<String>,
 ) -> Result<StatusCode, GatewayError> {
-    let _ = db(&state, &headers)?;
+    let pool = db(&state, &headers)?;
+    if let Ok(Some(row)) = sessions::repository::get(pool, &session_id).await {
+        if let Some(runtime) = row.runtime.as_deref() {
+            if let Ok(client) = runtime_sdk_client(&state, runtime).await {
+                if register_runtime_session(&client, &row).is_ok() {
+                    let _ = client.beta().sessions().events().interrupt(&session_id).await;
+                }
+            }
+        }
+    }
     state
         .agent_runs
         .set_error(&session_id, "aborted".to_owned());
