@@ -4,6 +4,8 @@ use serde_json::json;
 
 use crate::errors::GatewayError;
 
+pub(super) const MAX_TEXT_CHARS: usize = 3_900;
+
 #[derive(Debug, Deserialize)]
 pub struct SlackOAuthAccessResponse {
     pub ok: bool,
@@ -29,6 +31,17 @@ struct SlackMessageResponse {
 struct SlackOkResponse {
     ok: bool,
     error: Option<String>,
+}
+
+pub struct UpsertMessageParams<'a> {
+    pub client: &'a Client,
+    pub api_base_url: &'a str,
+    pub bot_token: &'a str,
+    pub channel: &'a str,
+    pub thread_ts: &'a str,
+    pub ts: Option<&'a str>,
+    pub text: &'a str,
+    pub username: Option<&'a str>,
 }
 
 pub async fn post_message_as(
@@ -135,6 +148,31 @@ pub async fn update_message(
     }
 }
 
+pub async fn upsert_message_as(params: UpsertMessageParams<'_>) -> Result<String, GatewayError> {
+    if let Some(ts) = params.ts {
+        update_message(
+            params.client,
+            params.api_base_url,
+            params.bot_token,
+            params.channel,
+            ts,
+            params.text,
+        )
+        .await?;
+        return Ok(ts.to_owned());
+    }
+    post_message_as(
+        params.client,
+        params.api_base_url,
+        params.bot_token,
+        params.channel,
+        params.thread_ts,
+        params.text,
+        params.username,
+    )
+    .await
+}
+
 pub async fn add_reaction(
     client: &Client,
     api_base_url: &str,
@@ -200,6 +238,5 @@ fn slack_api_error(method: &str, error: Option<String>) -> GatewayError {
 }
 
 fn truncate(text: &str) -> String {
-    const MAX_CHARS: usize = 30_000;
-    text.chars().take(MAX_CHARS).collect()
+    text.chars().take(MAX_TEXT_CHARS).collect()
 }

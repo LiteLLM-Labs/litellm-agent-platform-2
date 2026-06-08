@@ -100,7 +100,7 @@ async fn run_locked_slack_prompt(
             }
             Err(error) => {
                 let message = format!("Agent run failed: {error}");
-                if let Err(update_error) = reply.finish_start_error(&message).await {
+                if let Err(update_error) = reply.replace_text(&message).await {
                     warn!("slack failure update failed: {update_error}");
                 }
                 Err(error)
@@ -119,7 +119,7 @@ async fn run_locked_slack_prompt(
         }
         Err(error) => {
             let message = format!("Agent run failed: {error}");
-            if let Err(update_error) = reply.finish_start_error(&message).await {
+            if let Err(update_error) = reply.replace_text(&message).await {
                 warn!("slack failure update failed: {update_error}");
             }
             Err(error)
@@ -254,7 +254,7 @@ async fn enqueue_or_report(
     )
     .await;
     if let Err(error) = result {
-        reply.finish_start_error(&error.to_string()).await?;
+        reply.replace_text(&error.to_string()).await?;
         return Err(error);
     }
     Ok(())

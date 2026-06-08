@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::{
+    reply_chunks::{event_payload, split_at_char_limit, text_len},
     reply_format::{runtime_status, runtime_text, slack_mrkdwn},
     reply_storage::{closed_text, final_text, persisted_assistant_text_after},
     types::SlackIncomingMessage,
@@ -30,6 +31,7 @@ pub(super) struct SlackReply<'a> {
     session_id: &'a str,
     baseline_seq: i32,
     text: String,
+    segment_start: usize,
     since_update: tokio::time::Instant,
 }
 
@@ -57,6 +59,7 @@ impl<'a> SlackReply<'a> {
             session_id: params.session_id,
             baseline_seq: params.baseline_seq,
             text: String::new(),
+            segment_start: 0,
             since_update: tokio::time::Instant::now(),
         }
     }
@@ -94,7 +97,8 @@ impl<'a> SlackReply<'a> {
                     }
                 }
                 Ok(Some(Err(error))) => {
-                    self.update(&format!("Agent run failed: {error}")).await?;
+                    self.replace_text(&format!("Agent run failed: {error}"))
+                        .await?;
                     return Err(GatewayError::SandboxError(error.to_string()));
                 }
                 Ok(None) => return self.finish_closed().await,
@@ -107,13 +111,10 @@ impl<'a> SlackReply<'a> {
         }
     }
 
-    pub(super) async fn finish_start_error(&mut self, message: &str) -> Result<(), GatewayError> {
-        self.update(message).await
-    }
-
     pub(super) async fn replace_text(&mut self, message: &str) -> Result<(), GatewayError> {
         self.text = message.to_owned();
-        self.update(message).await
+        self.segment_start = 0;
+        self.flush_progress().await
     }
 
     async fn apply_line(&mut self, line: &str) -> Result<bool, GatewayError> {
@@ -177,8 +178,7 @@ impl<'a> SlackReply<'a> {
             && self.since_update.elapsed() >= Duration::from_secs(1)
             && !self.text.is_empty()
         {
-            let text = self.text.clone();
-            self.update(&text).await?;
+            self.flush_progress().await?;
             self.since_update = tokio::time::Instant::now();
         }
         Ok(())
@@ -190,30 +190,34 @@ impl<'a> SlackReply<'a> {
             .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
             .unwrap_or("Agent run failed.");
-        self.update(message).await?;
+        self.replace_text(message).await?;
         Ok(true)
     }
 
     async fn finish_success(&mut self) -> Result<bool, GatewayError> {
-        let text = self
-            .persisted_text()
-            .await?
-            .unwrap_or_else(|| final_text(&self.text));
-        self.update(&text).await?;
+        if let Some(text) = self.persisted_text().await? {
+            self.finish_with_text(text).await?;
+        } else if self.text.trim().is_empty() {
+            self.replace_text(&final_text(&self.text)).await?;
+        } else {
+            self.flush_progress().await?;
+        }
         Ok(true)
     }
 
     async fn finish_closed(&mut self) -> Result<(), GatewayError> {
-        let text = self
-            .persisted_text()
-            .await?
-            .unwrap_or_else(|| closed_text(&self.text));
-        self.update(&text).await
+        if let Some(text) = self.persisted_text().await? {
+            self.finish_with_text(text).await
+        } else if self.text.trim().is_empty() {
+            self.replace_text(&closed_text(&self.text)).await
+        } else {
+            self.flush_progress().await
+        }
     }
 
     async fn finish_if_terminal(&mut self) -> Result<bool, GatewayError> {
         if let Some(text) = self.persisted_text().await? {
-            self.update(&text).await?;
+            self.finish_with_text(text).await?;
             return Ok(true);
         }
         let Some(run) = self.state.agent_runs.get_run(self.session_id) else {
@@ -221,13 +225,16 @@ impl<'a> SlackReply<'a> {
         };
         match run.status {
             AgentRunStatus::Completed => {
-                let text = final_text(&self.text);
-                self.update(&text).await?;
+                if self.text.trim().is_empty() {
+                    self.replace_text(&final_text(&self.text)).await?;
+                } else {
+                    self.flush_progress().await?;
+                }
                 Ok(true)
             }
             AgentRunStatus::Failed | AgentRunStatus::TimedOut => {
                 let text = run.error.as_deref().unwrap_or("Agent run failed.");
-                self.update(text).await?;
+                self.replace_text(text).await?;
                 Ok(true)
             }
             AgentRunStatus::Starting | AgentRunStatus::Running => Ok(false),
@@ -238,44 +245,54 @@ impl<'a> SlackReply<'a> {
         persisted_assistant_text_after(self.pool, self.session_id, self.baseline_seq).await
     }
 
-    async fn update(&mut self, text: &str) -> Result<(), GatewayError> {
-        let text = slack_mrkdwn(text);
-        match self.ts.as_deref() {
-            Some(ts) => {
-                web_api::update_message(
-                    &self.state.http,
-                    &self.state.config.slack.api_base_url,
-                    self.bot_token,
-                    self.channel,
-                    ts,
-                    &text,
-                )
-                .await
-            }
-            None => {
-                self.ts = Some(
-                    web_api::post_message_as(
-                        &self.state.http,
-                        &self.state.config.slack.api_base_url,
-                        self.bot_token,
-                        self.channel,
-                        self.thread_ts,
-                        &text,
-                        Some(self.username),
-                    )
-                    .await?,
-                );
-                Ok(())
-            }
+    async fn finish_with_text(&mut self, text: String) -> Result<(), GatewayError> {
+        if text.starts_with(&self.text) {
+            self.text = text;
+            self.flush_progress().await
+        } else {
+            self.replace_text(&text).await
         }
     }
-}
 
-fn event_payload(line: &str) -> Option<(String, Value)> {
-    let data = line.strip_prefix("data: ")?;
-    let payload: Value = serde_json::from_str(data.trim()).ok()?;
-    Some((
-        payload.get("type")?.as_str()?.to_owned(),
-        payload.get("properties")?.clone(),
-    ))
+    async fn flush_progress(&mut self) -> Result<(), GatewayError> {
+        loop {
+            let active = self.active_segment();
+            if text_len(active) <= web_api::MAX_TEXT_CHARS {
+                break;
+            }
+            let (head, next_offset) = split_at_char_limit(active, web_api::MAX_TEXT_CHARS);
+            let text = head.to_owned();
+            self.update_active(&text).await?;
+            self.segment_start += next_offset;
+            self.ts = None;
+        }
+        let active = self.active_segment();
+        if !active.is_empty() {
+            let text = active.to_owned();
+            self.update_active(&text).await?;
+        }
+        Ok(())
+    }
+
+    fn active_segment(&self) -> &str {
+        self.text.get(self.segment_start..).unwrap_or_default()
+    }
+
+    async fn update_active(&mut self, text: &str) -> Result<(), GatewayError> {
+        let text = slack_mrkdwn(text);
+        self.ts = Some(
+            web_api::upsert_message_as(web_api::UpsertMessageParams {
+                client: &self.state.http,
+                api_base_url: &self.state.config.slack.api_base_url,
+                bot_token: self.bot_token,
+                channel: self.channel,
+                thread_ts: self.thread_ts,
+                ts: self.ts.as_deref(),
+                text: &text,
+                username: Some(self.username),
+            })
+            .await?,
+        );
+        Ok(())
+    }
 }
