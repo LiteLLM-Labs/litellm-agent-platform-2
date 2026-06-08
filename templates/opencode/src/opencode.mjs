@@ -1,0 +1,128 @@
+// opencode.mjs — manages a child `opencode serve` process and provisions
+// per-agent config (agent .md files + opencode.json MCP entries) for an
+// opencode-compatible wrapper server. Node 20 ESM, built-ins + global fetch only.
+
+import { spawn } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+// Spawns `opencode serve`, returns once health check passes.
+// Returns { baseUrl, proc, stop() }
+export async function startOpencode({ port = 4096, cwd, env } = {}) {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const proc = spawn(
+    "opencode",
+    ["serve", "--port", String(port), "--hostname", "127.0.0.1"],
+    { cwd, env: { ...process.env, ...env }, stdio: "inherit" }
+  );
+
+  const stop = () => {
+    try {
+      proc.kill();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const deadline = Date.now() + 30_000;
+
+    proc.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Failed to spawn opencode: ${err.message}`));
+    });
+
+    proc.on("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`opencode exited before becoming healthy (code ${code})`));
+    });
+
+    const poll = async () => {
+      if (settled) return;
+      if (Date.now() > deadline) {
+        settled = true;
+        stop();
+        reject(new Error("Timed out waiting for opencode health check"));
+        return;
+      }
+      try {
+        const res = await fetch(`${baseUrl}/global/health`);
+        if (res.status === 200) {
+          settled = true;
+          resolve({ baseUrl, proc, stop });
+          return;
+        }
+      } catch {
+        /* not up yet */
+      }
+      setTimeout(poll, 300);
+    };
+
+    poll();
+  });
+}
+
+// Writes <cwd>/.opencode/agent/<agent.id>.md and merges agent.mcp_servers
+// into <cwd>/opencode.json
+export async function provisionAgent(cwd, agent) {
+  const agentDir = path.join(cwd, ".opencode", "agent");
+  await mkdir(agentDir, { recursive: true });
+
+  // Build YAML frontmatter by hand.
+  const lines = [];
+  lines.push(`description: ${agent?.name || "sandbox agent"}`);
+  lines.push("mode: primary");
+  if (agent?.model) lines.push(`model: ${agent.model}`);
+
+  const perms = agent?.permissions;
+  if (perms && typeof perms === "object" && Object.keys(perms).length) {
+    lines.push("permission:");
+    for (const [key, value] of Object.entries(perms)) {
+      lines.push(`  ${key}: ${value}`);
+    }
+  }
+
+  const body = agent?.system || "";
+  const md = `---\n${lines.join("\n")}\n---\n${body}`;
+  const agentFile = path.join(agentDir, `${agent.id}.md`);
+  await writeFile(agentFile, md, "utf8");
+
+  // Merge MCP servers into opencode.json.
+  if (agent?.mcp_servers?.length) {
+    const configPath = path.join(cwd, "opencode.json");
+    let obj = {};
+    try {
+      obj = JSON.parse(await readFile(configPath, "utf8"));
+    } catch {
+      obj = {};
+    }
+    obj.mcp = obj.mcp || {};
+
+    for (const server of agent.mcp_servers) {
+      if (!server || !server.name) continue;
+      if (server.command) {
+        obj.mcp[server.name] = {
+          type: "local",
+          command: [server.command, ...(server.args || [])],
+          enabled: true,
+        };
+      } else if (server.url) {
+        obj.mcp[server.name] = {
+          type: "remote",
+          url: server.url,
+          enabled: true,
+        };
+      }
+    }
+
+    await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
+  }
+}
+
+// Thin proxy helper to the opencode child. Returns the raw fetch Response.
+export async function ocFetch(baseUrl, path, init) {
+  return fetch(baseUrl + path, init);
+}
