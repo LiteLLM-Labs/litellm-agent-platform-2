@@ -48,9 +48,20 @@ function toLocal(m: HarnessMessage): LocalMessage {
     .join("\n");
   let status: LocalMessage["status"];
   let latency_ms: number | undefined;
+  const infoStatus = (m.info as Record<string, unknown>).status;
+  if (
+    infoStatus === "queued" ||
+    infoStatus === "in_progress" ||
+    infoStatus === "completed" ||
+    infoStatus === "failed"
+  ) {
+    status = infoStatus;
+  }
   if (role === "assistant") {
     const finish = m.info.finish;
-    if (!finish) {
+    if (status) {
+      status = status;
+    } else if (!finish) {
       status = "in_progress";
     } else if (finish === "stop" || finish === "end_turn") {
       status = "completed";
@@ -97,8 +108,11 @@ function InnerMessageBlock({
   if (msg.role === "user") {
     return (
       <UserPromptBlock
+        id={msg.id}
         content={msg.text ?? ""}
         emphasized={isFirstUser}
+        status={msg.status}
+        onCancelQueued={onCancelQueued}
       />
     );
   }
@@ -106,20 +120,46 @@ function InnerMessageBlock({
 }
 
 function UserPromptBlock({
+  id,
   content,
   emphasized,
+  status,
+  onCancelQueued,
 }: {
+  id: string;
   content: string;
   emphasized: boolean;
+  status?: LocalMessage["status"];
+  onCancelQueued?: (msgId: string) => void;
 }) {
+  const queued = status === "queued";
   return (
     <div className="flex justify-end">
-      <div
-        className={`max-w-[min(740px,82%)] rounded-[18px] border border-border/80 bg-muted/65 px-5 py-3 text-[15px] leading-relaxed text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:bg-muted/45 ${
-          emphasized ? "ring-1 ring-ring/30" : ""
-        }`}
-      >
-        {content && <div className="whitespace-pre-wrap">{content}</div>}
+      <div className="flex max-w-[min(740px,82%)] flex-col items-end gap-1.5">
+        <div
+          className={`w-full rounded-[18px] border border-border/80 bg-muted/65 px-5 py-3 text-[15px] leading-relaxed text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.04)] dark:bg-muted/45 ${
+            emphasized ? "ring-1 ring-ring/30" : ""
+          } ${queued ? "opacity-75" : ""}`}
+        >
+          {content && <div className="whitespace-pre-wrap">{content}</div>}
+        </div>
+        {queued && (
+          <div className="flex items-center gap-1.5 pr-1 text-[12px] text-muted-foreground">
+            <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/40" />
+            queued
+            {onCancelQueued && (
+              <button
+                type="button"
+                onClick={() => onCancelQueued(id)}
+                title="Cancel queued message"
+                className="rounded p-0.5 transition-colors hover:bg-muted hover:text-foreground"
+                aria-label="Cancel queued message"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -501,7 +541,13 @@ function ToolKv({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-export function MessageBlock({ msg }: { msg: HarnessMessage }) {
+export function MessageBlock({
+  msg,
+  onCancelQueued,
+}: {
+  msg: HarnessMessage;
+  onCancelQueued?: (msgId: string) => void;
+}) {
   const local = toLocal(msg);
-  return <InnerMessageBlock msg={local} isFirstUser={false} />;
+  return <InnerMessageBlock msg={local} isFirstUser={false} onCancelQueued={onCancelQueued} />;
 }

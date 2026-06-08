@@ -241,6 +241,18 @@ function makeTextMessage(sessionId: string, role: "user" | "assistant", id: stri
   };
 }
 
+type QueuedPrompt = {
+  id: string;
+  text: string;
+};
+
+function makeQueuedPromptMessage(sessionId: string, prompt: QueuedPrompt): HarnessMessage {
+  return {
+    ...makeTextMessage(sessionId, "user", prompt.id, prompt.text),
+    info: { id: prompt.id, role: "user", sessionID: sessionId, status: "queued" },
+  };
+}
+
 function runtimeEventsToMessages(
   sessionId: string,
   events: RuntimeAgentEvent[],
@@ -435,6 +447,7 @@ function ChatInner() {
   const [promptCopied, setPromptCopied] = useState(false);
   const eventBufferRef = useRef<Frame[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeAgentEvent[]>([]);
+  const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -447,6 +460,7 @@ function ChatInner() {
   const wasNearBottomRef = useRef(true);
   const activeSessionRef = useRef<string | null>(null);
   const autostartedRef = useRef<string | null>(null);
+  const flushingQueuedPromptRef = useRef(false);
 
   const refetch = useCallback(async () => {
     if (!sid) return;
@@ -486,7 +500,14 @@ function ChatInner() {
     if (!sid || !sessionRuntime) return null;
     return runtimeEventsToMessages(sid, runtimeEvents, sessionStatus);
   }, [runtimeEvents, sessionRuntime, sessionStatus, sid]);
-  const displayMessages = sessionRuntime ? runtimeMessages : messages;
+  const displayMessages = useMemo(() => {
+    const baseMessages = sessionRuntime ? runtimeMessages : messages;
+    if (!sid || !sessionRuntime || queuedPrompts.length === 0) return baseMessages;
+    return [
+      ...(baseMessages ?? []),
+      ...queuedPrompts.map((prompt) => makeQueuedPromptMessage(sid, prompt)),
+    ];
+  }, [messages, queuedPrompts, runtimeMessages, sessionRuntime, sid]);
   const hasStarted = Boolean(displayMessages && displayMessages.length > 0);
   const modelOptions = useMemo(() => {
     const runtimeModel = runtimeModelId(sessionRuntime);
@@ -522,6 +543,8 @@ function ChatInner() {
     eventBufferRef.current = [];
     setMessages(null);
     setRuntimeEvents([]);
+    setQueuedPrompts([]);
+    flushingQueuedPromptRef.current = false;
     setError(null);
     setSessionLoaded(false);
     setProviderSessionId(undefined);
@@ -621,6 +644,63 @@ function ChatInner() {
     }
     setSessionStatus("busy");
   }, [appendRuntimeEvent, sessionRuntime, sid]);
+
+  const queueRuntimePrompt = useCallback((text: string) => {
+    if (!sid) return;
+    setQueuedPrompts((current) => [
+      ...current,
+      {
+        id: `${sid}_queued_${Date.now().toString(36)}_${current.length}`,
+        text,
+      },
+    ]);
+  }, [sid]);
+
+  const sendOrQueueRuntimePrompt = useCallback(async (text: string) => {
+    if (!sid) return;
+    if (sessionStatus === "busy") {
+      queueRuntimePrompt(text);
+      return;
+    }
+    sendMessageWithRuntimeModel({
+      sessionId: sid,
+      text,
+      model,
+      runtime: sessionRuntime,
+    }).catch((err) => {
+      if (activeSessionRef.current !== sid) return;
+      setError(err instanceof Error ? err.message : String(err));
+      setSessionStatus("idle");
+    });
+  }, [model, queueRuntimePrompt, sessionRuntime, sessionStatus, sid]);
+
+  const cancelQueuedPrompt = useCallback((id: string) => {
+    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
+  }, []);
+
+  useEffect(() => {
+    if (!sid || !sessionRuntime || sessionStatus !== "idle" || queuedPrompts.length === 0) return;
+    if (flushingQueuedPromptRef.current) return;
+
+    const [nextPrompt] = queuedPrompts;
+    flushingQueuedPromptRef.current = true;
+    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== nextPrompt.id));
+    beginRuntimeTurn(nextPrompt.text);
+    sendMessageWithRuntimeModel({
+      sessionId: sid,
+      text: nextPrompt.text,
+      model,
+      runtime: sessionRuntime,
+    })
+      .catch((err) => {
+        if (activeSessionRef.current !== sid) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setSessionStatus("idle");
+      })
+      .finally(() => {
+        flushingQueuedPromptRef.current = false;
+      });
+  }, [beginRuntimeTurn, model, queuedPrompts, sessionRuntime, sessionStatus, sid]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
@@ -1002,6 +1082,7 @@ function ChatInner() {
               <MessageBlock
                 key={(m.info.id as string | undefined) ?? i}
                 msg={m}
+                onCancelQueued={cancelQueuedPrompt}
               />
             ))}
             {approvals.map((a) => (
@@ -1020,15 +1101,12 @@ function ChatInner() {
           sessionId={sid}
           model={model}
           onSent={sessionRuntime ? undefined : refetch}
-          onSend={sessionRuntime ? (text) => sendMessageWithRuntimeModel({
-            sessionId: sid,
-            text,
-            model,
-            runtime: sessionRuntime,
-          }) : undefined}
-          onSendStart={beginRuntimeTurn}
+          onSend={sessionRuntime ? sendOrQueueRuntimePrompt : undefined}
+          onSendStart={sessionRuntime ? (text) => {
+            if (sessionStatus !== "busy") beginRuntimeTurn(text);
+          } : undefined}
           onAbort={sessionRuntime ? () => abortSession(sid).catch(() => {}) : undefined}
-          disabled={Boolean(sessionRuntime && sessionStatus === "busy")}
+          busy={Boolean(sessionRuntime && sessionStatus === "busy")}
         />
       </div>
 
