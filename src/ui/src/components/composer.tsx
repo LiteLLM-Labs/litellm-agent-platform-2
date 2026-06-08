@@ -11,6 +11,7 @@ export function Composer({
   onSend,
   onSendStart,
   onAbort,
+  busy = false,
   disabled = false,
 }: {
   sessionId: string;
@@ -19,6 +20,7 @@ export function Composer({
   onSend?: (text: string) => Promise<void>;
   onSendStart?: (text: string) => void;
   onAbort?: () => void;
+  busy?: boolean;
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
@@ -58,6 +60,8 @@ export function Composer({
     ? "Sending…"
     : disabled
       ? "Waiting for the runtime…"
+      : busy
+        ? "Queue a follow up"
     : "Add a follow up";
 
   return (
@@ -83,7 +87,7 @@ export function Composer({
                 )}
               </span>
               <div className="flex items-center gap-2">
-                {disabled && onAbort ? (
+                {busy && onAbort && !draft.trim() ? (
                   <button
                     type="button"
                     onClick={onAbort}
