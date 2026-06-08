@@ -746,10 +746,18 @@ export async function saveIntegrationKey(
   value: string,
   scope: "personal" | "global" = "personal",
 ): Promise<"vault" | "session"> {
-  try {
-    const endpoint =
-      scope === "global" ? `/api/vault/global` : `/api/vault/${VAULT_USER}`;
+  if (scope === "global") {
+    const endpoint = `/api/vault/global`;
     const res = await req(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: envKey, value, scope }),
+    });
+    if (!res.ok) throw new Error(`Failed to save global key: ${res.status}`);
+    return "vault";
+  }
+  try {
+    const res = await req(`/api/vault/${VAULT_USER}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ key: envKey, value, scope }),
@@ -807,10 +815,18 @@ export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
     fallback.map((e) => [`${e.scope}:${e.key}`, e]),
   );
   try {
-    const res = await req(`/api/vault/${VAULT_USER}`);
-    if (res.ok) {
-      const data = (await res.json()) as { keys?: VaultKeyEntry[] };
-      for (const k of data.keys ?? []) byKey.set(`${k.scope}:${k.key}`, k);
+    const [personalRes, globalRes] = await Promise.all([
+      req(`/api/vault/${VAULT_USER}`).catch(() => null),
+      req(`/api/vault/global`).catch(() => null),
+    ]);
+    for (const res of [personalRes, globalRes]) {
+      if (res?.ok) {
+        const data = (await res.json()) as { keys?: VaultKeyEntry[] };
+        for (const k of data.keys ?? []) {
+          const scope = k.scope ?? "personal";
+          byKey.set(`${scope}:${k.key}`, { ...k, scope });
+        }
+      }
     }
   } catch {
     /* vault unavailable — sessionStorage only */
