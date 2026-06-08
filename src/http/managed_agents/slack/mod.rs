@@ -8,6 +8,7 @@ pub(crate) mod manifest_api;
 mod message;
 mod oauth;
 mod replies;
+mod reply_chunks;
 mod reply_format;
 mod reply_lock;
 mod reply_storage;
