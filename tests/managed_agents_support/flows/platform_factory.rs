@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use crate::support::{request_json, AppFixture};
 
 use super::{
+    platform_factory_oauth::assert_child_oauth_install,
     platform_factory_payloads::{
         child_message_body, install_call, slack_config, unrelated_message_body,
     },
@@ -99,6 +100,7 @@ async fn connect_child_agent(fixture: &AppFixture, platform_agent_id: &str, chil
         .unwrap()
         .contains("dedicated Slack app"));
     assert_slack_api_called(fixture, "/apps.manifest.create").await;
+    assert_child_oauth_install(fixture, platform_agent_id, child_id, &connected).await;
 }
 
 async fn assert_child_slack_app(fixture: &AppFixture, child_id: &str) {
@@ -111,7 +113,7 @@ async fn assert_child_slack_app(fixture: &AppFixture, child_id: &str) {
     .await;
     assert_eq!(child["config"]["slack"]["app_id"], "A-child-agent");
     assert_eq!(child["config"]["slack"]["client_id"], "child-client-id");
-    assert_eq!(child["config"]["slack"]["status"], "credentials_saved");
+    assert_eq!(child["config"]["slack"]["status"], "connected");
     assert_eq!(
         child["config"]["slack"]["client_secret_key"],
         format!("SLACK_{child_id}_CLIENT_SECRET")
@@ -183,7 +185,6 @@ async fn assert_factory_slack_dispatch(
     child_agent_id: &str,
 ) {
     let update_baseline = slack_api_call_count(fixture, "/chat.update").await;
-    create_thread_binding(fixture, platform_agent_id, child_agent_id).await;
     signed_json_request(
         fixture,
         &format!("/api/agents/{platform_agent_id}/slack/events"),
@@ -201,25 +202,6 @@ async fn assert_factory_slack_dispatch(
     )
     .await;
     assert_no_child_thread(fixture, child_agent_id, "1712345688.000100").await;
-}
-
-async fn create_thread_binding(
-    fixture: &AppFixture,
-    platform_agent_id: &str,
-    child_agent_id: &str,
-) {
-    sqlx::query(
-        r#"
-        INSERT INTO "LiteLLM_SlackAgentBindingsTable"
-          (id, platform_agent_id, agent_id, team_id, channel_id, thread_ts, status, created_at, updated_at)
-        VALUES ('slack_binding_test', $1, $2, 'T123', 'C-factory', '1712345679.000100', 'connected', 1, 1)
-        "#,
-    )
-    .bind(platform_agent_id)
-    .bind(child_agent_id)
-    .execute(&fixture.pool)
-    .await
-    .unwrap();
 }
 
 async fn wait_for_child_thread(fixture: &AppFixture, child_agent_id: &str) -> String {
