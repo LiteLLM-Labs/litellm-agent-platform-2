@@ -93,6 +93,7 @@ fn create_agent_input(arguments: &Value) -> Result<CreateManagedAgent, GatewayEr
         model: optional_string(arguments, "model"),
         system: Some(instructions),
         skill_ids: None,
+        rule_ids: None,
     })
 }
 
@@ -120,6 +121,7 @@ async fn activate_factory_agent(
             description: None,
             harness: Some(FACTORY_RUNTIME.to_owned()),
             skill_ids: None,
+            rule_ids: None,
         },
     )
     .await?
