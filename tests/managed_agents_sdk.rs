@@ -172,9 +172,9 @@ async fn retries_opencode_bearer_after_basic_unauthorized() {
 }
 
 #[tokio::test]
-async fn rejects_opencode_agent_create_before_network() {
+async fn opencode_agent_create_returns_stub_without_network() {
     let server = MockServer::start().await;
-    let error = sdk_support::opencode_client(&server)
+    let agent = sdk_support::opencode_client(&server)
         .beta()
         .agents()
         .create(CreateAgentParams {
@@ -191,10 +191,9 @@ async fn rejects_opencode_agent_create_before_network() {
             metadata: None,
         })
         .await
-        .unwrap_err()
-        .to_string();
+        .unwrap();
 
-    assert!(error.contains("agents.create is not supported for opencode"));
+    assert_eq!(agent.id, "Coding Assistant");
     assert_eq!(server.received_requests().await.unwrap().len(), 0);
 }
 
