@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ExternalLink, Pencil, Plus } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -187,9 +187,21 @@ function AgentEdit() {
                           Attached LAP agents are exposed as constrained run_sub_agent calls.
                         </p>
                       </div>
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {form.subAgentIds.length} attached
-                      </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {form.subAgentIds.length} attached
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => router.push("/agents/new/")}
+                          className="h-7 gap-1.5 px-2 text-xs"
+                        >
+                          <Plus className="size-3.5" />
+                          New
+                        </Button>
+                      </div>
                     </div>
                     {agents.length === 0 ? (
                       <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
@@ -199,24 +211,30 @@ function AgentEdit() {
                       <div className="grid gap-2">
                         {agents.map((agent) => {
                           const checked = form.subAgentIds.includes(agent.id);
+                          const checkboxId = `sub-agent-${agent.id}`;
+                          const toggleSubAgent = (enabled: boolean) => {
+                            const subAgentIds = enabled
+                              ? [...form.subAgentIds, agent.id]
+                              : form.subAgentIds.filter((agentId) => agentId !== agent.id);
+                            setForm({ ...form, subAgentIds });
+                          };
                           return (
-                            <label
+                            <div
                               key={agent.id}
-                              className="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-muted/40"
+                              className="flex min-w-0 items-start gap-2.5 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-muted/40"
                             >
                               <input
+                                id={checkboxId}
+                                aria-label={`Attach ${agent.name}`}
                                 type="checkbox"
                                 checked={checked}
-                                onChange={(event) => {
-                                  const subAgentIds = event.target.checked
-                                    ? [...form.subAgentIds, agent.id]
-                                    : form.subAgentIds.filter((agentId) => agentId !== agent.id);
-                                  setForm({ ...form, subAgentIds });
-                                }}
+                                onChange={(event) => toggleSubAgent(event.target.checked)}
                                 className="mt-0.5 size-3.5 shrink-0"
                               />
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm font-medium">{agent.name}</span>
+                                <label htmlFor={checkboxId} className="block cursor-pointer truncate text-sm font-medium">
+                                  {agent.name}
+                                </label>
                                 <span className="mt-0.5 block truncate font-mono text-muted-foreground">
                                   {agent.id}
                                 </span>
@@ -224,7 +242,31 @@ function AgentEdit() {
                                   {agent.description || agent.model || "Saved LAP agent"}
                                 </span>
                               </span>
-                            </label>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  aria-label={`Edit ${agent.name}`}
+                                  title={`Edit ${agent.name}`}
+                                  onClick={() => router.push(`/agents/edit/?id=${encodeURIComponent(agent.id)}`)}
+                                  className="size-7"
+                                >
+                                  <Pencil className="size-3.5" />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  aria-label={`Open ${agent.name}`}
+                                  title={`Open ${agent.name}`}
+                                  onClick={() => router.push(`/agents/detail/?id=${encodeURIComponent(agent.id)}`)}
+                                  className="size-7"
+                                >
+                                  <ExternalLink className="size-3.5" />
+                                </Button>
+                              </div>
+                            </div>
                           );
                         })}
                       </div>

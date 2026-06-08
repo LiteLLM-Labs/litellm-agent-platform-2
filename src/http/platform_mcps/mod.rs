@@ -32,6 +32,7 @@ pub const PLATFORM_MCP_SERVER_NAME: &str = "platform";
 pub const CREATE_MANAGED_AGENT_MCP_ID: &str = "create_managed_agent";
 pub const CONNECT_AGENT_TO_SLACK_MCP_ID: &str = "connect_agent_to_slack";
 pub const LIST_SLACK_AGENT_BINDINGS_MCP_ID: &str = "list_slack_agent_bindings";
+pub const LIST_SUB_AGENTS_MCP_ID: &str = "list_sub_agents";
 pub const RUN_SUB_AGENT_MCP_ID: &str = "run_sub_agent";
 
 #[derive(Debug, Clone, Serialize)]
@@ -78,6 +79,11 @@ pub fn platform_mcps() -> Vec<PlatformMcp> {
             id: LIST_SLACK_AGENT_BINDINGS_MCP_ID,
             name: "List Slack agent bindings",
             description: "List channel bindings created by this platform agent factory.",
+        },
+        PlatformMcp {
+            id: LIST_SUB_AGENTS_MCP_ID,
+            name: "List sub-agents",
+            description: "List this agent's attached LAP sub-agents with IDs, names, and runtime.",
         },
         PlatformMcp {
             id: RUN_SUB_AGENT_MCP_ID,
@@ -222,6 +228,7 @@ async fn call_tool(
         LIST_SLACK_AGENT_BINDINGS_MCP_ID => {
             factory_slack::list_slack_bindings(pool, agent_id).await?
         }
+        LIST_SUB_AGENTS_MCP_ID => tools::list_sub_agents(pool, agent_id).await?,
         RUN_SUB_AGENT_MCP_ID => {
             tools::run_sub_agent(state.clone(), pool.clone(), agent_id, arguments).await?
         }

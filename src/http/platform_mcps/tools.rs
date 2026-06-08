@@ -56,8 +56,12 @@ pub async fn run_sub_agent(
     let parent = registry::repository::get(&pool, parent_agent_id)
         .await?
         .ok_or_else(|| GatewayError::UnknownAgent(parent_agent_id.to_owned()))?;
-    let allowed = sub_agent_ids(&parent.config);
-    if !allowed.iter().any(|id| id == &child_agent_id) {
+    let allowed = attached_sub_agents(&pool, &parent).await?;
+    let allowed_ids = allowed
+        .iter()
+        .map(|agent| agent.agent_id.clone())
+        .collect::<Vec<_>>();
+    if !allowed_ids.iter().any(|id| id == &child_agent_id) {
         return Ok(json!({
             "isError": true,
             "message": "sub-agent is not attached to this parent agent",
@@ -93,6 +97,41 @@ pub async fn run_sub_agent(
         "status": output.status,
         "output": output.text
     }))
+}
+
+pub async fn list_sub_agents(pool: &PgPool, parent_agent_id: &str) -> Result<Value, GatewayError> {
+    let parent = registry::repository::get(pool, parent_agent_id)
+        .await?
+        .ok_or_else(|| GatewayError::UnknownAgent(parent_agent_id.to_owned()))?;
+    Ok(json!({ "sub_agents": attached_sub_agents(pool, &parent).await? }))
+}
+
+#[derive(serde::Serialize)]
+struct AttachedSubAgent {
+    agent_id: String,
+    name: String,
+    description: Option<String>,
+    model: String,
+    runtime: String,
+}
+
+async fn attached_sub_agents(
+    pool: &PgPool,
+    parent: &registry::schema::ManagedAgentRow,
+) -> Result<Vec<AttachedSubAgent>, GatewayError> {
+    let mut agents = Vec::new();
+    for agent_id in sub_agent_ids(&parent.config) {
+        if let Some(agent) = registry::repository::get(pool, &agent_id).await? {
+            agents.push(AttachedSubAgent {
+                agent_id: agent.id.clone(),
+                name: agent.name.clone(),
+                description: agent.description.clone(),
+                model: agent.model.clone(),
+                runtime: child_runtime(&agent),
+            });
+        }
+    }
+    Ok(agents)
 }
 
 fn child_runtime(agent: &registry::schema::ManagedAgentRow) -> String {

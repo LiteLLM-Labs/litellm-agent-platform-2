@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use super::{
-    factory, session_management, AGENT_MEMORY_MCP_ID, RUN_SUB_AGENT_MCP_ID,
+    factory, session_management, AGENT_MEMORY_MCP_ID, LIST_SUB_AGENTS_MCP_ID, RUN_SUB_AGENT_MCP_ID,
     SEND_SLACK_MESSAGE_MCP_ID,
 };
 
@@ -11,16 +11,28 @@ pub fn tool_defs() -> Vec<Value> {
         session_management::send_tool_def(),
         agent_memory_tool(),
         send_slack_message_tool(),
+        list_sub_agents_tool(),
         run_sub_agent_tool(),
     ];
     tools.extend(factory::tool_defs());
     tools
 }
 
+fn list_sub_agents_tool() -> Value {
+    json!({
+        "name": LIST_SUB_AGENTS_MCP_ID,
+        "description": "List this parent agent's attached LAP sub-agents, including each agent_id, name, description, model, and runtime. Call this before run_sub_agent when choosing by name.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {}
+        }
+    })
+}
+
 fn run_sub_agent_tool() -> Value {
     json!({
         "name": RUN_SUB_AGENT_MCP_ID,
-        "description": "Run one of this agent's configured LAP sub-agents. Only agent IDs attached to this parent agent are allowed.",
+        "description": "Run one of this agent's configured LAP sub-agents. Only agent IDs attached to this parent agent are allowed. Use list_sub_agents first when you need the attached agents' names.",
         "inputSchema": {
             "type": "object",
             "properties": {
