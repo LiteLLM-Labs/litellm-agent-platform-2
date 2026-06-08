@@ -197,6 +197,7 @@ async fn send_session_event(client: &Lap, session_id: &str) -> SendEventsRespons
                     "type": "user.message",
                     "content": [{ "type": "text", "text": "Create fibonacci.txt" }]
                 })],
+                model: None,
             },
         )
         .await

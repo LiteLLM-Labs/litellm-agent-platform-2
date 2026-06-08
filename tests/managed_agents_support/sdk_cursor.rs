@@ -194,6 +194,7 @@ pub async fn send_cursor_prompt(client: &Lap) {
                     "type": "user.message",
                     "content": [{ "type": "text", "text": "Add a troubleshooting note" }]
                 })],
+                model: None,
             },
         )
         .await

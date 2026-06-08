@@ -10,8 +10,20 @@ pub(super) fn session_body(title: String, resources: Option<Value>) -> Value {
     Value::Object(body)
 }
 
+/// Provider id opencode routes through. LAP is the gateway, so model requests
+/// flow back through the litellm provider configured on the opencode server
+/// (the same convention lite-harness uses).
+const PROVIDER_ID: &str = "litellm";
+
 pub(super) fn message_body(params: &SendEventsParams) -> Result<Value, AgentSdkError> {
-    Ok(json!({ "parts": parts_from_events(&params.events)? }))
+    let parts = parts_from_events(&params.events)?;
+    match params.model.as_deref().filter(|model| !model.is_empty()) {
+        Some(model_id) => Ok(json!({
+            "model": { "providerID": PROVIDER_ID, "modelID": model_id },
+            "parts": parts,
+        })),
+        None => Ok(json!({ "parts": parts })),
+    }
 }
 
 fn parts_from_events(events: &[Value]) -> Result<Vec<Value>, AgentSdkError> {

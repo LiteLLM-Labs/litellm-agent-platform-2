@@ -74,12 +74,13 @@ pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result
         .map_err(agent_sdk_error)
 }
 
-pub(super) fn send_events_params(prompt: String) -> SendEventsParams {
+pub(super) fn send_events_params(prompt: String, model: Option<String>) -> SendEventsParams {
     SendEventsParams {
         events: vec![json!({
             "type": "user.message",
             "content": [{ "type": "text", "text": prompt }]
         })],
+        model: model.filter(|model| !model.is_empty()),
     }
 }
 

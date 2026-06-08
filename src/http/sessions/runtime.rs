@@ -18,6 +18,7 @@ use crate::{
 };
 
 use super::{
+    runtime_inputs::agent_model,
     runtime_provision::provision_runtime_session,
     runtime_sdk::{
         agent_sdk_error, provider_run_id, register_runtime_session, runtime_sdk_client,
@@ -151,17 +152,34 @@ pub(super) async fn execute_runtime_prompt(
     state
         .agent_runs
         .update_status(&row.id, crate::agents::runs::AgentRunStatus::Running);
+    let model = session_model(pool, &row).await?;
     let sent = client
         .beta()
         .sessions()
         .events()
-        .send(&row.id, send_events_params(prompt))
+        .send(&row.id, send_events_params(prompt, model))
         .await
         .map_err(agent_sdk_error)?;
     if let Some(run_id) = provider_run_id(runtime, &sent.raw) {
         sessions::repository::set_provider_run(pool, &row.id, &run_id, "running").await?;
     }
     Ok(())
+}
+
+/// Resolve the model the agent should run for this turn. Passed generically on
+/// the send params; each runtime adapter decides whether its message API needs
+/// the model in the request body. Returns `None` when the agent can't be found.
+async fn session_model(
+    pool: &PgPool,
+    row: &SessionRow,
+) -> Result<Option<String>, GatewayError> {
+    let Some(agent_id) = row.agent_id.as_deref() else {
+        return Ok(None);
+    };
+    let Some(agent) = registry::repository::get(pool, agent_id).await? else {
+        return Ok(None);
+    };
+    Ok(Some(agent_model(&agent, &row.environment_json)))
 }
 
 fn validated_runtime(input: &CreateSessionRequest) -> Result<String, GatewayError> {
