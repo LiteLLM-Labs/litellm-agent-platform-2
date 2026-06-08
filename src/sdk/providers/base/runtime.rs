@@ -147,4 +147,12 @@ pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
     ) -> AdapterFuture<'a, Value> {
         Box::pin(async { Ok(serde_json::json!({ "data": [] })) })
     }
+
+    fn interrupt_session<'a>(
+        &'a self,
+        _client: &'a Lap,
+        _session_id: &'a str,
+    ) -> AdapterFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
 }

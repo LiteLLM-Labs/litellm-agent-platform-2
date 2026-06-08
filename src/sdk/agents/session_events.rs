@@ -31,6 +31,14 @@ impl SessionEvents<'_> {
             .await
     }
 
+    pub async fn interrupt(&self, session_id: &str) -> Result<(), AgentSdkError> {
+        let runtime = self.client.runtime_for_session(session_id)?;
+        self.client
+            .adapter(runtime)?
+            .interrupt_session(self.client, session_id)
+            .await
+    }
+
     pub async fn list(&self, session_id: &str) -> Result<Value, AgentSdkError> {
         let runtime = self.client.runtime_for_session(session_id)?;
         self.client

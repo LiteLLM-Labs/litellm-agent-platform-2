@@ -136,6 +136,26 @@ impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
                 .await
         })
     }
+
+    fn interrupt_session<'a>(
+        &'a self,
+        client: &'a Lap,
+        session_id: &'a str,
+    ) -> AdapterFuture<'a, ()> {
+        Box::pin(async move {
+            let provider_session_id = provider_session_id(client, session_id)?;
+            client
+                .post(
+                    AgentRuntime::ClaudeManagedAgents,
+                    &format!("/v1/sessions/{provider_session_id}/events"),
+                    &SendEventsParams {
+                        events: vec![serde_json::json!({ "type": "user.interrupt" })],
+                    },
+                )
+                .await?;
+            Ok(())
+        })
+    }
 }
 
 fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> {

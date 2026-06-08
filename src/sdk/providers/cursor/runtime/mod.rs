@@ -202,6 +202,29 @@ impl RuntimeAdapter for CursorRuntime {
                 .await
         })
     }
+
+    fn interrupt_session<'a>(
+        &'a self,
+        client: &'a Lap,
+        session_id: &'a str,
+    ) -> AdapterFuture<'a, ()> {
+        Box::pin(async move {
+            let context = client.context_for_session(session_id)?;
+            let agent_id = agent_id_from_context(session_id, context.as_ref());
+            let run_id = match context.and_then(|context| context.run_id) {
+                Some(run_id) => run_id,
+                None => latest_run_id(client, &agent_id).await?,
+            };
+            client
+                .post(
+                    AgentRuntime::Cursor,
+                    &format!("/v1/agents/{agent_id}/runs/{run_id}/cancel"),
+                    &serde_json::json!({}),
+                )
+                .await?;
+            Ok(())
+        })
+    }
 }
 
 pub(crate) fn run_id(raw: &Value) -> Option<String> {

@@ -69,6 +69,24 @@ impl RuntimeAdapter for OpenCodeRuntime {
             Ok(normalize_opencode_stream(provider_session_id, stream))
         })
     }
+
+    fn interrupt_session<'a>(
+        &'a self,
+        client: &'a Lap,
+        session_id: &'a str,
+    ) -> AdapterFuture<'a, ()> {
+        Box::pin(async move {
+            let provider_session_id = provider_session_id(client, session_id)?;
+            client
+                .post(
+                    AgentRuntime::OpenCode,
+                    &format!("/session/{provider_session_id}/abort"),
+                    &serde_json::json!({}),
+                )
+                .await?;
+            Ok(())
+        })
+    }
 }
 
 fn provider_session_id(client: &Lap, session_id: &str) -> Result<String, AgentSdkError> {

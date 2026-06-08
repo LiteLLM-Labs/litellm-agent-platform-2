@@ -1027,6 +1027,7 @@ function ChatInner() {
             runtime: sessionRuntime,
           }) : undefined}
           onSendStart={beginRuntimeTurn}
+          onAbort={sessionRuntime ? () => abortSession(sid).catch(() => {}) : undefined}
           disabled={Boolean(sessionRuntime && sessionStatus === "busy")}
         />
       </div>
