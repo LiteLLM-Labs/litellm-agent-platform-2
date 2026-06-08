@@ -97,6 +97,7 @@ export interface Agent {
   /** IDs of DB-backed rules attached to this agent (agents.rule_ids). */
   rule_ids?: string[];
   vault_keys?: string[];
+  config?: Record<string, unknown>;
   created_at?: number;
   [k: string]: unknown;
 }
