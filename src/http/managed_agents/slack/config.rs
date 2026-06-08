@@ -13,7 +13,7 @@ use crate::{
 
 use super::types::{SlackAgentConfig, DEFAULT_VAULT_USER};
 
-pub(super) async fn load_agent(
+pub(crate) async fn load_agent(
     pool: &PgPool,
     agent_id: &str,
 ) -> Result<ManagedAgentRow, GatewayError> {
@@ -40,18 +40,25 @@ pub(crate) async fn load_secret(state: &AppState, key: &str) -> Result<String, G
         .ok_or_else(|| GatewayError::InvalidConfig(format!("vault key is not configured: {key}")))
 }
 
-pub(super) fn signing_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+pub(crate) fn signing_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
     config
         .signing_secret_key
         .clone()
         .unwrap_or_else(|| format!("SLACK_{agent_id}_SIGNING_SECRET"))
 }
 
-pub(super) fn client_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+pub(crate) fn client_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
     config
         .client_secret_key
         .clone()
         .unwrap_or_else(|| format!("SLACK_{agent_id}_CLIENT_SECRET"))
+}
+
+pub(crate) fn app_config_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+    config
+        .app_config_token_key
+        .clone()
+        .unwrap_or_else(|| format!("SLACK_{agent_id}_APP_CONFIG_TOKEN"))
 }
 
 pub(crate) fn bot_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
@@ -61,7 +68,7 @@ pub(crate) fn bot_token_key(agent_id: &str, config: &SlackAgentConfig) -> String
         .unwrap_or_else(|| format!("SLACK_{agent_id}_BOT_TOKEN"))
 }
 
-pub(super) async fn update_slack_config(
+pub(crate) async fn update_slack_config(
     pool: &PgPool,
     agent: &ManagedAgentRow,
     patch: Value,
@@ -93,7 +100,7 @@ pub(super) async fn update_slack_config(
     Ok(())
 }
 
-pub(super) fn provider_id_for(agent_id: &str) -> String {
+pub(crate) fn provider_id_for(agent_id: &str) -> String {
     let mut output = String::new();
     let mut last_dash = false;
     for ch in agent_id.to_lowercase().chars() {

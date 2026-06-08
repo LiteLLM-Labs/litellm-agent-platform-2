@@ -3,6 +3,11 @@ use sqlx::{FromRow, PgPool};
 
 use crate::errors::GatewayError;
 
+pub use super::vault_keys::VaultKeyRow;
+pub use super::vault_keys::{
+    delete_vault_key, list_vault_keys_for_user, resolve_vault_key, upsert_vault_key,
+};
+
 #[derive(Debug, Clone, FromRow)]
 pub struct CredentialRow {
     pub credential_values: Value,
@@ -31,6 +36,25 @@ pub async fn get_by_name(
     .map_err(GatewayError::Database)
 }
 
+pub async fn get_personal_by_name(
+    pool: &PgPool,
+    credential_name: &str,
+    owner_id: &str,
+) -> Result<Option<CredentialRow>, GatewayError> {
+    sqlx::query_as::<_, CredentialRow>(
+        r#"
+        SELECT credential_values
+        FROM "LiteLLM_CredentialsTable"
+        WHERE credential_name = $1 AND scope = 'personal' AND owner_id = $2
+        "#,
+    )
+    .bind(credential_name)
+    .bind(owner_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(GatewayError::Database)
+}
+
 pub async fn upsert(
     pool: &PgPool,
     credential_name: &str,
@@ -49,7 +73,7 @@ pub async fn upsert(
             updated_by
         )
         VALUES ($1, $2, $3, $4, $5, $5)
-        ON CONFLICT (credential_name) DO UPDATE SET
+        ON CONFLICT (credential_name) WHERE scope = 'global' DO UPDATE SET
             credential_values = EXCLUDED.credential_values,
             credential_info = EXCLUDED.credential_info,
             updated_at = CURRENT_TIMESTAMP,

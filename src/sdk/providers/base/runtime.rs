@@ -13,7 +13,6 @@ use crate::sdk::agents::{
     SendEventsResponse, Session, SessionContext,
 };
 
-
 pub(crate) type AdapterFuture<'a, T> =
     Pin<Box<dyn Future<Output = Result<T, AgentSdkError>> + Send + 'a>>;
 

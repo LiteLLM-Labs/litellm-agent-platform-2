@@ -9,7 +9,13 @@ use axum::{
 use serde_json::{json, Value};
 
 use crate::{
-    db::managed_agents::{registry::schema::ManagedAgentRow, slack},
+    db::managed_agents::{
+        registry::{
+            self,
+            schema::{ManagedAgentRow, UpdateManagedAgent},
+        },
+        slack,
+    },
     errors::GatewayError,
     proxy::{state::AppState, vault},
 };
@@ -42,14 +48,23 @@ pub async fn oauth_callback(
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<Redirect, GatewayError> {
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    let agent_id = consume_state(pool, query.state.as_deref(), &provider_id).await?;
+    let oauth_state = required(query.state.as_deref(), "missing oauth state")?.to_owned();
+    let agent_id = consume_state(pool, Some(&oauth_state), &provider_id).await?;
     let agent = load_agent(pool, &agent_id).await?;
-    let config = slack_config(&agent)?;
     if let Some(error) = query.error.clone() {
         mark_failed(pool, &agent, error).await?;
         return Ok(Redirect::to("/agents/?slack=failed"));
     }
-    complete_oauth(&state, pool, &headers, provider_id, query, agent, config).await
+    complete_oauth(
+        &state,
+        pool,
+        &headers,
+        provider_id,
+        oauth_state,
+        query,
+        agent,
+    )
+    .await
 }
 
 async fn complete_oauth(
@@ -57,10 +72,11 @@ async fn complete_oauth(
     pool: &sqlx::PgPool,
     headers: &HeaderMap,
     provider_id: String,
+    oauth_state: String,
     query: OAuthCallbackQuery,
     agent: ManagedAgentRow,
-    config: SlackAgentConfig,
 ) -> Result<Redirect, GatewayError> {
+    let config = slack_config(&agent)?;
     let code = required(query.code.as_deref(), "missing oauth code")?;
     let client_id = required(
         config.client_id.as_deref(),
@@ -77,7 +93,7 @@ async fn complete_oauth(
         &redirect_uri,
     )
     .await?;
-    store_oauth_result(state, pool, &agent, &config, oauth).await
+    store_oauth_result(state, pool, &agent, &config, oauth_state, oauth).await
 }
 
 async fn store_oauth_result(
@@ -85,6 +101,7 @@ async fn store_oauth_result(
     pool: &sqlx::PgPool,
     agent: &ManagedAgentRow,
     config: &SlackAgentConfig,
+    oauth_state: String,
     oauth: web_api::SlackOAuthAccessResponse,
 ) -> Result<Redirect, GatewayError> {
     if !oauth.ok {
@@ -109,7 +126,75 @@ async fn store_oauth_result(
         }),
     )
     .await?;
+    finish_pending_install(pool, agent, &oauth_state).await?;
     Ok(Redirect::to("/agents/?slack=connected"))
+}
+
+async fn finish_pending_install(
+    pool: &sqlx::PgPool,
+    platform_agent: &ManagedAgentRow,
+    oauth_state: &str,
+) -> Result<(), GatewayError> {
+    let Some(pending) = slack::bindings::consume_pending_install(pool, oauth_state).await? else {
+        return Ok(());
+    };
+    let platform = load_agent(pool, &platform_agent.id).await?;
+    let child = load_agent(pool, &pending.agent_id).await?;
+    copy_slack_config(pool, &child, &platform.config).await?;
+    slack::bindings::upsert_binding(
+        pool,
+        slack::bindings::UpsertBindingInput {
+            platform_agent_id: &pending.platform_agent_id,
+            agent_id: &pending.agent_id,
+            team_id: pending.team_id.as_deref(),
+            channel_id: &pending.channel_id,
+            thread_ts: pending.thread_ts.as_deref().unwrap_or(&pending.channel_id),
+            dm_user_id: pending.dm_user_id.as_deref(),
+            created_by: pending.requested_by.as_deref(),
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+async fn copy_slack_config(
+    pool: &sqlx::PgPool,
+    child: &ManagedAgentRow,
+    platform_config: &Value,
+) -> Result<(), GatewayError> {
+    let mut root = child.config.as_object().cloned().unwrap_or_default();
+    root.insert("runtime".to_owned(), "claude_managed_agents".into());
+    root.insert(
+        "slack".to_owned(),
+        platform_config
+            .get("slack")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    );
+    registry::repository::update(
+        pool,
+        &child.id,
+        UpdateManagedAgent {
+            name: None,
+            model: None,
+            system: None,
+            prompt: None,
+            cron: None,
+            timezone: None,
+            vault_keys: None,
+            setup_commands: None,
+            max_runtime_minutes: None,
+            on_failure: None,
+            config: Some(Value::Object(root)),
+            owner_id: None,
+            status: None,
+            description: None,
+            harness: Some("claude_managed_agents".to_owned()),
+            skill_ids: None,
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 async fn consume_state(

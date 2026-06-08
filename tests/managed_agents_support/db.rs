@@ -5,6 +5,8 @@ pub async fn reset_tables(pool: &PgPool) {
         r#"
         TRUNCATE
           "LiteLLM_ManagedAgentSlackOAuthStatesTable",
+          "LiteLLM_SlackPendingInstallsTable",
+          "LiteLLM_SlackAgentBindingsTable",
           "LiteLLM_ManagedAgentSlackEventsTable",
           "LiteLLM_CredentialsTable",
           "LiteLLM_ManagedAgentSlackThreadSessionsTable",

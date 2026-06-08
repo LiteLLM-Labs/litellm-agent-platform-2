@@ -3,8 +3,7 @@ use serde_json::Value;
 use crate::sdk::agents::{
     response_fields::id, AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams,
     CreateEnvironmentParams, CreateSessionParams, Environment, Lap, ManagedAgent,
-    SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION, CLAUDE_MANAGED_AGENTS,
-    MANAGED_AGENTS_BETA,
+    SendEventsParams, SendEventsResponse, Session, CLAUDE_MANAGED_AGENTS,
 };
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 

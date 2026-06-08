@@ -235,24 +235,21 @@ export default function ObservabilityLogsPage() {
   const selectedError = errorInfo(selected);
 
   return (
-    <div className="flex h-screen bg-[#f5f5f7] text-[#1d1d1f]">
+    <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#d7d7dc] bg-white px-5">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <BarChart3 className="size-4 text-[#53657d]" />
-              <h1 className="truncate text-[15px] font-semibold">Request Logs</h1>
+              <BarChart3 className="size-4 text-muted-foreground" />
+              <h1 className="truncate text-xl font-semibold tracking-tight">Request Logs</h1>
             </div>
-            <p className="mt-0.5 hidden text-xs text-[#6e6e73] sm:block">
-              Spend, latency, payloads, and provider errors from gateway traffic
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              className="h-8 border-[#d7d7dc] bg-white text-xs"
+              className="h-8 border-border bg-card text-xs"
               onClick={() => load(true)}
             >
               <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
@@ -262,15 +259,15 @@ export default function ObservabilityLogsPage() {
           </div>
         </header>
 
-        <main className="relative min-h-0 flex-1 overflow-hidden">
-          <section className="flex h-full min-h-0 min-w-0 flex-col bg-white">
-            <div className="border-b border-[#e5e5ea] px-4 py-3">
-              <div className="flex flex-wrap items-center justify-end gap-4 text-sm text-[#53657d]">
+        <main id="main-content" className="relative min-h-0 flex-1 overflow-hidden">
+          <section className="flex h-full min-h-0 min-w-0 flex-col bg-card">
+            <div className="border-b border-border px-4 py-3">
+              <div className="flex flex-wrap items-center justify-end gap-4 text-sm text-muted-foreground">
                 <span>Showing {pageStart} - {pageEnd} of {logs.length} results</span>
                 <span>Page {currentPage} of {totalPages}</span>
                 <Button
                   variant="outline"
-                  className="h-8 border-[#d7d7dc] bg-white text-sm"
+                  className="h-8 border-border bg-card text-sm"
                   disabled={currentPage <= 1}
                   onClick={() => setPage((value) => Math.max(1, value - 1))}
                 >
@@ -278,7 +275,7 @@ export default function ObservabilityLogsPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  className="h-8 border-[#d7d7dc] bg-white text-sm"
+                  className="h-8 border-border bg-card text-sm"
                   disabled={currentPage >= totalPages}
                   onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                 >
@@ -288,23 +285,23 @@ export default function ObservabilityLogsPage() {
             </div>
 
             <div className={`border-b px-4 py-2 text-sm font-medium ${
-              liveTail ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-[#e5e5ea] bg-[#fbfbfd] text-[#6e6e73]"
+              liveTail ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "border-border bg-muted text-muted-foreground"
             }`}>
               {liveTail ? "Auto-refreshing every 15 seconds" : "Live tail paused"}
-              <button className="float-right" onClick={() => setLiveTail((value) => !value)}>
+              <Button variant="ghost" size="sm" className="float-right h-6 px-2 text-xs" onClick={() => setLiveTail(v => !v)} aria-label={liveTail ? "Stop auto-refresh" : "Start auto-refresh"}>
                 {liveTail ? "Stop" : "Start"}
-              </button>
+              </Button>
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto">
               {error && (
-                <div className="m-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <div className="m-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                   {error}
                 </div>
               )}
-              {loading && <div className="p-4 text-sm text-[#6e6e73]">Loading logs...</div>}
+              {loading && <div className="p-4 text-sm text-muted-foreground">Loading logs…</div>}
               {!loading && logs.length === 0 && !error && (
-                <div className="p-4 text-sm text-[#6e6e73]">No spend logs found.</div>
+                <div className="p-4 text-sm text-muted-foreground">No spend logs found.</div>
               )}
               <div className="min-w-[1660px]">
                 <TableHeader />
@@ -323,18 +320,18 @@ export default function ObservabilityLogsPage() {
           {selected && !detailOpen && (
             <button
               type="button"
-              className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 items-center gap-2 rounded-md border border-[#c7c7cc] bg-white px-3 py-2 text-sm font-medium text-[#1d1d1f] shadow-lg"
+              className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground shadow-lg focus-visible:ring-2 focus-visible:ring-ring/50"
               title="Open request details"
               onClick={() => setDetailOpen(true)}
             >
-              <PanelRightOpen className="size-4 text-[#53657d]" />
+              <PanelRightOpen className="size-4 text-muted-foreground" />
               Details
             </button>
           )}
 
           {selected && (
             <aside
-              className={`absolute inset-y-0 right-0 z-30 w-[min(760px,calc(100vw-320px))] min-w-[520px] overflow-y-auto border-l border-[#c7c7cc] bg-[#f5f5f7] shadow-[-18px_0_45px_rgba(15,23,42,0.12)] transition-transform duration-200 ease-out ${
+              className={`absolute inset-y-0 right-0 z-30 w-[min(760px,calc(100vw-320px))] min-w-[520px] overflow-y-auto border-l border-border bg-background shadow-[-18px_0_45px_rgba(15,23,42,0.12)] transition-transform duration-200 ease-out ${
                 detailOpen ? "translate-x-0" : "pointer-events-none translate-x-full"
               }`}
             >
@@ -349,7 +346,7 @@ export default function ObservabilityLogsPage() {
 
 function TableHeader() {
   return (
-    <div className={`grid ${TABLE_COLUMNS} border-b border-[#e5e5ea] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#1d1d1f]`}>
+    <div className={`grid ${TABLE_COLUMNS} border-b border-border bg-card px-4 py-2.5 text-[12px] font-semibold text-foreground`}>
       <div>Time</div>
       <div>Type</div>
       <div>Status</div>
@@ -378,26 +375,26 @@ function LogRow({
 }) {
   return (
     <button
-      className={`grid w-full ${TABLE_COLUMNS} items-center border-b border-[#ececf1] px-4 py-2.5 text-left text-[13px] transition ${
-        active ? "bg-[#eef5ff] shadow-[inset_3px_0_0_#0a84ff]" : "hover:bg-[#f8f8fa]"
+      className={`grid w-full ${TABLE_COLUMNS} items-center border-b border-border px-4 py-2.5 text-left text-[13px] transition ${
+        active ? "bg-primary/10 border-l-2 border-primary" : "hover:bg-muted"
       }`}
       onClick={onSelect}
     >
-      <div className="font-mono text-[#53657d]">{formatDate(log.start_time)}</div>
+      <div className="font-mono text-muted-foreground">{formatDate(log.start_time)}</div>
       <div><TypePill value={typeLabel(log)} /></div>
       <div><StatusBadge status={log.status} compact /></div>
-      <div className="truncate font-mono text-[#0a84ff]">{shortValue(log.session_id, 13)}</div>
-      <div className="truncate font-mono text-[#53657d]">{shortValue(log.request_id, 18)}</div>
-      <div className="font-mono text-[#53657d]">{log.status === "error" ? "-" : formatCost(log.spend)}</div>
-      <div className="font-mono text-[#53657d]">{((log.request_duration_ms ?? 0) / 1000).toFixed(2)}</div>
-      <div className="font-mono text-[#53657d]">{timeToFirstToken(log)}</div>
-      <div className="truncate text-[#53657d]">{metadataString(log, "team_name") ?? "-"}</div>
-      <div className="truncate font-mono text-[#53657d]">{shortValue(log.api_key, 14)}</div>
-      <div className="truncate text-[#53657d]">{log.user || "-"}</div>
-      <div className="truncate text-[#53657d]">{log.model_group || log.model}</div>
-      <div className="font-mono text-[#53657d]">
+      <div className="truncate font-mono text-primary">{shortValue(log.session_id, 13)}</div>
+      <div className="truncate font-mono text-muted-foreground">{shortValue(log.request_id, 18)}</div>
+      <div className="font-mono text-muted-foreground">{log.status === "error" ? "-" : formatCost(log.spend)}</div>
+      <div className="font-mono text-muted-foreground">{((log.request_duration_ms ?? 0) / 1000).toFixed(2)}</div>
+      <div className="font-mono text-muted-foreground">{timeToFirstToken(log)}</div>
+      <div className="truncate text-muted-foreground">{metadataString(log, "team_name") ?? "-"}</div>
+      <div className="truncate font-mono text-muted-foreground">{shortValue(log.api_key, 14)}</div>
+      <div className="truncate text-muted-foreground">{log.user || "-"}</div>
+      <div className="truncate text-muted-foreground">{log.model_group || log.model}</div>
+      <div className="font-mono text-muted-foreground">
         {log.total_tokens.toLocaleString()}{" "}
-        <span className="text-[#86868b]">
+        <span className="text-muted-foreground">
           ({log.prompt_tokens}+{log.completion_tokens})
         </span>
       </div>
@@ -407,7 +404,7 @@ function LogRow({
 
 function TypePill({ value }: { value: string }) {
   return (
-    <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+    <span className="inline-flex items-center rounded-full bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-600 dark:text-sky-400">
       {value}
     </span>
   );
@@ -416,11 +413,10 @@ function TypePill({ value }: { value: string }) {
 function StatusBadge({ status, compact = false }: { status: string | null; compact?: boolean }) {
   const ok = status !== "error";
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold ${
-        ok ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"
-      }`}
-    >
+    <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold ${
+      ok ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+         : "border-red-500/20 bg-red-500/10 text-red-600 dark:text-red-400"
+    }`}>
       {!compact && (ok ? <Check className="size-3.5" /> : <AlertTriangle className="size-3.5" />)}
       {ok ? "Success" : "Failure"}
     </span>
@@ -447,16 +443,16 @@ function LogDetail({
 
   return (
     <div className="space-y-5 px-6 py-5">
-      <div className="border-b border-[#d7d7dc] pb-4">
+      <div className="border-b border-border pb-4">
         <div className="space-y-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[15px] font-semibold text-[#1d1d1f]">{log.model_group || log.model}</span>
-              <span className="text-sm text-[#86868b]">{log.custom_llm_provider || "-"}</span>
+              <span className="text-[15px] font-semibold text-foreground">{log.model_group || log.model}</span>
+              <span className="text-sm text-muted-foreground">{log.custom_llm_provider || "-"}</span>
               <Button
                 variant="ghost"
                 size="icon"
-                className="ml-auto h-8 w-8 text-[#53657d]"
+                className="ml-auto h-8 w-8 text-muted-foreground"
                 title="Collapse request details"
                 onClick={onClose}
               >
@@ -464,13 +460,13 @@ function LogDetail({
               </Button>
             </div>
             <div className="mt-4 flex min-w-0 items-center gap-2">
-              <h2 className="truncate font-mono text-[22px] font-semibold leading-tight text-[#1d1d1f]">
+              <h2 className="truncate font-mono text-[22px] font-semibold leading-tight text-foreground">
                 {log.request_id}
               </h2>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-[#0a84ff]"
+                className="h-8 w-8 text-primary"
                 title="Copy request ID"
                 onClick={() => void copy("request", log.request_id)}
               >
@@ -479,14 +475,14 @@ function LogDetail({
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <StatusBadge status={log.status} />
-              <span className="rounded-md border border-[#d7d7dc] bg-white px-3 py-1 text-sm">
+              <span className="rounded-md border border-border bg-card px-3 py-1 text-sm">
                 Env: {metadataString(log, "environment") ?? "default"}
               </span>
-              <span className="text-sm text-[#86868b]">{formatDate(log.start_time)}</span>
+              <span className="text-sm text-muted-foreground">{formatDate(log.start_time)}</span>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 border-[#d7d7dc] bg-white text-xs"
+                className="h-8 border-border bg-card text-xs"
                 onClick={() => void copy("url", logUrl)}
               >
                 {copied === "url" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -495,7 +491,7 @@ function LogDetail({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 border-[#d7d7dc] bg-white text-xs"
+                className="h-8 border-border bg-card text-xs"
                 onClick={() => void copy("prompt", debugPrompt)}
               >
                 {copied === "prompt" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -503,7 +499,7 @@ function LogDetail({
               </Button>
             </div>
           </div>
-          <div className="grid overflow-hidden rounded-md border border-[#d7d7dc] bg-white sm:grid-cols-4">
+          <div className="grid overflow-hidden rounded-md border border-border bg-card sm:grid-cols-4">
             <DetailStat label="Cost" value={formatCost(log.spend)} />
             <DetailStat label="Tokens" value={log.total_tokens.toLocaleString()} />
             <DetailStat label="Latency" value={formatDuration(log.request_duration_ms)} />
@@ -563,8 +559,8 @@ function LogDetail({
 
       <InfoCard title="Cost Breakdown">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-[#6e6e73]">Total</span>
-          <span className="font-mono text-base font-semibold text-[#1d1d1f]">{formatCost(log.spend)}</span>
+          <span className="text-muted-foreground">Total</span>
+          <span className="font-mono text-base font-semibold text-foreground">{formatCost(log.spend)}</span>
         </div>
       </InfoCard>
 
@@ -586,7 +582,7 @@ function TagList({ log }: { log: SpendLog }) {
       {tags.map((tag, index) => (
         <span
           key={`${String(tag)}-${index}`}
-          className="rounded-md border border-[#d7d7dc] bg-[#fbfbfd] px-2 py-1 text-xs font-medium text-[#53657d]"
+          className="rounded-md border border-border bg-muted px-2 py-1 text-xs font-medium text-muted-foreground"
         >
           {index}: {String(tag)}
         </span>
@@ -605,14 +601,14 @@ function PayloadBlock({
   value: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-md border border-[#e5e5ea] bg-white">
-      <div className="flex items-center gap-3 border-b border-[#e5e5ea] bg-[#fbfbfd] px-3 py-2 text-sm">
-        <span className="font-semibold text-[#1d1d1f]">{title}</span>
-        <span className="text-[#86868b]">Tokens: {tokens.toLocaleString()}</span>
+    <div className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="flex items-center gap-3 border-b border-border bg-muted px-3 py-2 text-sm">
+        <span className="font-semibold text-foreground">{title}</span>
+        <span className="text-muted-foreground">Tokens: {tokens.toLocaleString()}</span>
         <Button
           variant="ghost"
           size="icon"
-          className="ml-auto h-7 w-7 text-[#6e6e73]"
+          className="ml-auto h-7 w-7 text-muted-foreground"
           title={`Copy ${title.toLowerCase()}`}
           onClick={() => navigator.clipboard?.writeText(value)}
         >
@@ -626,9 +622,9 @@ function PayloadBlock({
 
 function DetailStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 border-r border-[#e5e5ea] px-3 py-2 last:border-r-0">
-      <div className="text-[10px] font-semibold uppercase text-[#86868b]">{label}</div>
-      <div className="mt-1 truncate font-mono text-[13px] font-semibold text-[#1d1d1f]">
+    <div className="min-w-0 border-r border-border px-3 py-2 last:border-r-0">
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate font-mono text-[13px] font-semibold text-foreground">
         {value}
       </div>
     </div>
@@ -645,13 +641,13 @@ function InfoCard({
   tone?: "error";
 }) {
   return (
-    <section className={`overflow-hidden rounded-lg border bg-white shadow-sm ${
-      tone === "error" ? "border-red-200" : "border-[#e5e5ea]"
+    <section className={`overflow-hidden rounded-lg border bg-card shadow-sm ${
+      tone === "error" ? "border-destructive/40" : "border-border"
     }`}>
-      <div className="flex h-12 items-center gap-2 border-b border-[#e5e5ea] px-5">
-        <h3 className="text-[15px] font-semibold text-[#1d1d1f]">{title}</h3>
+      <div className="flex h-12 items-center gap-2 border-b border-border px-5">
+        <h3 className="text-[13.5px] font-semibold tracking-tight text-foreground">{title}</h3>
         {tone === "error" && (
-          <span className="ml-auto rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+          <span className="ml-auto rounded-md bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive">
             Captured on error
           </span>
         )}
@@ -687,17 +683,17 @@ function TwoColumnFields({
 function InlineMetric({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="flex min-w-0 items-baseline gap-2 text-[15px]">
-      <span className="shrink-0 text-[#86868b]">{label}:</span>
-      <span className="min-w-0 break-words font-medium text-[#1d1d1f]">{value || "-"}</span>
+      <span className="shrink-0 text-muted-foreground">{label}:</span>
+      <span className="min-w-0 break-words font-medium text-foreground">{value || "-"}</span>
     </div>
   );
 }
 
 function ErrorField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-red-100 bg-white px-3 py-2">
-      <div className="text-[11px] font-semibold uppercase text-red-700">{label}</div>
-      <div className="mt-1 break-words text-sm font-medium text-[#1d1d1f]">{value}</div>
+    <div className="rounded-md border border-destructive/20 bg-card px-3 py-2">
+      <div className="text-[11px] font-semibold uppercase text-destructive">{label}</div>
+      <div className="mt-1 break-words text-sm font-medium text-foreground">{value}</div>
     </div>
   );
 }
@@ -717,8 +713,8 @@ function CodeBlock({
         compact ? "max-h-[260px]" : "max-h-[540px]"
       } ${
         tone === "error"
-          ? "border-red-200 bg-red-50 text-red-950"
-          : "border-[#e5e5ea] bg-[#fbfbfd] text-[#1d1d1f]"
+          ? "border-destructive/40 bg-destructive/10 text-destructive"
+          : "border-border bg-muted text-foreground"
       }`}
     >
       {value}

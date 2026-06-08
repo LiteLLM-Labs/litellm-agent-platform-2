@@ -26,31 +26,36 @@ pub(super) struct SlackReply<'a> {
     channel: &'a str,
     thread_ts: &'a str,
     ts: Option<String>,
+    username: &'a str,
     session_id: &'a str,
     baseline_seq: i32,
     text: String,
     since_update: tokio::time::Instant,
 }
 
+pub(super) struct SlackReplyParams<'a> {
+    pub state: &'a AppState,
+    pub pool: &'a PgPool,
+    pub bot_token: &'a str,
+    pub message: &'a SlackIncomingMessage,
+    pub username: &'a str,
+    pub ts: Option<String>,
+    pub session_id: &'a str,
+    pub baseline_seq: i32,
+}
+
 impl<'a> SlackReply<'a> {
-    pub(super) fn new(
-        state: &'a AppState,
-        pool: &'a PgPool,
-        bot_token: &'a str,
-        message: &'a SlackIncomingMessage,
-        ts: Option<String>,
-        session_id: &'a str,
-        baseline_seq: i32,
-    ) -> Self {
+    pub(super) fn new(params: SlackReplyParams<'a>) -> Self {
         Self {
-            state,
-            pool,
-            bot_token,
-            channel: &message.channel,
-            thread_ts: &message.reply_thread_ts,
-            ts,
-            session_id,
-            baseline_seq,
+            state: params.state,
+            pool: params.pool,
+            bot_token: params.bot_token,
+            channel: &params.message.channel,
+            thread_ts: &params.message.reply_thread_ts,
+            ts: params.ts,
+            username: params.username,
+            session_id: params.session_id,
+            baseline_seq: params.baseline_seq,
             text: String::new(),
             since_update: tokio::time::Instant::now(),
         }
@@ -103,6 +108,11 @@ impl<'a> SlackReply<'a> {
     }
 
     pub(super) async fn finish_start_error(&mut self, message: &str) -> Result<(), GatewayError> {
+        self.update(message).await
+    }
+
+    pub(super) async fn replace_text(&mut self, message: &str) -> Result<(), GatewayError> {
+        self.text = message.to_owned();
         self.update(message).await
     }
 
@@ -244,13 +254,14 @@ impl<'a> SlackReply<'a> {
             }
             None => {
                 self.ts = Some(
-                    web_api::post_message(
+                    web_api::post_message_as(
                         &self.state.http,
                         &self.state.config.slack.api_base_url,
                         self.bot_token,
                         self.channel,
                         self.thread_ts,
                         &text,
+                        Some(self.username),
                     )
                     .await?,
                 );

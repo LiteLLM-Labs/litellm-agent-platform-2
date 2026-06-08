@@ -77,7 +77,7 @@ function configuredRuntime(agent: Agent | null): AgentRuntimeId | "" {
 function promptTitle(prompt: string): string {
   const compact = prompt.replace(/\s+/g, " ").trim();
   if (!compact) return "New agent session";
-  return compact.length > 46 ? `${compact.slice(0, 46).trimEnd()}...` : compact;
+  return compact.length > 46 ? `${compact.slice(0, 46).trimEnd()}…` : compact;
 }
 
 function isDbBackedAgent(agent: Agent): boolean {
@@ -170,6 +170,7 @@ function SessionsStart() {
     setError(null);
     try {
       const title = selectedAgent ? `${selectedAgent.name} session` : promptTitle(trimmed);
+      let shouldAutostartPrompt = Boolean(trimmed);
       const session =
         selectedAgent && !isDbBackedAgent(selectedAgent)
           ? await createSession(title, selectedAgent.id)
@@ -191,6 +192,7 @@ function SessionsStart() {
                 }));
               const environment =
                 runtimeForSession === "cursor" ? cursorEnvironment(repository, ref) : {};
+              shouldAutostartPrompt = false;
               return createSession(title, agent.id, {
                 runtime: runtimeForSession,
                 prompt: trimmed || undefined,
@@ -200,7 +202,7 @@ function SessionsStart() {
       const params = new URLSearchParams({
         id: session.id,
       });
-      if (trimmed) {
+      if (trimmed && shouldAutostartPrompt) {
         params.set("prompt", trimmed);
         params.set("autostart", "1");
       }
@@ -215,7 +217,7 @@ function SessionsStart() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <Sidebar />
-      <main className="relative flex min-w-0 flex-1 overflow-hidden bg-[#fbfbfa] text-[#20201f]">
+      <main id="main-content" className="relative flex min-w-0 flex-1 overflow-hidden bg-background text-foreground">
         <div
           aria-hidden
           className="absolute inset-0 opacity-80"
@@ -235,7 +237,7 @@ function SessionsStart() {
         />
 
         <section className="relative z-10 flex min-h-full w-full flex-col items-center justify-center px-6 py-12">
-          <div className="w-full max-w-2xl overflow-hidden rounded-lg border border-black/10 bg-white/92 shadow-[0_18px_70px_rgba(15,23,42,0.12)] backdrop-blur">
+          <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-border bg-card shadow-lg backdrop-blur">
             <Textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -246,9 +248,10 @@ function SessionsStart() {
                 }
               }}
               placeholder={selectedAgent ? "Optional first message" : "Ask or build anything"}
-              className="min-h-24 resize-none border-0 bg-transparent px-4 py-4 text-[15px] text-[#20201f] shadow-none outline-none placeholder:text-[#77736d] focus-visible:ring-0"
+              aria-label="Session prompt"
+              className="min-h-24 resize-none border-0 bg-transparent px-4 py-4 text-[15px] shadow-none outline-none placeholder:text-muted-foreground focus-visible:ring-0 dark:text-foreground"
             />
-            <div className="flex flex-wrap items-center gap-2 border-t border-black/10 bg-[#faf9f7] px-3 py-3">
+            <div className="flex flex-wrap items-center gap-2 border-t border-border bg-muted/30 px-3 py-3">
               <Select
                 value={selectedAgentId || NEW_AGENT_VALUE}
                 onValueChange={(value) => {
@@ -260,9 +263,9 @@ function SessionsStart() {
                   if (nextRuntime) setRuntime(nextRuntime);
                 }}
               >
-                <SelectTrigger className="h-10 w-auto min-w-[230px] max-w-[320px] rounded-full border border-black/10 bg-white px-3 text-left text-[#20201f] shadow-sm transition-colors hover:bg-[#fbfaf8] focus:ring-1 focus:ring-black/15">
+                <SelectTrigger className="h-10 w-auto min-w-[230px] max-w-[320px] rounded-full border border-border bg-background px-3 text-left text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#77736d]">
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Agent
                     </span>
                     <span className="truncate text-sm font-medium">
@@ -300,12 +303,12 @@ function SessionsStart() {
               </Select>
 
               <Select value={runtime} onValueChange={(value) => setRuntime((value ?? "") as AgentRuntimeId | "")}>
-                <SelectTrigger className="h-10 w-auto min-w-[260px] max-w-[340px] rounded-full border border-black/10 bg-white px-3 text-left text-[#20201f] shadow-sm transition-colors hover:bg-[#fbfaf8] focus:ring-1 focus:ring-black/15">
+                <SelectTrigger className="h-10 w-auto min-w-[260px] max-w-[340px] rounded-full border border-border bg-background px-3 text-left text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[#77736d]">
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Runtime
                     </span>
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-[#f3f1ee]">
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
                       <BrandIcon id={runtimeIconId(runtime)} className="size-4" />
                     </span>
                     <span className="truncate text-sm font-medium">
@@ -331,13 +334,13 @@ function SessionsStart() {
                   ))}
                 </SelectContent>
               </Select>
-              <span className="hidden rounded-full border border-black/10 bg-white px-3 py-1.5 font-mono text-xs text-[#77736d] 2xl:inline">
+              <span className="hidden rounded-full border border-border bg-card px-3 py-1.5 font-mono text-xs text-muted-foreground 2xl:inline">
                 {selectedAgentIsConfigured ? "agent/*" : runtimeRoutePrefix(runtime)}
               </span>
-              <Button variant="ghost" size="icon-sm" disabled className="ml-auto hidden text-[#5d5a55] 2xl:inline-flex">
+              <Button variant="ghost" size="icon-sm" disabled aria-label="Voice input (coming soon)" className="ml-auto hidden text-[#5d5a55] 2xl:inline-flex">
                 <Mic className="size-4" />
               </Button>
-              <Button variant="ghost" size="icon-sm" disabled className="hidden text-[#5d5a55] 2xl:inline-flex">
+              <Button variant="ghost" size="icon-sm" disabled aria-label="Attach file (coming soon)" className="hidden text-[#5d5a55] 2xl:inline-flex">
                 <Paperclip className="size-4" />
               </Button>
               <Button
@@ -345,7 +348,7 @@ function SessionsStart() {
                 size="sm"
                 onClick={() => void startSession()}
                 disabled={!canStart}
-                className="ml-auto rounded-full bg-[#20201f] text-white hover:bg-black disabled:opacity-30"
+                className="ml-auto rounded-full"
                 aria-label="Start session"
               >
                 <ArrowUp className="size-4" />
@@ -353,23 +356,23 @@ function SessionsStart() {
               </Button>
             </div>
             {runtime === "cursor" && (
-              <div className="grid gap-2 border-t border-black/10 bg-[#f5f4f2] px-4 py-3 sm:grid-cols-[1fr_120px]">
+              <div className="grid gap-2 border-t border-border bg-muted/40 px-4 py-3 sm:grid-cols-[1fr_120px]">
                 <Input
                   value={repository}
                   onChange={(event) => setRepository(event.target.value)}
                   placeholder="https://github.com/org/repo"
-                  className="h-8 border-black/10 bg-white text-sm"
+                  className="h-8 border-border bg-background text-sm"
                 />
                 <Input
                   value={ref}
                   onChange={(event) => setRef(event.target.value)}
                   placeholder="main"
-                  className="h-8 border-black/10 bg-white text-sm"
+                  className="h-8 border-border bg-background text-sm"
                 />
               </div>
             )}
             {error && (
-              <div className="border-t border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700">
+              <div className="border-t border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -384,7 +387,7 @@ function SessionsStart() {
             />
           </div>
 
-          <div className="absolute bottom-6 rounded-full border border-black/10 bg-white/80 px-3 py-1.5 text-xs text-[#68645f] shadow-sm">
+          <div className="absolute bottom-6 rounded-full border border-border bg-card/80 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
             <span className="mr-2 inline-block size-2 rounded-full bg-[#b7b3ad]" />
             {selectedAgentIsConfigured
               ? `${selectedAgent?.name} ready`
@@ -414,9 +417,9 @@ function MetricCard({
   value: number | null;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-black/10 bg-white/88 p-4 shadow-sm">
-      <div className="text-sm text-[#706c66]">{title}</div>
-      <div className="mt-1 text-3xl tracking-tight text-[#20201f]">
+    <div className="overflow-hidden rounded-lg border border-border bg-card/90 p-4 shadow-sm backdrop-blur">
+      <div className="text-sm text-muted-foreground">{title}</div>
+      <div className="mt-1 text-3xl tracking-tight text-foreground">
         {value === null ? "..." : value.toLocaleString()}
       </div>
       <div className="mt-4 h-1.5 rounded-full bg-black/5">
