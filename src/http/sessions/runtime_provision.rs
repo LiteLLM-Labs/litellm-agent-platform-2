@@ -40,6 +40,9 @@ pub(super) async fn provision_runtime_session(
     created: &CreatedRuntimeSession,
 ) -> Result<SessionRow, GatewayError> {
     let sdk_rt = super::runtime_sdk::sdk_runtime(&created.runtime)?;
+    if sdk_rt == AgentRuntime::OpenCode {
+        return provision_opencode_session(state, pool, created).await;
+    }
     let client = runtime_client(state, sdk_rt, created);
     let provider_agent = create_provider_agent(state, &client, sdk_rt, created).await?;
     let provider_env = create_provider_environment(&client, sdk_rt, created).await?;
@@ -74,6 +77,33 @@ pub(super) async fn provision_runtime_session(
             "session": provider_session.raw,
         }),
     );
+    persist_runtime_refs(pool, created, provision).await
+}
+
+async fn provision_opencode_session(
+    state: &AppState,
+    pool: &PgPool,
+    created: &CreatedRuntimeSession,
+) -> Result<SessionRow, GatewayError> {
+    let client = runtime_client(state, AgentRuntime::OpenCode, created);
+    let session = client
+        .beta()
+        .sessions()
+        .create(CreateSessionParams::opencode(
+            format!("{} session", created.agent.name),
+        ))
+        .await
+        .map_err(agent_sdk_error)?;
+    let provision = RuntimeProvision {
+        runtime_agent_id: session.id.clone(),
+        provider_session_id: Some(session.id.clone()),
+        provider_run_id: None,
+        provider_url: None,
+        metadata: serde_json::json!({
+            "runtime": created.runtime,
+            "session": session.raw,
+        }),
+    };
     persist_runtime_refs(pool, created, provision).await
 }
 
