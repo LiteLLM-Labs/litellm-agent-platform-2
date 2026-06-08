@@ -168,7 +168,12 @@ pub async fn abort(
         if let Some(runtime) = row.runtime.as_deref() {
             if let Ok(client) = runtime_sdk_client(&state, runtime).await {
                 if register_runtime_session(&client, &row).is_ok() {
-                    let _ = client.beta().sessions().events().interrupt(&session_id).await;
+                    let _ = client
+                        .beta()
+                        .sessions()
+                        .events()
+                        .interrupt(&session_id)
+                        .await;
                 }
             }
         }
