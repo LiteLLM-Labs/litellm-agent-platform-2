@@ -60,7 +60,11 @@ impl RuntimeAdapter for OpenCodeRuntime {
     ) -> AdapterFuture<'a, Session> {
         Box::pin(async move {
             let raw = client
-                .post(AgentRuntime::OpenCode, "/session", &session_body(params.title))
+                .post(
+                    AgentRuntime::OpenCode,
+                    "/session",
+                    &session_body(params.title, params.resources),
+                )
                 .await?;
             let session = Session {
                 id: id(&raw)?,
