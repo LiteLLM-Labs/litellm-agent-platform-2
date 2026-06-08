@@ -4,7 +4,7 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-use super::super::{read_events_until_completed, request_json, AppFixture};
+use super::super::{read_events_until_completed, request_json, request_json_raw, AppFixture};
 
 pub async fn save_anthropic_credentials(fixture: &AppFixture) -> MockServer {
     let anthropic = MockServer::start().await;
@@ -24,7 +24,7 @@ pub async fn save_anthropic_credentials(fixture: &AppFixture) -> MockServer {
 
 pub async fn exercise_claude_runtime_session_storage(fixture: &AppFixture, agent_id: &str) {
     let anthropic = save_anthropic_credentials(fixture).await;
-    let session = create_claude_runtime_session(fixture, agent_id).await;
+    let session = create_claude_runtime_session(fixture, &anthropic, agent_id).await;
     let session_id = session["id"].as_str().unwrap();
     assert_claude_session_response(&session);
     assert_claude_session_stored(fixture, session_id).await;
@@ -32,8 +32,12 @@ pub async fn exercise_claude_runtime_session_storage(fixture: &AppFixture, agent
     anthropic.verify().await;
 }
 
-async fn create_claude_runtime_session(fixture: &AppFixture, agent_id: &str) -> serde_json::Value {
-    request_json(
+async fn create_claude_runtime_session(
+    fixture: &AppFixture,
+    anthropic: &MockServer,
+    agent_id: &str,
+) -> serde_json::Value {
+    let (status, body) = request_json_raw(
         fixture.app.clone(),
         "POST",
         "/session",
@@ -45,7 +49,16 @@ async fn create_claude_runtime_session(fixture: &AppFixture, agent_id: &str) -> 
             "prompt": "say hello"
         })),
     )
-    .await
+    .await;
+    if !status.is_success() {
+        if let Some(requests) = anthropic.received_requests().await {
+            for request in requests {
+                eprintln!("anthropic request: {} {}", request.method, request.url);
+            }
+        }
+        panic!("POST /session returned {status}: {body}");
+    }
+    serde_json::from_str(&body).unwrap()
 }
 
 fn assert_claude_session_response(session: &serde_json::Value) {
@@ -102,6 +115,7 @@ fn assert_claude_replay_events(replay: &serde_json::Value) {
 }
 
 async fn mount_claude_runtime(anthropic: &MockServer) {
+    mount_claude_vault(anthropic).await;
     Mock::given(method("POST"))
         .and(path("/v1/agents"))
         .and(header("x-api-key", "anthropic-test"))
@@ -127,6 +141,27 @@ async fn mount_claude_runtime(anthropic: &MockServer) {
         .mount(anthropic)
         .await;
     mount_claude_session_events(anthropic).await;
+}
+
+async fn mount_claude_vault(anthropic: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/v1/vaults"))
+        .and(header("x-api-key", "anthropic-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "vault_111111111111111111111111"
+        })))
+        .mount(anthropic)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(
+            "/v1/vaults/vault_111111111111111111111111/credentials",
+        ))
+        .and(header("x-api-key", "anthropic-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "vcred_111111111111111111111111"
+        })))
+        .mount(anthropic)
+        .await;
 }
 
 async fn mount_claude_session_events(anthropic: &MockServer) {

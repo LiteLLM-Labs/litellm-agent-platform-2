@@ -152,6 +152,7 @@ async fn assert_sub_agent_allowlist(fixture: &AppFixture, agent_id: &str) {
     assert!(content.contains("sub-agent is not attached"));
     assert!(content.contains(&child_id));
     assert!(content.contains("Allowed Child"));
+    attach_child_agents(fixture, agent_id, Vec::new()).await;
 }
 
 async fn seed_child_agent(fixture: &AppFixture) -> String {
@@ -181,6 +182,10 @@ async fn seed_child_agent(fixture: &AppFixture) -> String {
 }
 
 async fn attach_child_agent(fixture: &AppFixture, agent_id: &str, child_id: &str) {
+    attach_child_agents(fixture, agent_id, vec![child_id.to_owned()]).await;
+}
+
+async fn attach_child_agents(fixture: &AppFixture, agent_id: &str, child_ids: Vec<String>) {
     request_json(
         fixture.app.clone(),
         "PATCH",
@@ -188,7 +193,11 @@ async fn attach_child_agent(fixture: &AppFixture, agent_id: &str, child_id: &str
         Some(json!({
             "config": {
                 "runtime": "claude_managed_agents",
-                "sub_agents": [{ "agent_id": child_id }]
+                "platform_mcp_ids": [],
+                "sub_agents": child_ids
+                    .into_iter()
+                    .map(|agent_id| json!({ "agent_id": agent_id }))
+                    .collect::<Vec<_>>()
             }
         })),
     )
