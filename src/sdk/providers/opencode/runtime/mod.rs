@@ -1,10 +1,13 @@
 mod request;
 mod stream;
 
+use serde_json::json;
+
 use crate::sdk::agents::{
     response_fields::id,
-    AgentEventStream, AgentRuntime, AgentSdkError, CreateSessionParams, Lap, SendEventsParams,
-    SendEventsResponse, Session, OPENCODE,
+    AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
+    CreateSessionParams, Environment, Lap, ManagedAgent, SendEventsParams, SendEventsResponse,
+    Session, OPENCODE,
 };
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 use request::{message_body, session_body};
@@ -15,6 +18,41 @@ pub(crate) const RUNTIME_ID: &str = OPENCODE;
 pub(crate) struct OpenCodeRuntime;
 
 impl RuntimeAdapter for OpenCodeRuntime {
+    fn create_agent<'a>(
+        &'a self,
+        _client: &'a Lap,
+        params: CreateAgentParams,
+    ) -> AdapterFuture<'a, ManagedAgent> {
+        Box::pin(async move {
+            let raw = json!({ "id": params.name });
+            Ok(ManagedAgent {
+                id: id(&raw)?,
+                version: None,
+                name: Some(params.name),
+                description: None,
+                model: None,
+                system: None,
+                tools: Vec::new(),
+                mcp_servers: Vec::new(),
+                metadata: None,
+                created_at: None,
+                updated_at: None,
+                raw,
+            })
+        })
+    }
+
+    fn create_environment<'a>(
+        &'a self,
+        _client: &'a Lap,
+        params: CreateEnvironmentParams,
+    ) -> AdapterFuture<'a, Environment> {
+        Box::pin(async move {
+            let raw = json!({ "id": params.name });
+            Ok(Environment { id: id(&raw)?, raw })
+        })
+    }
+
     fn create_session<'a>(
         &'a self,
         client: &'a Lap,

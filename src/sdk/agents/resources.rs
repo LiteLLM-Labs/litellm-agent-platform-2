@@ -2,9 +2,8 @@ use super::{
     client::Lap,
     events::AgentEventStream,
     types::{
-        AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, ManagedAgent, SendEventsParams, SendEventsResponse,
-        Session,
+        AgentSdkError, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
+        Environment, ManagedAgent, SendEventsParams, SendEventsResponse, Session,
     },
 };
 
@@ -42,11 +41,6 @@ pub struct Agents<'a> {
 impl Agents<'_> {
     pub async fn create(&self, params: CreateAgentParams) -> Result<ManagedAgent, AgentSdkError> {
         let runtime = params.lap_agent_runtime;
-        if runtime == AgentRuntime::OpenCode {
-            return Err(AgentSdkError::InvalidRequest(
-                "agents.create is not supported for opencode".to_owned(),
-            ));
-        }
         self.client
             .adapter(runtime)?
             .create_agent(self.client, params)
@@ -64,11 +58,6 @@ impl Environments<'_> {
         params: CreateEnvironmentParams,
     ) -> Result<Environment, AgentSdkError> {
         let runtime = params.lap_agent_runtime;
-        if runtime == AgentRuntime::OpenCode {
-            return Err(AgentSdkError::InvalidRequest(
-                "environments.create is not supported for opencode".to_owned(),
-            ));
-        }
         self.client
             .adapter(runtime)?
             .create_environment(self.client, params)
