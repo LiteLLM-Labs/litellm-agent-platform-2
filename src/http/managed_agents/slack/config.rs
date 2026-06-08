@@ -3,12 +3,13 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
+    db::credentials,
     db::managed_agents::registry::{
         self,
         schema::{ManagedAgentRow, UpdateManagedAgent},
     },
     errors::GatewayError,
-    proxy::{state::AppState, vault},
+    proxy::{credential_crypto, state::AppState, vault},
 };
 
 use super::types::{SlackAgentConfig, DEFAULT_VAULT_USER};
@@ -35,9 +36,30 @@ pub(crate) fn slack_config(agent: &ManagedAgentRow) -> Result<SlackAgentConfig, 
 
 pub(crate) async fn load_secret(state: &AppState, key: &str) -> Result<String, GatewayError> {
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    vault::load(pool, &state.config, DEFAULT_VAULT_USER, key)
-        .await?
-        .ok_or_else(|| GatewayError::InvalidConfig(format!("vault key is not configured: {key}")))
+    if let Some(value) = vault::load(pool, &state.config, DEFAULT_VAULT_USER, key).await? {
+        return Ok(value);
+    }
+    let legacy_key = format!("vault:{DEFAULT_VAULT_USER}:{key}");
+    if let Some(value) = load_legacy_secret(state, pool, &legacy_key).await? {
+        return Ok(value);
+    }
+    Err(GatewayError::InvalidConfig(format!(
+        "vault key is not configured: {key}"
+    )))
+}
+
+async fn load_legacy_secret(
+    state: &AppState,
+    pool: &PgPool,
+    key: &str,
+) -> Result<Option<String>, GatewayError> {
+    let Some(encrypted) = credentials::resolve_vault_key(pool, key, DEFAULT_VAULT_USER).await?
+    else {
+        return Ok(None);
+    };
+    let encryption_key =
+        credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
+    credential_crypto::decrypt_value(&encrypted, &encryption_key).map(Some)
 }
 
 pub(crate) fn signing_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
