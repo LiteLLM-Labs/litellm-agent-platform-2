@@ -5,7 +5,7 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-use super::super::{request_json, request_raw, AppFixture};
+use super::super::{request_json, request_json_raw, request_raw, AppFixture};
 
 const CURSOR_AGENT_ID: &str = "bc-11111111-1111-1111-1111-111111111111";
 const FIRST_RUN_ID: &str = "run-11111111-1111-1111-1111-111111111111";
@@ -21,7 +21,7 @@ pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str
     mount_run_stream(&cursor, SECOND_RUN_ID, "followup", " stream").await;
 
     save_cursor_credentials(fixture, &cursor).await;
-    let session_id = create_cursor_session(fixture, agent_id).await;
+    let session_id = create_cursor_session(fixture, &cursor, agent_id).await;
     assert_initial_stream(fixture, &session_id).await;
     assert_session_status(fixture, &session_id, "idle").await;
     send_followup_prompt(fixture, &session_id).await;
@@ -105,14 +105,32 @@ async fn save_cursor_credentials(fixture: &AppFixture, cursor: &MockServer) {
     assert_eq!(cursor_runtime["api_base"].as_str().unwrap(), cursor.uri());
 }
 
-async fn create_cursor_session(fixture: &AppFixture, agent_id: &str) -> String {
-    let session = request_json(
+async fn create_cursor_session(
+    fixture: &AppFixture,
+    cursor: &MockServer,
+    agent_id: &str,
+) -> String {
+    let (status, body) = request_json_raw(
         fixture.app.clone(),
         "POST",
         "/session",
         Some(cursor_session_request(agent_id)),
     )
     .await;
+    if !status.is_success() {
+        if let Some(requests) = cursor.received_requests().await {
+            for request in requests {
+                eprintln!(
+                    "cursor request: {} {} {}",
+                    request.method,
+                    request.url,
+                    String::from_utf8_lossy(&request.body)
+                );
+            }
+        }
+        panic!("POST /session returned {status}: {body}");
+    }
+    let session: Value = serde_json::from_str(&body).unwrap();
     let session_id = session["id"].as_str().unwrap().to_owned();
     assert_eq!(session["runtime"], "cursor");
     assert_eq!(session["provider_session_id"], CURSOR_AGENT_ID);
@@ -192,7 +210,7 @@ async fn runtime_events(fixture: &AppFixture, session_id: &str) -> String {
 
 fn cursor_create_agent_request() -> Value {
     json!({
-        "prompt": { "text": "watch deploys\n\nRepository: https://github.com/acme/app\nBase branch: main\n\nFix the failing tests" },
+        "prompt": { "text": "watch deploys\n\n---\n\n## Attached Rules\n### backend safety\nAlways use repository helpers before changing managed-agent DB code.\n\nRepository: https://github.com/acme/app\nBase branch: main\n\nFix the failing tests" },
         "model": { "id": "composer-2" },
         "name": "ops-agent",
         "repos": [{

@@ -9,6 +9,7 @@ import type {
   Memory,
   OpencodeSession,
   PlatformMcp,
+  Rule,
   Skill,
   SpendLog,
   VaultKeyEntry,
@@ -577,7 +578,7 @@ export async function draftAgentConfigWithModel(
       model,
       max_tokens: 1200,
       system:
-        "You design managed agent configs for LiteLLM Agent Platform. Return only valid YAML, with no markdown fence and no prose. Use exactly these primary keys: name, description, model, runtime, system, tools. The runtime must be claude_managed_agents unless the user explicitly names another supported runtime. The model should be claude-sonnet-4-6 unless a different model is clearly requested. Use tools as YAML list items with a type equal to a tool id available for the selected runtime, for example `- type: bash`. Do not emit provider-native toolset identifiers such as agent_toolset_20260401. If the selected runtime has no explicit LAP-managed tools, use tools: []. Do not include harness. Do not paste the user's request as a generic mission; synthesize a complete, specific system prompt that tells the agent how to behave, what to avoid, and when to ask for approval. Include schedule, vault_keys, or skill_ids only when the request clearly needs them.\n\n" +
+        "You design managed agent configs for LiteLLM Agent Platform. Return only valid YAML, with no markdown fence and no prose. Use these primary keys when relevant: name, description, model, runtime, system, tools, schedule, vault_keys, skill_ids, rule_ids, sub_agents. The runtime must be claude_managed_agents unless the user explicitly names another supported runtime. The model should be claude-sonnet-4-6 unless a different model is clearly requested. Use tools as YAML list items with a type equal to a tool id available for the selected runtime, for example `- type: bash`. Do not emit provider-native toolset identifiers such as agent_toolset_20260401. If the selected runtime has no explicit LAP-managed tools, use tools: []. Do not include harness. Do not include provider-native multiagent or callable_agents. For sub-agents, only emit existing LAP agent references if the user provided exact IDs, using `sub_agents:` entries with `agent_id`. If useful helper agents are implied but no IDs are known, describe them in the system prompt as suggested roles instead of inventing IDs. Do not paste the user's request as a generic mission; synthesize a complete, specific system prompt that tells the agent how to behave, what to avoid, when to delegate to attached sub-agents, and when to ask for approval. Include schedule, vault_keys, skill_ids, or rule_ids only when the request clearly needs them.\n\n" +
         runtimeToolCatalogPrompt(runtimes),
       messages: [
         {
@@ -970,6 +971,50 @@ export async function listMcpUserCredentials(
   return data.data ?? [];
 }
 
+// ── Rules CRUD (DB-backed, /api/rules) ───────────────────────────────────────
+// Rules are reusable Markdown instructions persisted in the harness DB and
+// attached to agents via agents.rule_ids.
+
+export async function listRules(): Promise<Rule[]> {
+  const res = await req("/api/rules");
+  const data = await jsonOrThrow<{ rules: Rule[] }>(res);
+  return data.rules ?? [];
+}
+
+export async function createRule(input: {
+  name: string;
+  content: string;
+  description?: string | null;
+}): Promise<Rule> {
+  const res = await req("/api/rules", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<Rule>(res);
+}
+
+export async function getRule(id: string): Promise<Rule> {
+  const res = await req(`/api/rules/${encodeURIComponent(id)}`);
+  return jsonOrThrow<Rule>(res);
+}
+
+export async function updateRule(
+  id: string,
+  fields: { name?: string; description?: string | null; content?: string },
+): Promise<Rule> {
+  const res = await req(`/api/rules/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  return jsonOrThrow<Rule>(res);
+}
+
+export async function deleteRule(id: string): Promise<void> {
+  await req(`/api/rules/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 // ── Skills CRUD (DB-backed, /api/skills) ──────────────────────────────────────
 // Skills are reusable capability docs persisted in the harness DB and attached
 // to agents via agents.skill_ids.
@@ -1289,4 +1334,3 @@ export async function deleteMemory(agentId: string, key: string): Promise<void> 
     { method: "DELETE" },
   );
 }
-

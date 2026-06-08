@@ -3,8 +3,7 @@ use serde_json::Value;
 use crate::sdk::agents::{
     response_fields::id, AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams,
     CreateEnvironmentParams, CreateSessionParams, Environment, Lap, ManagedAgent,
-    SendEventsParams, SendEventsResponse, Session, ANTHROPIC_VERSION, CLAUDE_MANAGED_AGENTS,
-    MANAGED_AGENTS_BETA,
+    SendEventsParams, SendEventsResponse, Session, CLAUDE_MANAGED_AGENTS,
 };
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 
@@ -14,17 +13,6 @@ pub(crate) const RUNTIME_ID: &str = CLAUDE_MANAGED_AGENTS;
 pub(crate) struct ClaudeManagedAgentsRuntime;
 
 impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
-    fn configure_request(
-        &self,
-        request: reqwest::RequestBuilder,
-        api_key: &str,
-    ) -> reqwest::RequestBuilder {
-        request
-            .header("x-api-key", api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("anthropic-beta", MANAGED_AGENTS_BETA)
-    }
-
     fn create_agent<'a>(
         &'a self,
         client: &'a Lap,
@@ -132,6 +120,42 @@ impl RuntimeAdapter for ClaudeManagedAgentsRuntime {
                 .await
         })
     }
+
+    fn list_events<'a>(
+        &'a self,
+        client: &'a Lap,
+        session_id: &'a str,
+    ) -> AdapterFuture<'a, serde_json::Value> {
+        Box::pin(async move {
+            let provider_session_id = provider_session_id(client, session_id)?;
+            client
+                .get(
+                    AgentRuntime::ClaudeManagedAgents,
+                    &format!("/v1/sessions/{provider_session_id}/events"),
+                )
+                .await
+        })
+    }
+
+    fn interrupt_session<'a>(
+        &'a self,
+        client: &'a Lap,
+        session_id: &'a str,
+    ) -> AdapterFuture<'a, ()> {
+        Box::pin(async move {
+            let provider_session_id = provider_session_id(client, session_id)?;
+            client
+                .post(
+                    AgentRuntime::ClaudeManagedAgents,
+                    &format!("/v1/sessions/{provider_session_id}/events"),
+                    &SendEventsParams {
+                        events: vec![serde_json::json!({ "type": "user.interrupt" })],
+                    },
+                )
+                .await?;
+            Ok(())
+        })
+    }
 }
 
 fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> {
@@ -154,7 +178,6 @@ fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> 
     Ok(body)
 }
 
-#[allow(dead_code)]
 fn provider_session_id(client: &Lap, session_id: &str) -> Result<String, AgentSdkError> {
     Ok(client
         .context_for_session(session_id)?

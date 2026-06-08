@@ -14,6 +14,8 @@ export interface AgentDraft {
   timezone: string;
   vault_keys: string[];
   skill_ids: string[];
+  rule_ids: string[];
+  sub_agents: AgentSubAgent[];
   /** IDs of integrations from INTEGRATIONS catalog to attach as MCP servers. */
   mcp_server_ids: string[];
   max_runtime_minutes: number;
@@ -21,6 +23,10 @@ export interface AgentDraft {
 }
 
 export type AgentTool = Record<string, string>;
+
+export interface AgentSubAgent {
+  agent_id: string;
+}
 
 export interface AgentTemplate {
   id: string;
@@ -64,6 +70,8 @@ function baseDraft(): AgentDraft {
     timezone: DEFAULT_TIMEZONE,
     vault_keys: [],
     skill_ids: [],
+    rule_ids: [],
+    sub_agents: [],
     mcp_server_ids: [],
     max_runtime_minutes: 30,
     on_failure: DEFAULT_FAILURE,
@@ -71,7 +79,15 @@ function baseDraft(): AgentDraft {
 }
 
 export function blankAgentDraft(): AgentDraft {
-  return { ...baseDraft(), tools: DEFAULT_TOOLS.map((tool) => ({ ...tool })), vault_keys: [], skill_ids: [], mcp_server_ids: [] };
+  return {
+    ...baseDraft(),
+    tools: DEFAULT_TOOLS.map((tool) => ({ ...tool })),
+    vault_keys: [],
+    skill_ids: [],
+    rule_ids: [],
+    sub_agents: [],
+    mcp_server_ids: [],
+  };
 }
 
 export function defaultToolsForRuntime(runtime: string, runtimes: AgentRuntime[]): AgentTool[] {
@@ -93,6 +109,8 @@ function withDraft(patch: Partial<AgentDraft>): AgentDraft {
     tools: (patch.tools ?? DEFAULT_TOOLS).map((tool) => ({ ...tool })),
     vault_keys: [...(patch.vault_keys ?? [])],
     skill_ids: [...(patch.skill_ids ?? [])],
+    rule_ids: [...(patch.rule_ids ?? [])],
+    sub_agents: [...(patch.sub_agents ?? [])],
     mcp_server_ids: [...(patch.mcp_server_ids ?? [])],
   };
 }
@@ -277,6 +295,11 @@ function cronForPrompt(prompt: string): string {
   return "";
 }
 
+function subAgentsForPrompt(prompt: string): AgentSubAgent[] {
+  void prompt;
+  return [];
+}
+
 function generatedSystem(template: AgentTemplate, prompt: string): string {
   const objective = sentence(prompt);
   return `${template.draft.system}\n\nUse this agent configuration to accomplish the requested workflow: ${objective} Before taking irreversible external actions, summarize the intended action and wait for explicit user approval. Keep outputs structured, concise, and easy to review.`;
@@ -285,6 +308,7 @@ function generatedSystem(template: AgentTemplate, prompt: string): string {
 export function buildAgentDraftFromPrompt(prompt: string): AgentDraft {
   const promptVaultKeys = vaultKeysForPrompt(prompt);
   const promptCron = cronForPrompt(prompt);
+  const promptSubAgents = subAgentsForPrompt(prompt);
   if (/\bhello\s*,?\s*world\b/i.test(prompt)) {
     return {
       ...blankAgentDraft(),
@@ -294,6 +318,7 @@ export function buildAgentDraftFromPrompt(prompt: string): AgentDraft {
         'You are a friendly Hello World agent. When a user sends you any message, greet them warmly with "Hello, World!" and a brief, cheerful follow-up. Keep responses short, positive, and welcoming.',
       cron: promptCron,
       vault_keys: promptVaultKeys,
+      sub_agents: promptSubAgents,
     };
   }
 
@@ -307,6 +332,7 @@ export function buildAgentDraftFromPrompt(prompt: string): AgentDraft {
     cron: promptCron || template.draft.cron,
     vault_keys: unique([...template.draft.vault_keys, ...promptVaultKeys]),
     skill_ids: [...template.draft.skill_ids],
+    sub_agents: promptSubAgents,
   };
 }
 
@@ -350,6 +376,14 @@ function toolsBlock(tools: AgentTool[]): string {
   ].join("\n");
 }
 
+function subAgentsBlock(subAgents: AgentSubAgent[]): string {
+  if (subAgents.length === 0) return "sub_agents: []";
+  return [
+    "sub_agents:",
+    ...subAgents.map((agent) => `  - agent_id: ${scalar(agent.agent_id)}`),
+  ].join("\n");
+}
+
 export function stringifyAgentDraft(draft: AgentDraft): string {
   const lines = [
     `name: ${scalar(draft.name)}`,
@@ -367,6 +401,8 @@ export function stringifyAgentDraft(draft: AgentDraft): string {
   }
   if (draft.vault_keys.length > 0) lines.push(`vault_keys: ${listBlock(draft.vault_keys)}`);
   if (draft.skill_ids.length > 0) lines.push(`skill_ids: ${listBlock(draft.skill_ids)}`);
+  if (draft.rule_ids.length > 0) lines.push(`rule_ids: ${listBlock(draft.rule_ids)}`);
+  if (draft.sub_agents.length > 0) lines.push(subAgentsBlock(draft.sub_agents));
   if (draft.mcp_server_ids.length > 0) lines.push(`mcp_servers: ${listBlock(draft.mcp_server_ids)}`);
   if (draft.max_runtime_minutes !== 30) lines.push(`max_runtime_minutes: ${draft.max_runtime_minutes}`);
   if (draft.on_failure !== DEFAULT_FAILURE) lines.push(`on_failure: ${scalar(draft.on_failure)}`);
@@ -466,6 +502,58 @@ function parseTools(lines: string[], start: number, draft: AgentDraft): number {
   return i - 1;
 }
 
+function cleanSubAgents(values: AgentSubAgent[]): AgentSubAgent[] {
+  const seen = new Set<string>();
+  const agents: AgentSubAgent[] = [];
+  values.forEach((agent) => {
+    const agentId = agent.agent_id.trim();
+    if (!agentId || seen.has(agentId)) return;
+    seen.add(agentId);
+    agents.push({ agent_id: agentId });
+  });
+  return agents;
+}
+
+function parseSubAgents(lines: string[], start: number, draft: AgentDraft): number {
+  const subAgents: AgentSubAgent[] = [];
+  let current: AgentSubAgent | null = null;
+  let i = start + 1;
+  while (i < lines.length) {
+    const next = lines[i];
+    if (!next.trim()) {
+      i += 1;
+      continue;
+    }
+    if (indentOf(next) === 0) {
+      draft.sub_agents = cleanSubAgents(subAgents);
+      return i - 1;
+    }
+    const trimmed = next.trim();
+    const itemPair = trimmed.match(/^-\s*([A-Za-z_][A-Za-z0-9_]*):(?:\s*(.*))?$/);
+    if (itemPair) {
+      current = { agent_id: itemPair[1] === "agent_id" ? unquote(itemPair[2] ?? "") : "" };
+      subAgents.push(current);
+      i += 1;
+      continue;
+    }
+    const itemScalar = trimmed.match(/^-\s*(.*)$/);
+    if (itemScalar) {
+      current = { agent_id: unquote(itemScalar[1]) };
+      subAgents.push(current);
+      i += 1;
+      continue;
+    }
+    const pair = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*):(?:\s*(.*))?$/);
+    if (current && pair) {
+      const value = unquote(pair[2] ?? "");
+      if (pair[1] === "agent_id" || pair[1] === "id") current.agent_id = value;
+    }
+    i += 1;
+  }
+  draft.sub_agents = cleanSubAgents(subAgents);
+  return i - 1;
+}
+
 export function parseAgentDraftConfig(source: string): ParsedAgentDraft {
   const draft = blankAgentDraft();
   const lines = source.replace(/\r\n/g, "\n").split("\n");
@@ -524,7 +612,16 @@ export function parseAgentDraftConfig(source: string): ParsedAgentDraft {
       continue;
     }
 
-    if (key === "vault_keys" || key === "skill_ids" || key === "mcp_servers") {
+    if (key === "sub_agents" || key === "multiagent") {
+      if (value === "[]") {
+        draft.sub_agents = [];
+        continue;
+      }
+      i = parseSubAgents(lines, i, draft);
+      continue;
+    }
+
+    if (key === "vault_keys" || key === "skill_ids" || key === "rule_ids" || key === "mcp_servers") {
       const values = value ? inlineList(value) : [];
       if (!value) {
         i += 1;
@@ -574,6 +671,8 @@ export function createInputFromDraft(draft: AgentDraft) {
   const baseTools = draft.tools.filter((t) => t.type !== "mcp_toolset");
   const mcpToolsets = resolvedMcpServers.map(({ id }) => ({ type: "mcp_toolset", mcp_server_name: id }));
   const allTools = [...baseTools, ...mcpToolsets];
+  const subAgents = cleanSubAgents(draft.sub_agents);
+  const platformMcpIds = subAgents.length > 0 ? ["run_sub_agent"] : [];
 
   return {
     name: draft.name.trim(),
@@ -588,12 +687,15 @@ export function createInputFromDraft(draft: AgentDraft) {
     schedule: cron ? { cron, timezone: draft.timezone.trim() || "UTC" } : null,
     vault_keys: draft.vault_keys,
     skill_ids: draft.skill_ids,
+    rule_ids: draft.rule_ids,
     max_runtime_minutes: draft.max_runtime_minutes,
     on_failure: draft.on_failure.trim() || DEFAULT_FAILURE,
     config: {
       runtime,
       tools: allTools,
       mcp_servers: mcpServers,
+      sub_agents: subAgents,
+      platform_mcp_ids: platformMcpIds,
     },
   };
 }

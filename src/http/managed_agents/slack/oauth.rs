@@ -191,6 +191,7 @@ async fn copy_slack_config(
             description: None,
             harness: Some("claude_managed_agents".to_owned()),
             skill_ids: None,
+            rule_ids: None,
         },
     )
     .await?;

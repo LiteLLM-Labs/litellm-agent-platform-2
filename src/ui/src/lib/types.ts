@@ -94,7 +94,10 @@ export interface Agent {
   owner_id?: string | null;
   /** IDs of DB-backed skills attached to this agent (agents.skill_ids). */
   skill_ids?: string[];
+  /** IDs of DB-backed rules attached to this agent (agents.rule_ids). */
+  rule_ids?: string[];
   vault_keys?: string[];
+  config?: Record<string, unknown>;
   created_at?: number;
   [k: string]: unknown;
 }
@@ -137,6 +140,17 @@ export interface Skill {
   content: string;
   owner_id: string | null;
   created_at: number;
+}
+
+/** A reusable, DB-backed Markdown rule attachable to an agent. */
+export interface Rule {
+  id: string;
+  name: string;
+  description: string | null;
+  content: string;
+  owner_id: string | null;
+  created_at: number;
+  updated_at: number;
 }
 
 /** A durable key→value note an agent has stored in its memory. */

@@ -23,14 +23,6 @@ pub(crate) const RUNTIME_ID: &str = "cursor";
 pub(crate) struct CursorRuntime;
 
 impl RuntimeAdapter for CursorRuntime {
-    fn configure_request(
-        &self,
-        request: reqwest::RequestBuilder,
-        api_key: &str,
-    ) -> reqwest::RequestBuilder {
-        request.bearer_auth(api_key)
-    }
-
     fn normalize_stream(&self, stream: AgentEventStream) -> AgentEventStream {
         normalize_cursor_stream(stream)
     }
@@ -208,6 +200,29 @@ impl RuntimeAdapter for CursorRuntime {
                     &format!("/v1/agents/{agent_id}/runs/{run_id}/stream"),
                 )
                 .await
+        })
+    }
+
+    fn interrupt_session<'a>(
+        &'a self,
+        client: &'a Lap,
+        session_id: &'a str,
+    ) -> AdapterFuture<'a, ()> {
+        Box::pin(async move {
+            let context = client.context_for_session(session_id)?;
+            let agent_id = agent_id_from_context(session_id, context.as_ref());
+            let run_id = match context.and_then(|context| context.run_id) {
+                Some(run_id) => run_id,
+                None => latest_run_id(client, &agent_id).await?,
+            };
+            client
+                .post(
+                    AgentRuntime::Cursor,
+                    &format!("/v1/agents/{agent_id}/runs/{run_id}/cancel"),
+                    &serde_json::json!({}),
+                )
+                .await?;
+            Ok(())
         })
     }
 }

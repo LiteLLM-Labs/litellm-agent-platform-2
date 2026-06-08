@@ -7,8 +7,9 @@ use super::{
     super::{request_json, request_raw, AppFixture},
     claude_runtime::save_anthropic_credentials,
     slack_helpers::{
-        assert_slack_api_call_count, assert_slack_api_called, now_seconds, percent_encode,
-        provider_id_for, signed_json_request, signed_request, slack_api_call_count,
+        assert_legacy_prefixed_slack_secret, assert_slack_api_call_count, assert_slack_api_called,
+        now_seconds, percent_encode, provider_id_for, signed_json_request, signed_request,
+        slack_api_call_count,
     },
     slack_url_verification::{assert_url_verification, assert_url_verification_without_secret},
 };
@@ -20,6 +21,7 @@ pub async fn exercise_slack(fixture: &AppFixture, agent_id: &str) {
     assert_oauth_callback(fixture, agent_id).await;
     assert_url_verification(fixture, agent_id).await;
     assert_url_verification_without_secret(fixture, agent_id).await;
+    assert_legacy_prefixed_slack_secret(fixture, agent_id).await;
     assert_thread_session_race(fixture, agent_id).await;
     let reaction_baseline = slack_api_call_count(fixture, "/reactions.add").await;
     let post_baseline = slack_api_call_count(fixture, "/chat.postMessage").await;

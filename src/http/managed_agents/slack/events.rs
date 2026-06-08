@@ -79,6 +79,7 @@ async fn handle_event_callback(
                 state.clone(),
                 &pool,
                 agent.id.clone(),
+                agent_runtime(&agent),
                 format!("Slack {} {}", message.channel, message.thread_ts),
                 prompt.clone(),
                 serde_json::json!({
@@ -103,6 +104,17 @@ async fn handle_event_callback(
     };
     spawn_slack_prompt(state, pool, agent, config, message, row.session_id);
     Ok(())
+}
+
+fn agent_runtime(agent: &crate::db::managed_agents::registry::schema::ManagedAgentRow) -> String {
+    agent
+        .config
+        .get("runtime")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|runtime| !runtime.is_empty())
+        .unwrap_or(crate::sdk::agents::CLAUDE_MANAGED_AGENTS)
+        .to_owned()
 }
 
 fn challenge(payload: &Value) -> String {

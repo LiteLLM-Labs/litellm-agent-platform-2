@@ -114,13 +114,13 @@ async fn insert_agent(
           id, name, model, system, tools, cadence, interval_seconds, session_id,
           loop_id, created_at, prompt, cron, timezone, vault_keys, setup_commands,
           max_runtime_minutes, on_failure, config, owner_id, status, description,
-          harness, skill_ids
+          harness, skill_ids, rule_ids
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, NULL, $7,
           NULL, $8, $9, $10, $11, $12, $13,
           $14, $15, $16, $17, 'paused', $18,
-          $19, $20
+          $19, $20, $21
         )
         RETURNING *
         "#,
@@ -149,6 +149,7 @@ async fn insert_agent(
     .bind(input.description)
     .bind(defaults.harness.clone())
     .bind(input.skill_ids.unwrap_or_else(|| json!([])))
+    .bind(input.rule_ids.unwrap_or_else(|| json!([])))
     .fetch_one(conn)
     .await
     .map_err(GatewayError::Database)
@@ -238,7 +239,8 @@ pub async fn update(
           status = COALESCE($14, status),
           description = COALESCE($15, description),
           harness = COALESCE($16, harness),
-          skill_ids = COALESCE($17, skill_ids)
+          skill_ids = COALESCE($17, skill_ids),
+          rule_ids = COALESCE($18, rule_ids)
         WHERE id = $1
         RETURNING *
         "#,
@@ -260,6 +262,7 @@ pub async fn update(
     .bind(input.description)
     .bind(input.harness)
     .bind(input.skill_ids)
+    .bind(input.rule_ids)
     .fetch_optional(pool)
     .await
     .map_err(GatewayError::Database)

@@ -27,6 +27,7 @@ pub struct ManagedAgentRow {
     pub description: Option<String>,
     pub harness: String,
     pub skill_ids: Value,
+    pub rule_ids: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +48,7 @@ pub struct CreateManagedAgent {
     pub model: Option<String>,
     pub system: Option<String>,
     pub skill_ids: Option<Value>,
+    pub rule_ids: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,4 +75,5 @@ pub struct UpdateManagedAgent {
     pub description: Option<String>,
     pub harness: Option<String>,
     pub skill_ids: Option<Value>,
+    pub rule_ids: Option<Value>,
 }
