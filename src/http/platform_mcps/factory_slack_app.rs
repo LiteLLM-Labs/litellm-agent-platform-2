@@ -194,6 +194,7 @@ async fn save_child_slack_app(
             description: None,
             harness: Some(FACTORY_RUNTIME.to_owned()),
             skill_ids: None,
+            rule_ids: None,
         },
     )
     .await?

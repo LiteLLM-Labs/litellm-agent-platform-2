@@ -9,6 +9,7 @@ mod cursor_runtime;
 mod platform_factory;
 mod platform_factory_payloads;
 mod platform_mcps;
+mod rules;
 mod sessions;
 mod slack;
 mod slack_helpers;
@@ -18,6 +19,7 @@ mod slack_url_verification;
 pub use claude_runtime::exercise_claude_runtime_session_storage;
 pub use cursor_runtime::exercise_cursor_runtime_stream;
 pub use platform_mcps::exercise_platform_mcps;
+pub use rules::exercise_rules;
 pub use sessions::exercise_sessions;
 pub use slack::exercise_slack;
 

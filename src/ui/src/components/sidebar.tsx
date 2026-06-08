@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Plus,
   Puzzle,
+  ScrollText,
   Server,
   ServerCog,
   Settings,
@@ -184,6 +185,12 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           href: "/skills/",
           icon: FileText,
           active: (path) => path.startsWith("/skills"),
+        },
+        {
+          label: "Rules",
+          href: "/rules/",
+          icon: ScrollText,
+          active: (path) => path.startsWith("/rules"),
         },
         {
           label: "Vault",

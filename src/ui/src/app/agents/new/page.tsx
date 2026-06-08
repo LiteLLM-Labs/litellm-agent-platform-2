@@ -41,9 +41,9 @@ import {
 } from "@/lib/agent-builder";
 import type { AgentDraft, AgentTemplate } from "@/lib/agent-builder";
 import { INTEGRATIONS } from "@/lib/integrations";
-import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes, listModels } from "@/lib/api";
+import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes, listModels, listRules } from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
-import type { AgentRuntime } from "@/lib/types";
+import type { AgentRuntime, Rule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type BuilderStep = "create" | "config";
@@ -70,6 +70,7 @@ export default function NewAgentPage() {
   const [configText, setConfigText] = useState(INITIAL_CONFIG);
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [models, setModels] = useState<string[]>([]);
+  const [rules, setRules] = useState<Rule[]>([]);
   const [view, setView] = useState<BuilderView>("edit");
   const [drafting, setDrafting] = useState(false);
   const [lastRequest, setLastRequest] = useState("");
@@ -83,10 +84,11 @@ export default function NewAgentPage() {
   const canCreate = !saving && !parsed.error && draft.name.trim().length > 0;
 
   useEffect(() => {
-    Promise.all([listAgentRuntimes(), listModels()])
-      .then(([runtimeValues, modelValues]) => {
+    Promise.all([listAgentRuntimes(), listModels(), listRules()])
+      .then(([runtimeValues, modelValues, ruleValues]) => {
         setRuntimes(runtimeValues);
         setModels(modelValues);
+        setRules(ruleValues);
         setConfigText((current) =>
           current === INITIAL_CONFIG
             ? stringifyAgentDraft(withRuntimeDefaultTools(AGENT_TEMPLATES[0].draft, runtimeValues))
@@ -96,6 +98,7 @@ export default function NewAgentPage() {
       .catch(() => {
         setRuntimes([]);
         setModels([]);
+        setRules([]);
       });
   }, []);
 
@@ -240,6 +243,7 @@ export default function NewAgentPage() {
               models={models}
               parsedError={parsed.error}
               prompt={prompt}
+              rules={rules}
               runtimes={runtimes}
               saving={saving}
               view={view}
@@ -413,6 +417,7 @@ function ConfigStep({
   models,
   parsedError,
   prompt,
+  rules,
   runtimes,
   saving,
   view,
@@ -435,6 +440,7 @@ function ConfigStep({
   models: string[];
   parsedError: string | null;
   prompt: string;
+  rules: Rule[];
   runtimes: AgentRuntime[];
   saving: boolean;
   view: BuilderView;
@@ -580,7 +586,7 @@ function ConfigStep({
           </div>
 
           {view === "edit" ? (
-            <AgentDraftControls draft={draft} models={models} runtimes={runtimes} onChange={onDraftChange} />
+            <AgentDraftControls draft={draft} models={models} rules={rules} runtimes={runtimes} onChange={onDraftChange} />
           ) : view === "config" ? (
             <Textarea
               value={configText}
@@ -690,11 +696,13 @@ function TemplateBrowser({
 function AgentDraftControls({
   draft,
   models,
+  rules,
   runtimes,
   onChange,
 }: {
   draft: AgentDraft;
   models: string[];
+  rules: Rule[];
   runtimes: AgentRuntime[];
   onChange: (next: AgentDraft) => void;
 }) {
@@ -710,6 +718,13 @@ function AgentDraftControls({
     if (enabled) next.add(toolId);
     else next.delete(toolId);
     update({ tools: Array.from(next).map((type) => ({ type })) });
+  };
+  const toggleRule = (ruleId: string, enabled: boolean) => {
+    update({
+      rule_ids: enabled
+        ? Array.from(new Set([...draft.rule_ids, ruleId]))
+        : draft.rule_ids.filter((id) => id !== ruleId),
+    });
   };
 
   return (
@@ -780,7 +795,7 @@ function AgentDraftControls({
               {draft.tools.length} selected
             </span>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid max-h-[284px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
             {toolOptions.map((toolId) => (
               <label
                 key={toolId}
@@ -800,12 +815,52 @@ function AgentDraftControls({
 
         <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
           <div className="flex items-center justify-between gap-3">
+            <Label className="text-sm font-medium">Rules</Label>
+            <span className="font-mono text-xs text-[#9d9384]">
+              {draft.rule_ids.length} attached
+            </span>
+          </div>
+          {rules.length === 0 ? (
+            <p className="text-xs text-[#9d9384]">No rules available.</p>
+          ) : (
+            <div className="grid max-h-[284px] gap-2 overflow-y-auto pr-1">
+              {rules.map((rule) => {
+                const enabled = draft.rule_ids.includes(rule.id);
+                return (
+                  <label
+                    key={rule.id}
+                    className="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs hover:bg-white/10"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(event) => toggleRule(rule.id, event.target.checked)}
+                      className="mt-0.5 size-3.5 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{rule.name}</span>
+                        <span className="truncate font-mono text-[#9d9384]">{rule.id}</span>
+                      </div>
+                      <div className="mt-0.5 line-clamp-2 text-[#9d9384]">
+                        {rule.description || "No description."}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
+          <div className="flex items-center justify-between gap-3">
             <Label className="text-sm font-medium">MCP integrations</Label>
             <span className="font-mono text-xs text-[#9d9384]">
               {draft.mcp_server_ids.length} connected
             </span>
           </div>
-          <div className="grid gap-2">
+          <div className="grid max-h-[284px] gap-2 overflow-y-auto pr-1">
             {INTEGRATIONS.map((integration) => {
               const enabled = draft.mcp_server_ids.includes(integration.id);
               const toggle = (on: boolean) => {
@@ -881,6 +936,7 @@ function ConfigPreview({ draft }: { draft: AgentDraft }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <TokenList label="Vault keys" values={draft.vault_keys} />
           <TokenList label="Skill IDs" values={draft.skill_ids} />
+          <TokenList label="Rule IDs" values={draft.rule_ids} />
           <TokenList label="MCP integrations" values={draft.mcp_server_ids} />
         </div>
       </div>
