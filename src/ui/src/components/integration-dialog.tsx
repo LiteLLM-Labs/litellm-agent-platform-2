@@ -8,7 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { BrandIcon } from "@/components/brand-icons";
-import { storeMcpUserCredential, storeMcpVarCredential, deleteMcpUserCredential, getStoredMasterKey } from "@/lib/api";
+import {
+  deleteMcpUserCredential,
+  listMcpServerTools,
+  storeMcpUserCredential,
+  storeMcpVarCredential,
+  testMcpServerTools,
+} from "@/lib/api";
 import type { McpServer } from "@/lib/types";
 
 interface McpVariable {
@@ -78,25 +84,29 @@ export function IntegrationDialog({
   const onTest = async () => {
     setTesting(true);
     setTestResult(null);
+    setError(null);
     try {
-      const serverName = server.alias ?? server.server_name ?? server.server_id;
-      const key = getStoredMasterKey();
-      const headers: Record<string, string> = { "content-type": "application/json" };
-      if (key) headers["authorization"] = `Bearer ${key}`;
-      const res = await fetch(`/${encodeURIComponent(serverName)}/mcp`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
-        cache: "no-store",
-      });
-      if (res.ok) {
-        const data = await res.json() as { result?: { tools?: { name?: string }[] }; tools?: { name?: string }[] };
-        const rawTools = data.result?.tools ?? data.tools ?? [];
-        const tools = rawTools.map((t) => t.name ?? "").filter(Boolean);
-        setTestResult({ ok: true, tools: tools.slice(0, 8), count: tools.length });
-      } else {
-        setTestResult({ ok: false, tools: [], count: 0 });
+      const variables: Record<string, string> = {};
+      let hasEnteredVariable = false;
+      for (const variable of perUserVars) {
+        const value = varValues[variable.name]?.trim() ?? "";
+        variables[variable.name] = value;
+        if (value) hasEnteredVariable = true;
       }
+
+      if (hasEnteredVariable) {
+        const missing = perUserVars.filter((variable) => !variables[variable.name]);
+        if (missing.length > 0) {
+          setError(`Please fill in all required fields: ${missing.map((v) => v.name).join(", ")}`);
+          return;
+        }
+      }
+
+      const rawTools = hasEnteredVariable
+        ? await testMcpServerTools(server.server_id, variables)
+        : await listMcpServerTools(server.server_id);
+      const tools = rawTools.map((t) => t.name ?? "").filter(Boolean);
+      setTestResult({ ok: true, tools: tools.slice(0, 8), count: tools.length });
     } catch {
       setTestResult({ ok: false, tools: [], count: 0 });
     } finally {
