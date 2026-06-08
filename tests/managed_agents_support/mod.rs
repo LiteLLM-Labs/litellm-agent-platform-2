@@ -10,10 +10,10 @@ use litellm_rust::{
     db::managed_agents::pool as managed_agents_pool,
     http::routes::router,
     proxy::{
-        config::{GatewayConfig, GeneralSettings},
+        config::{GatewayConfig, GeneralSettings, SlackSettings},
         state::AppState,
     },
-    sdk::{providers::transform::ProviderRegistry, router::Router as ModelRouter},
+    sdk::{providers::ProviderRegistry, routing::Router as ModelRouter},
 };
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -23,13 +23,18 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
+mod db;
 pub mod flows;
-mod session_flow;
+mod slack_mock;
+
+use db::reset_tables;
+use slack_mock::mock_slack;
 
 pub struct AppFixture {
     pub app: axum::Router,
-    pool: PgPool,
+    pub(crate) pool: PgPool,
     _e2b: MockServer,
+    pub slack: MockServer,
 }
 
 impl AppFixture {
@@ -41,20 +46,23 @@ impl AppFixture {
         managed_agents_pool::migrate(&pool).await.unwrap();
         reset_tables(&pool).await;
         let e2b = mock_e2b().await;
+        let slack = mock_slack().await;
         Some(Self {
-            app: router(build_state(pool.clone(), e2b.uri())),
+            app: router(build_state(pool.clone(), e2b.uri(), slack.uri())),
             pool,
             _e2b: e2b,
+            slack,
         })
     }
 }
 
-fn build_state(pool: PgPool, e2b_api_base: String) -> Arc<AppState> {
+fn build_state(pool: PgPool, e2b_api_base: String, slack_api_base_url: String) -> Arc<AppState> {
     let config = GatewayConfig {
         model_list: Vec::new(),
         mcp_servers: HashMap::new(),
         general_settings: GeneralSettings {
             master_key: Some("sk-local".to_owned()),
+            public_base_url: Some("http://localhost".to_owned()),
             database_url: Some("postgres://test".to_owned()),
             sandbox_choice: Some("e2b".to_owned()),
             e2b_sandbox_params: E2bSandboxParams {
@@ -66,6 +74,9 @@ fn build_state(pool: PgPool, e2b_api_base: String) -> Arc<AppState> {
                 envs: Default::default(),
             },
             ..Default::default()
+        },
+        slack: SlackSettings {
+            api_base_url: slack_api_base_url,
         },
         agents: Vec::new(),
     };
@@ -79,6 +90,7 @@ fn empty_router() -> ModelRouter {
             model_list: Vec::new(),
             mcp_servers: HashMap::new(),
             general_settings: GeneralSettings::default(),
+            slack: Default::default(),
             agents: Vec::new(),
         },
         &ProviderRegistry::new(),
@@ -100,14 +112,16 @@ pub async fn request_json(
         "application/json",
     )
     .await;
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(
-        response.status().is_success(),
-        "{} {} returned {}",
+        status.is_success(),
+        "{} {} returned {}: {}",
         method,
         uri,
-        response.status()
+        status,
+        String::from_utf8_lossy(&body)
     );
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     serde_json::from_slice(&body).unwrap_or_else(|_| json!({}))
 }
 
@@ -153,6 +167,32 @@ pub async fn request_raw(
     expected: StatusCode,
 ) -> String {
     let response = request(app, method, uri, body, content_type).await;
+    assert_eq!(response.status(), expected);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    String::from_utf8(body.to_vec()).unwrap()
+}
+
+pub async fn request_with_headers(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    body: String,
+    content_type: &str,
+    headers: &[(&str, String)],
+    expected: StatusCode,
+) -> String {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::AUTHORIZATION, "Bearer sk-local")
+        .header(header::CONTENT_TYPE, content_type);
+    for (name, value) in headers {
+        builder = builder.header(*name, value);
+    }
+    let response = app
+        .oneshot(builder.body(Body::from(body)).unwrap())
+        .await
+        .unwrap();
     assert_eq!(response.status(), expected);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(body.to_vec()).unwrap()
@@ -222,24 +262,4 @@ async fn request(
     )
     .await
     .unwrap()
-}
-
-async fn reset_tables(pool: &PgPool) {
-    sqlx::query(
-        r#"
-        TRUNCATE
-          "LiteLLM_ManagedAgentInboxItemsTable",
-          "LiteLLM_ManagedAgentRunsTable",
-          "LiteLLM_ManagedAgentFilesTable",
-          "LiteLLM_ManagedAgentMemoriesTable",
-          "LiteLLM_ManagedAgentsTable",
-          "LiteLLM_ManagedAgentSessionsTable",
-          "LiteLLM_ManagedAgentSkillsTable",
-          "LiteLLM_SavedAgentsTable"
-        CASCADE
-        "#,
-    )
-    .execute(pool)
-    .await
-    .unwrap();
 }

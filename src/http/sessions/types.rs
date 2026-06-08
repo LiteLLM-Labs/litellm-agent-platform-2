@@ -8,15 +8,29 @@ use crate::{
 
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionRequest {
-    pub(crate) title: Option<String>,
-    pub(crate) harness: Option<String>,
-    pub(crate) agent: Option<String>,
-    pub(crate) agent_id: Option<String>,
-    pub(crate) runtime: Option<String>,
-    pub(crate) prompt: Option<String>,
-    pub(crate) environment: Option<Value>,
-    pub(crate) timezone: Option<String>,
-    pub(crate) tz: Option<String>,
+    pub(super) title: Option<String>,
+    pub(super) harness: Option<String>,
+    pub(super) agent: Option<String>,
+    pub(super) agent_id: Option<String>,
+    pub(super) runtime: Option<String>,
+    pub(super) prompt: Option<String>,
+    pub(super) environment: Option<Value>,
+    pub(super) timezone: Option<String>,
+    pub(super) tz: Option<String>,
+}
+
+impl CreateSessionRequest {
+    pub(super) fn has_runtime(&self) -> bool {
+        self.runtime.is_some()
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct ResolvedSession {
+    pub(super) title: String,
+    pub(super) harness: String,
+    pub(super) agent_id: Option<String>,
+    pub(super) timezone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,11 +40,7 @@ pub struct PromptRequest {
 }
 
 impl PromptRequest {
-    pub(crate) fn model_id(&self) -> Option<String> {
-        self.model.as_ref().map(|model| model.model_id.clone())
-    }
-
-    pub(crate) fn prompt_text(&self) -> Result<String, GatewayError> {
+    pub(super) fn prompt_text(&self) -> Result<String, GatewayError> {
         let text = self
             .parts
             .as_deref()
@@ -48,6 +58,10 @@ impl PromptRequest {
             ));
         }
         Ok(text)
+    }
+
+    pub(super) fn model_id(&self) -> Option<&str> {
+        self.model.as_ref().map(|model| model.model_id.as_str())
     }
 }
 
@@ -85,6 +99,12 @@ pub struct SessionResponse {
     status: String,
     environment: Value,
     time: SessionTime,
+}
+
+impl SessionResponse {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 impl From<SessionRow> for SessionResponse {

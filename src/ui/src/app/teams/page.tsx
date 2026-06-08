@@ -4,6 +4,7 @@ import { Users } from "lucide-react";
 
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Button } from "@/components/ui/button";
 
 export default function TeamsPage() {
   return (
@@ -18,12 +19,16 @@ export default function TeamsPage() {
           <ThemeToggle />
         </header>
 
-        <main className="flex-1 overflow-y-auto px-4 py-6">
-          <div className="max-w-3xl rounded-lg border border-border bg-card p-5">
-            <h2 className="text-lg font-semibold">Teams</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
+        <main id="main-content" className="flex-1 overflow-y-auto px-4 py-6">
+          <div className="rounded-xl border border-dashed border-border py-16 text-center">
+            <Users className="mx-auto mb-3 size-7 text-muted-foreground" />
+            <h2 className="text-base font-semibold tracking-tight">No teams yet</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
               Team access controls are not configured in this build yet.
             </p>
+            <Button className="mt-4" disabled>
+              Create team
+            </Button>
           </div>
         </main>
       </div>

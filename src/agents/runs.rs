@@ -114,6 +114,10 @@ impl AgentRunStore {
             .collect()
     }
 
+    pub fn get_run(&self, run_id: &str) -> Option<AgentRun> {
+        self.runs().get(run_id).map(|stored| stored.run.clone())
+    }
+
     pub fn event_stream(&self) -> AgentEventStream {
         let events = self.events();
         AgentEventStream {

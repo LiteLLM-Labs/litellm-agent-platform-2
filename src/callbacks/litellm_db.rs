@@ -1,3 +1,5 @@
+use std::{future::Future, pin::Pin};
+
 use sqlx::PgPool;
 use tokio::{
     sync::mpsc,
@@ -5,31 +7,37 @@ use tokio::{
 };
 
 use crate::{
-    callbacks::{base::BaseCallback, standard_logging::StandardLoggingPayload},
+    callbacks::{
+        base::BaseCallback,
+        events::{CallbackEventPayload, MANAGED_RUNTIME_SESSION_EVENT},
+        standard_logging::StandardLoggingPayload,
+    },
+    db::managed_agents::runtime_events,
     proxy::config::GeneralSettings,
 };
 
 #[derive(Clone)]
 pub struct LiteLLMDBCallback {
-    sender: mpsc::Sender<StandardLoggingPayload>,
+    spend_sender: mpsc::Sender<StandardLoggingPayload>,
+    pool: PgPool,
 }
 
 impl LiteLLMDBCallback {
     pub fn new(pool: PgPool, settings: &GeneralSettings) -> Self {
-        let (sender, receiver) = mpsc::channel(settings.spend_logs_queue_capacity);
+        let (spend_sender, receiver) = mpsc::channel(settings.spend_logs_queue_capacity);
         let writer = BatchWriter {
-            pool,
+            pool: pool.clone(),
             receiver,
             batch_size: settings.spend_logs_batch_size,
             interval: Duration::from_secs(settings.spend_logs_batch_interval_seconds),
             store_bodies: settings.store_prompts_in_spend_logs,
         };
         tokio::spawn(writer.run());
-        Self { sender }
+        Self { spend_sender, pool }
     }
 
-    fn enqueue(&self, payload: StandardLoggingPayload) {
-        if let Err(error) = self.sender.try_send(payload) {
+    fn enqueue_spend_log(&self, payload: StandardLoggingPayload) {
+        if let Err(error) = self.spend_sender.try_send(payload) {
             tracing::warn!("spend log callback queue full or closed: {error}");
         }
     }
@@ -37,11 +45,22 @@ impl LiteLLMDBCallback {
 
 impl BaseCallback for LiteLLMDBCallback {
     fn on_success(&self, payload: StandardLoggingPayload) {
-        self.enqueue(payload);
+        self.enqueue_spend_log(payload);
     }
 
     fn on_error(&self, payload: StandardLoggingPayload) {
-        self.enqueue(payload);
+        self.enqueue_spend_log(payload);
+    }
+
+    fn on_event<'a>(
+        &'a self,
+        payload: CallbackEventPayload,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            if let Err(error) = insert_event_payload(&self.pool, payload).await {
+                tracing::warn!("failed to write callback event: {error}");
+            }
+        })
     }
 }
 
@@ -87,6 +106,23 @@ impl BatchWriter {
             }
         }
     }
+}
+
+async fn insert_event_payload(
+    pool: &PgPool,
+    payload: CallbackEventPayload,
+) -> Result<(), crate::errors::GatewayError> {
+    if payload.event != MANAGED_RUNTIME_SESSION_EVENT {
+        return Ok(());
+    }
+    let Some(session_id) = payload.session_id.as_deref() else {
+        return Ok(());
+    };
+    let Some(event) = payload.runtime_event() else {
+        return Ok(());
+    };
+    runtime_events::repository::append(pool, session_id, event).await?;
+    Ok(())
 }
 
 async fn insert_payload(

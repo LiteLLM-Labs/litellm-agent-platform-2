@@ -8,11 +8,15 @@ export function Composer({
   sessionId,
   model,
   onSent,
+  onSend,
+  onSendStart,
   disabled = false,
 }: {
   sessionId: string;
   model: string;
-  onSent?: (text: string) => void;
+  onSent?: () => void;
+  onSend?: (text: string) => Promise<void>;
+  onSendStart?: (text: string) => void;
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
@@ -24,16 +28,17 @@ export function Composer({
     if (!t || sending || disabled) return;
     setSending(true);
     setError(null);
+    onSendStart?.(t);
     try {
-      await sendMessage({ sessionId, text: t, model });
+      await (onSend ? onSend(t) : sendMessage({ sessionId, text: t, model }));
       setDraft("");
-      onSent?.(t);
+      onSent?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
     }
-  }, [disabled, draft, sending, sessionId, model, onSent]);
+  }, [draft, sending, disabled, sessionId, model, onSent, onSend, onSendStart]);
 
   // Plain Enter sends, Shift+Enter inserts a newline. Matches LAP.
   const handleKeyDown = useCallback(
@@ -50,7 +55,7 @@ export function Composer({
   const placeholder = sending
     ? "Sending…"
     : disabled
-      ? "Waiting for assistant…"
+      ? "Waiting for the runtime…"
     : "Add a follow up";
 
   return (
@@ -65,12 +70,12 @@ export function Composer({
               placeholder={placeholder}
               disabled={sending || disabled}
               rows={1}
-              className="min-h-14 w-full resize-none bg-transparent px-4 pt-4 text-[15px] outline-none placeholder:text-muted-foreground"
+              className="min-h-14 w-full resize-none bg-transparent px-4 pt-4 text-[15px] outline-none focus-visible:outline-none placeholder:text-muted-foreground"
             />
             <div className="flex items-center justify-between px-4 pb-3 text-xs text-muted-foreground">
               <span className="mono flex min-w-0 items-center gap-2 truncate">
                 {error ? (
-                  <span className="text-red-600">{error}</span>
+                  <span className="text-red-600 dark:text-red-400">{error}</span>
                 ) : (
                   model || "Enter to send · Shift+Enter for newline"
                 )}

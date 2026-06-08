@@ -13,8 +13,8 @@ use litellm_rust::{
         state::AppState,
     },
     sdk::{
-        providers::{self, transform::ProviderRegistry},
-        router::Router as ModelRouter,
+        providers::{self, ProviderRegistry},
+        routing::Router as ModelRouter,
     },
 };
 use serde_json::json;
@@ -173,6 +173,7 @@ fn test_config(e2b_api_base: String) -> GatewayConfig {
             },
             ..Default::default()
         },
+        slack: Default::default(),
         agents: vec![AgentDefinition {
             id: None,
             name: "Untitled agent".to_owned(),

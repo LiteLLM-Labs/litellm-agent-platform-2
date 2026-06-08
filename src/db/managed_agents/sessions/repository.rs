@@ -8,6 +8,7 @@ use crate::{
 
 use super::schema::SessionRow;
 
+#[derive(Debug)]
 pub struct CreateRuntimeSession<'a> {
     pub runtime: &'a str,
     pub agent_id: &'a str,
@@ -48,7 +49,7 @@ pub async fn create(
 
 pub async fn create_runtime(
     pool: &PgPool,
-    params: CreateRuntimeSession<'_>,
+    input: CreateRuntimeSession<'_>,
 ) -> Result<SessionRow, GatewayError> {
     let session_id = id("ses");
     sqlx::query_as::<_, SessionRow>(
@@ -63,15 +64,15 @@ pub async fn create_runtime(
         "#,
     )
     .bind(session_id)
-    .bind(params.runtime)
-    .bind(params.agent_id)
-    .bind(params.title)
+    .bind(input.runtime)
+    .bind(input.agent_id)
+    .bind(input.title)
     .bind(now_ms())
-    .bind(params.timezone)
-    .bind(params.runtime_agent_ref_id)
-    .bind(params.environment)
-    .bind(params.provider_session_id)
-    .bind(params.provider_run_id)
+    .bind(input.timezone)
+    .bind(input.runtime_agent_ref_id)
+    .bind(input.environment)
+    .bind(input.provider_session_id)
+    .bind(input.provider_run_id)
     .fetch_one(pool)
     .await
     .map_err(GatewayError::Database)
@@ -106,6 +107,49 @@ pub async fn set_runtime_refs(
     .fetch_one(pool)
     .await
     .map_err(GatewayError::Database)
+}
+
+pub async fn set_provider_run(
+    pool: &PgPool,
+    session_id: &str,
+    provider_run_id: &str,
+    status: &str,
+) -> Result<(), GatewayError> {
+    sqlx::query(
+        r#"
+        UPDATE "LiteLLM_ManagedAgentSessionsTable"
+        SET provider_run_id = $2,
+            status = $3,
+            updated_at = $4
+        WHERE id = $1
+        "#,
+    )
+    .bind(session_id)
+    .bind(provider_run_id)
+    .bind(status)
+    .bind(now_ms())
+    .execute(pool)
+    .await
+    .map_err(GatewayError::Database)?;
+    Ok(())
+}
+
+pub async fn set_status(pool: &PgPool, session_id: &str, status: &str) -> Result<(), GatewayError> {
+    sqlx::query(
+        r#"
+        UPDATE "LiteLLM_ManagedAgentSessionsTable"
+        SET status = $2,
+            updated_at = $3
+        WHERE id = $1
+        "#,
+    )
+    .bind(session_id)
+    .bind(status)
+    .bind(now_ms())
+    .execute(pool)
+    .await
+    .map_err(GatewayError::Database)?;
+    Ok(())
 }
 
 pub async fn list(pool: &PgPool) -> Result<Vec<SessionRow>, GatewayError> {

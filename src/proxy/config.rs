@@ -22,6 +22,9 @@ pub struct GatewayConfig {
     pub general_settings: GeneralSettings,
 
     #[serde(default)]
+    pub slack: SlackSettings,
+
+    #[serde(default)]
     pub agents: Vec<AgentDefinition>,
 }
 
@@ -29,6 +32,7 @@ pub struct GatewayConfig {
 pub struct GeneralSettings {
     pub master_key: Option<String>,
     pub database_url: Option<String>,
+    pub public_base_url: Option<String>,
     #[serde(default)]
     pub store_prompts_in_spend_logs: bool,
     #[serde(default)]
@@ -49,6 +53,7 @@ impl Default for GeneralSettings {
         Self {
             master_key: None,
             database_url: None,
+            public_base_url: None,
             store_prompts_in_spend_logs: false,
             disable_spend_logs: false,
             spend_logs_batch_interval_seconds: default_spend_logs_batch_interval_seconds(),
@@ -58,6 +63,24 @@ impl Default for GeneralSettings {
             e2b_sandbox_params: E2bSandboxParams::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SlackSettings {
+    #[serde(default = "default_slack_api_base_url")]
+    pub api_base_url: String,
+}
+
+impl Default for SlackSettings {
+    fn default() -> Self {
+        Self {
+            api_base_url: default_slack_api_base_url(),
+        }
+    }
+}
+
+fn default_slack_api_base_url() -> String {
+    "https://slack.com/api".to_owned()
 }
 
 fn default_spend_logs_batch_interval_seconds() -> u64 {
@@ -126,6 +149,18 @@ fn expand_env(config: &mut GatewayConfig) -> Result<(), GatewayError> {
     if let Some(database_url) = config.general_settings.database_url.as_deref() {
         config.general_settings.database_url = Some(expand_env_value(database_url)?);
     }
+    if let Some(public_base_url) = config.general_settings.public_base_url.as_deref() {
+        config.general_settings.public_base_url = Some(expand_env_value(public_base_url)?);
+    } else if let Ok(public_base_url) = std::env::var("LITELLM_PUBLIC_BASE_URL") {
+        if !public_base_url.trim().is_empty() {
+            config.general_settings.public_base_url = Some(public_base_url);
+        }
+    } else if let Ok(public_base_url) = std::env::var("RENDER_EXTERNAL_URL") {
+        if !public_base_url.trim().is_empty() {
+            config.general_settings.public_base_url = Some(public_base_url);
+        }
+    }
+    config.slack.api_base_url = expand_env_value(&config.slack.api_base_url)?;
 
     for entry in &mut config.model_list {
         if let Some(api_key) = entry.litellm_params.api_key.as_deref() {

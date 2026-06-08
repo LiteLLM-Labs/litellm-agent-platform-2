@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Plus, Play, Pencil, Trash2, X, Brain } from "lucide-react";
+import { Clock, Plus, Play, Pencil, Trash2, X, Brain, Plug } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandIcon } from "@/components/brand-icons";
@@ -22,11 +22,11 @@ import { Badge } from "@/components/ui/badge";
 import { ScheduleEditor } from "@/components/schedule-editor";
 import {
   listAgents,
-  createAgent,
   updateAgent,
   deleteAgent,
   listSkills,
   listIntegrationKeys,
+  listPlatformMcps,
   saveIntegrationKey,
   deleteIntegrationKey,
   listMemory,
@@ -34,7 +34,7 @@ import {
   deleteMemory,
 } from "@/lib/api";
 import { DEFAULT_TIMEZONE, scheduleLabel } from "@/lib/schedule";
-import type { Agent, Skill, Memory } from "@/lib/types";
+import type { Agent, Skill, Memory, PlatformMcp } from "@/lib/types";
 import {
   slackActionClass,
   slackActionLabel,
@@ -44,36 +44,50 @@ import {
 
 interface FormState {
   name: string;
-  owner_id: string;
   description: string;
   prompt: string;
   skill_ids: string[];
   cron: string;
   timezone: string;
   vault_keys: string[];
+  platform_mcp_ids: string[];
 }
 
 const EMPTY: FormState = {
   name: "",
-  owner_id: "local",
   description: "",
   prompt: "",
   skill_ids: [],
   cron: "",
   timezone: DEFAULT_TIMEZONE,
   vault_keys: [],
+  platform_mcp_ids: [],
 };
+
+function agentConfig(agent: Agent): Record<string, unknown> {
+  return agent.config && typeof agent.config === "object" && !Array.isArray(agent.config)
+    ? (agent.config as Record<string, unknown>)
+    : {};
+}
+
+function platformMcpIds(agent: Agent): string[] {
+  const config = agentConfig(agent);
+  const value = config.platform_mcp_ids ?? config.platformMcpIds;
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+}
 
 export default function AgentsPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [platformMcps, setPlatformMcps] = useState<PlatformMcp[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
   const [vaultKeyInput, setVaultKeyInput] = useState("");
   const [vaultValues, setVaultValues] = useState<Record<string, string>>({});
   const [storedKeys, setStoredKeys] = useState<string[]>([]);
@@ -93,6 +107,7 @@ export default function AgentsPage() {
   useEffect(() => {
     load();
     listSkills().then(setSkills).catch(() => setSkills([]));
+    listPlatformMcps().then(setPlatformMcps).catch(() => setPlatformMcps([]));
     listIntegrationKeys().then(setStoredKeys).catch(() => setStoredKeys([]));
   }, []);
 
@@ -127,7 +142,17 @@ export default function AgentsPage() {
         : [...f.skill_ids, id],
     }));
 
+  const togglePlatformMcp = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      platform_mcp_ids: f.platform_mcp_ids.includes(id)
+        ? f.platform_mcp_ids.filter((mcpId) => mcpId !== id)
+        : [...f.platform_mcp_ids, id],
+    }));
+
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
+  const platformMcpName = (id: string) =>
+    platformMcps.find((mcp) => mcp.id === id)?.name ?? id;
 
   const loadMemory = async (agentId: string) => {
     setMemories(null);
@@ -159,28 +184,17 @@ export default function AgentsPage() {
     }
   };
 
-  const openNew = () => {
-    setEditingId(null);
-    setForm(EMPTY);
-    setFormError(null);
-    setVaultKeyInput("");
-    setVaultValues({});
-    setMemories([]);
-    setMemKey("");
-    setMemValue("");
-    setOpen(true);
-  };
   const openEdit = (ag: Agent) => {
     setEditingId(ag.id);
     setForm({
       name: ag.name ?? "",
-      owner_id: (ag.owner_id as string) ?? "local",
       description: ag.description ?? "",
       prompt: ag.prompt ?? "",
       skill_ids: Array.isArray(ag.skill_ids) ? ag.skill_ids : [],
       cron: ag.cron ?? "",
       timezone: ag.timezone ?? DEFAULT_TIMEZONE,
       vault_keys: Array.isArray(ag.vault_keys) ? ag.vault_keys : [],
+      platform_mcp_ids: platformMcpIds(ag),
     });
     setFormError(null);
     setVaultKeyInput("");
@@ -196,29 +210,24 @@ export default function AgentsPage() {
     setFormError(null);
     try {
       if (!form.name.trim()) throw new Error("Name is required");
+      if (!editingId) throw new Error("Agent ID is required");
       const cron = form.cron.trim();
       const timezone = form.timezone.trim() || "UTC";
-      if (editingId) {
-        await updateAgent(editingId, {
-          name: form.name,
-          description: form.description,
-          prompt: form.prompt,
-          skill_ids: form.skill_ids,
-          cron: cron || null,
-          timezone,
-          vault_keys: form.vault_keys,
-        });
-      } else {
-        await createAgent({
-          name: form.name,
-          owner_id: form.owner_id || "local",
-          description: form.description,
-          prompt: form.prompt,
-          skill_ids: form.skill_ids,
-          schedule: cron ? { cron, timezone } : null,
-          vault_keys: form.vault_keys,
-        });
-      }
+      const currentAgent = agents?.find((agent) => agent.id === editingId);
+      const config = {
+        ...(currentAgent ? agentConfig(currentAgent) : {}),
+        platform_mcp_ids: form.platform_mcp_ids,
+      };
+      await updateAgent(editingId, {
+        name: form.name,
+        description: form.description,
+        prompt: form.prompt,
+        skill_ids: form.skill_ids,
+        cron: cron || null,
+        timezone,
+        vault_keys: form.vault_keys,
+        config,
+      });
       setOpen(false);
       await load();
     } catch (e) {
@@ -229,7 +238,13 @@ export default function AgentsPage() {
   };
 
   const remove = async (ag: Agent) => {
-    if (!confirm(`Delete agent "${String(ag.name)}"?`)) return;
+    setDeleteTarget(ag);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const ag = deleteTarget;
+    setDeleteTarget(null);
     setAgents((prev) => prev?.filter((x) => x.id !== ag.id) ?? null);
     try {
       await deleteAgent(ag.id);
@@ -240,7 +255,7 @@ export default function AgentsPage() {
   };
 
   const openAgent = (ag: Agent) => {
-    router.push(`/agents/detail/?id=${encodeURIComponent(ag.id)}`);
+    router.push(`/sessions/?agent=${encodeURIComponent(ag.id)}`);
   };
 
   return (
@@ -250,15 +265,15 @@ export default function AgentsPage() {
         <header className="h-12 border-b border-border flex items-center justify-between px-4 shrink-0">
           <h1 className="text-sm font-semibold">Agents</h1>
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={openNew}>
+            <Button size="sm" onClick={() => router.push("/agents/new/")}>
               <Plus className="size-4" />
-              New agent
+              Create agent
             </Button>
             <ThemeToggle />
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main id="main-content" className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto px-4 py-6 flex flex-col gap-3">
             {error && (
               <Card className="border-destructive p-3">
@@ -266,15 +281,31 @@ export default function AgentsPage() {
               </Card>
             )}
             {!agents && !error && (
-              <div className="text-sm text-muted-foreground">Loading…</div>
+              <div className="flex flex-col gap-3">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="border border-border rounded-lg p-4 flex flex-col gap-2">
+                    <div className="h-4 w-1/3 bg-muted rounded animate-pulse motion-reduce:animate-none" />
+                    <div className="h-3 w-2/3 bg-muted rounded animate-pulse motion-reduce:animate-none" />
+                  </div>
+                ))}
+              </div>
             )}
             {agents && agents.length === 0 && (
-              <div className="text-center text-sm text-muted-foreground py-16">
-                No agents yet. Click <span className="font-medium">New agent</span> to define one.
+              <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                <Brain className="size-10 text-muted-foreground/40" />
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-medium">No agents yet</p>
+                  <p className="text-xs text-muted-foreground">Start with a template or draft one from a prompt.</p>
+                </div>
+                <Button size="sm" onClick={() => router.push("/agents/new/")}>
+                  <Plus className="size-4" />
+                  Create agent
+                </Button>
               </div>
             )}
             {agents?.map((ag) => {
               const slack = slackConfig(ag);
+              const attachedPlatformMcps = platformMcpIds(ag);
               return (
                 <Card
                   key={String(ag.id)}
@@ -292,7 +323,7 @@ export default function AgentsPage() {
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{String(ag.description)}</p>
                   )}
                   {Boolean(ag.prompt) && (
-                    <p className="text-xs text-muted-foreground/70 mt-1 line-clamp-1 font-mono">{String(ag.prompt)}</p>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1 font-mono">{String(ag.prompt)}</p>
                   )}
                   <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1.5">
                     <Clock className="size-3" />
@@ -303,6 +334,16 @@ export default function AgentsPage() {
                       {ag.skill_ids.map((id) => (
                         <Badge key={id} variant="secondary" className="text-[10px]">
                           {skillName(id)}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  {attachedPlatformMcps.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {attachedPlatformMcps.map((id) => (
+                        <Badge key={id} variant="outline" className="text-[10px] gap-1">
+                          <Plug className="size-3" />
+                          {platformMcpName(id)}
                         </Badge>
                       ))}
                     </div>
@@ -341,10 +382,25 @@ export default function AgentsPage() {
         </main>
       </div>
 
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete agent</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete <span className="font-medium text-foreground">"{String(deleteTarget?.name)}"</span>? This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={() => void confirmDelete()}>Delete</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[92vw] sm:max-w-2xl max-h-[88vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 p-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
-            <DialogTitle>{editingId ? "Edit agent" : "New agent"}</DialogTitle>
+            <DialogTitle>Edit agent</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4 px-6 py-4 overflow-y-auto">
             <div className="grid gap-1.5">
@@ -356,16 +412,6 @@ export default function AgentsPage() {
                 placeholder="security-reviewer"
               />
             </div>
-            {!editingId && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="ag-owner">Owner ID</Label>
-                <Input
-                  id="ag-owner"
-                  value={form.owner_id}
-                  onChange={(e) => setForm({ ...form, owner_id: e.target.value })}
-                />
-              </div>
-            )}
             <div className="grid gap-1.5">
               <Label htmlFor="ag-desc">Description</Label>
               <Input
@@ -427,6 +473,48 @@ export default function AgentsPage() {
               {form.skill_ids.length > 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   {form.skill_ids.length} skill{form.skill_ids.length === 1 ? "" : "s"} attached
+                </p>
+              )}
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="flex items-center gap-1.5">
+                <Plug className="size-3.5" />
+                Platform MCPs
+              </Label>
+              {platformMcps.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No platform MCPs available on this server.
+                </p>
+              ) : (
+                <div className="rounded-md border border-border divide-y divide-border">
+                  {platformMcps.map((mcp) => {
+                    const checked = form.platform_mcp_ids.includes(mcp.id);
+                    return (
+                      <label
+                        key={mcp.id}
+                        className="flex items-start gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={() => togglePlatformMcp(mcp.id)}
+                        />
+                        <span className="min-w-0 flex flex-col">
+                          <span className="text-xs font-medium">{mcp.name}</span>
+                          <span className="text-[11px] text-muted-foreground line-clamp-2">
+                            {mcp.description}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {form.platform_mcp_ids.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  {form.platform_mcp_ids.length} platform MCP
+                  {form.platform_mcp_ids.length === 1 ? "" : "s"} attached
                 </p>
               )}
             </div>
@@ -556,7 +644,7 @@ export default function AgentsPage() {
               Cancel
             </Button>
             <Button onClick={save} disabled={saving}>
-              {saving ? "Saving…" : editingId ? "Save" : "Create"}
+              {saving ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

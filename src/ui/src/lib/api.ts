@@ -5,10 +5,13 @@ import type {
   AgentRuntime,
   AgentRuntimeId,
   HarnessMessage,
+  McpServer,
   Memory,
   OpencodeSession,
+  PlatformMcp,
   Skill,
   SpendLog,
+  VaultKeyEntry,
 } from "./types";
 
 const BASE = "";
@@ -24,6 +27,37 @@ export class ApiError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+function responseErrorText(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: unknown } | string;
+      message?: unknown;
+      detail?: unknown;
+    };
+    if (typeof parsed.error === "string") return parsed.error;
+    if (typeof parsed.error?.message === "string") return parsed.error.message;
+    if (typeof parsed.message === "string") return parsed.message;
+    if (typeof parsed.detail === "string") return parsed.detail;
+  } catch {
+    /* use raw text */
+  }
+  return trimmed.replace(/\s+/g, " ");
+}
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const message = responseErrorText(error.body);
+    return message ? `HTTP ${error.status}: ${message}` : `HTTP ${error.status}: ${fallback}`;
+  }
+  if (error instanceof TypeError) {
+    return `Network error while contacting the gateway: ${error.message}`;
+  }
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
 }
 
 export function getStoredMasterKey(): string | null {
@@ -169,7 +203,7 @@ async function reqHarness(path: string, init?: RequestInit): Promise<Response> {
 }
 
 export async function whoami(): Promise<void> {
-  const res = await req("/whoami");
+  const res = await req("/v1/models");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new ApiError(res.status, body);
@@ -222,6 +256,12 @@ export async function listAgentRuntimes(): Promise<AgentRuntime[]> {
   return data.runtimes;
 }
 
+export async function listPlatformMcps(): Promise<PlatformMcp[]> {
+  const res = await req("/api/platform-mcps");
+  const data = await jsonOrThrow<{ platform_mcps: PlatformMcp[] }>(res);
+  return data.platform_mcps ?? [];
+}
+
 export async function saveAgentRuntimeCredential(input: {
   runtime: AgentRuntimeId;
   apiKey: string;
@@ -250,11 +290,14 @@ export async function listAgents(): Promise<Agent[]> {
   return data.agents;
 }
 
+export type ProviderCategory = "model" | "runtime";
+
 export interface AvailableProvider {
   id: string;
   name: string;
   description: string;
   default_base_url: string;
+  category?: ProviderCategory;
 }
 
 export interface ConnectedProvider {
@@ -262,6 +305,7 @@ export interface ConnectedProvider {
   name: string;
   api_base: string;
   masked_api_key: string;
+  category?: ProviderCategory;
 }
 
 export interface ProvidersResponse {
@@ -427,6 +471,21 @@ export async function sendMessage(opts: {
   }
 }
 
+export async function sendMessageWithRuntimeModel(opts: {
+  sessionId: string;
+  text: string;
+  model: string;
+  runtime?: AgentRuntimeId | "claude_agents";
+}): Promise<void> {
+  const model =
+    opts.runtime === "claude_managed_agents" || opts.runtime === "claude_agents"
+      ? "anthropic/*"
+      : opts.runtime === "cursor"
+        ? "cursor/*"
+        : opts.model;
+  return sendMessage({ sessionId: opts.sessionId, text: opts.text, model });
+}
+
 export async function abortSession(id: string): Promise<void> {
   await reqHarness(`/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
 }
@@ -437,6 +496,102 @@ export async function listModels(): Promise<string[]> {
   const data = await res.json().catch(() => null);
   const items: Array<{ id: string }> = data?.data ?? [];
   return items.map((m) => m.id).filter(Boolean);
+}
+
+const DEFAULT_AGENT_DRAFT_MODEL = "claude-sonnet-4-6";
+
+function draftModelFrom(models: string[]): string {
+  const concrete = models.filter((model) => !model.endsWith("/*"));
+  const anthropicWildcard = models.find((model) => model === "anthropic/*");
+  return (
+    concrete.find((model) => model === DEFAULT_AGENT_DRAFT_MODEL) ??
+    concrete.find((model) => model.endsWith(`/${DEFAULT_AGENT_DRAFT_MODEL}`)) ??
+    (anthropicWildcard ? `anthropic/${DEFAULT_AGENT_DRAFT_MODEL}` : undefined) ??
+    concrete.find((model) => /claude.*sonnet/i.test(model)) ??
+    concrete[0] ??
+    DEFAULT_AGENT_DRAFT_MODEL
+  );
+}
+
+function messageText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const data = payload as {
+    content?: unknown;
+    output_text?: unknown;
+    message?: { content?: unknown };
+  };
+  if (typeof data.output_text === "string") return data.output_text;
+  if (typeof data.content === "string") return data.content;
+  if (Array.isArray(data.content)) {
+    return data.content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const text = (part as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      })
+      .join("");
+  }
+  if (typeof data.message?.content === "string") return data.message.content;
+  if (Array.isArray(data.message?.content)) {
+    return data.message.content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const text = (part as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      })
+      .join("");
+  }
+  return "";
+}
+
+function yamlFromMessage(text: string): string {
+  const fenced = text.match(/```(?:ya?ml)?\s*([\s\S]*?)```/i);
+  return (fenced?.[1] ?? text).trim();
+}
+
+function runtimeToolCatalogPrompt(runtimes: AgentRuntime[]): string {
+  if (runtimes.length === 0) {
+    return [
+      "Available runtime tools:",
+      "- claude_managed_agents: bash, read, write, edit, glob, grep, web_fetch, web_search",
+    ].join("\n");
+  }
+  return [
+    "Available runtime tools:",
+    ...runtimes.map((runtime) => {
+      const tools = (runtime.tools ?? []).map((tool) => tool.id).join(", ");
+      return `- ${runtime.id}: ${tools || "no explicit LAP-managed tools"}`;
+    }),
+  ].join("\n");
+}
+
+export async function draftAgentConfigWithModel(
+  desire: string,
+  runtimes: AgentRuntime[] = [],
+): Promise<string> {
+  const model = draftModelFrom(await listModels().catch(() => []));
+  const res = await req("/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1200,
+      system:
+        "You design managed agent configs for LiteLLM Agent Platform. Return only valid YAML, with no markdown fence and no prose. Use exactly these primary keys: name, description, model, runtime, system, tools. The runtime must be claude_managed_agents unless the user explicitly names another supported runtime. The model should be claude-sonnet-4-6 unless a different model is clearly requested. Use tools as YAML list items with a type equal to a tool id available for the selected runtime, for example `- type: bash`. Do not emit provider-native toolset identifiers such as agent_toolset_20260401. If the selected runtime has no explicit LAP-managed tools, use tools: []. Do not include harness. Do not paste the user's request as a generic mission; synthesize a complete, specific system prompt that tells the agent how to behave, what to avoid, and when to ask for approval. Include schedule, vault_keys, or skill_ids only when the request clearly needs them.\n\n" +
+        runtimeToolCatalogPrompt(runtimes),
+      messages: [
+        {
+          role: "user",
+          content: `Create an editable config.yaml for this agent request:\n\n${desire.trim()}`,
+        },
+      ],
+    }),
+  });
+  const payload = await jsonOrThrow<unknown>(res);
+  const text = messageText(payload);
+  const yaml = yamlFromMessage(text);
+  if (!yaml) throw new Error("Model returned an empty config.");
+  return yaml;
 }
 
 export async function listSpendLogs(input?: {
@@ -542,8 +697,12 @@ export async function resolveInboxItem(id: string, note?: string): Promise<void>
 // `next dev`), we transparently fall back to sessionStorage so the flow still
 // works. Per project policy, secrets only ever touch sessionStorage — never
 // localStorage.
+//
+// Scopes:
+//   "personal" — stored under the current user's namespace (default)
+//   "global"   — admin-managed keys visible to all users
 
-const VAULT_USER = "default";
+const VAULT_USER = "local";
 const VAULT_FALLBACK_PREFIX = "lite-harness-integration:";
 
 function fallbackSet(key: string, value: string): void {
@@ -584,12 +743,15 @@ function fallbackList(): string[] {
 export async function saveIntegrationKey(
   envKey: string,
   value: string,
+  scope: "personal" | "global" = "personal",
 ): Promise<"vault" | "session"> {
   try {
-    const res = await req(`/api/vault/${VAULT_USER}`, {
+    const endpoint =
+      scope === "global" ? `/api/vault/global` : `/api/vault/${VAULT_USER}`;
+    const res = await req(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: envKey, value }),
+      body: JSON.stringify({ key: envKey, value, scope }),
     });
     if (res.ok) return "vault";
   } catch {
@@ -599,19 +761,24 @@ export async function saveIntegrationKey(
   return "session";
 }
 
-/** Remove a stored integration key from both vault and sessionStorage. */
-export async function deleteIntegrationKey(envKey: string): Promise<void> {
+/** Remove a stored integration key from vault and sessionStorage. */
+export async function deleteIntegrationKey(
+  envKey: string,
+  scope: "personal" | "global" = "personal",
+): Promise<void> {
   try {
-    await req(`/api/vault/${VAULT_USER}/${encodeURIComponent(envKey)}`, {
-      method: "DELETE",
-    });
+    const endpoint =
+      scope === "global"
+        ? `/api/vault/global/${encodeURIComponent(envKey)}`
+        : `/api/vault/${VAULT_USER}/${encodeURIComponent(envKey)}`;
+    await req(endpoint, { method: "DELETE" });
   } catch {
     /* noop */
   }
   fallbackDelete(envKey);
 }
 
-/** List the env-key names that currently have a stored value. */
+/** List the env-key names that currently have a stored value (personal + global). */
 export async function listIntegrationKeys(): Promise<string[]> {
   const keys = new Set<string>(fallbackList());
   try {
@@ -626,26 +793,181 @@ export async function listIntegrationKeys(): Promise<string[]> {
   return [...keys];
 }
 
-export interface VaultKeyEntry {
-  key: string;
-  updated_at?: number;
-  source?: string;
-}
+// VaultKeyEntry is defined in types.ts
+export type { VaultKeyEntry } from "./types";
 
-/** List all vault keys with metadata (no values). */
+/** List all vault keys with metadata for the current user (personal + global). */
 export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
-  const fallback: VaultKeyEntry[] = fallbackList().map((k) => ({ key: k }));
-  const byKey = new Map<string, VaultKeyEntry>(fallback.map((e) => [e.key, e]));
+  const fallback: VaultKeyEntry[] = fallbackList().map((k) => ({
+    key: k,
+    scope: "personal" as const,
+  }));
+  const byKey = new Map<string, VaultKeyEntry>(
+    fallback.map((e) => [`${e.scope}:${e.key}`, e]),
+  );
   try {
     const res = await req(`/api/vault/${VAULT_USER}`);
     if (res.ok) {
       const data = (await res.json()) as { keys?: VaultKeyEntry[] };
-      for (const k of data.keys ?? []) byKey.set(k.key, k);
+      for (const k of data.keys ?? []) byKey.set(`${k.scope}:${k.key}`, k);
     }
   } catch {
     /* vault unavailable — sessionStorage only */
   }
   return [...byKey.values()];
+}
+
+// ── MCP Server Registry ───────────────────────────────────────────────────────
+
+/** List all MCP servers (admin). Returns full rows including server-side secrets. */
+export async function listMcpServers(): Promise<McpServer[]> {
+  const res = await req("/v1/mcp/server");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+/**
+ * List MCP servers for the user connect flow via the public hub.
+ * Server-side secrets (credentials, static_headers, env) are stripped by the backend.
+ */
+export async function listPublicMcpServers(): Promise<McpServer[]> {
+  const res = await req("/public/mcp_hub");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+
+/** Create an MCP server (admin). */
+export async function createMcpServer(input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Update an MCP server (admin). */
+export async function updateMcpServer(server_id: string, input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, server_id }),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Delete an MCP server (admin). */
+export async function deleteMcpServer(server_id: string): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}`, { method: "DELETE" }),
+  );
+}
+
+export interface McpToolDef {
+  name: string;
+  description?: string | null;
+  inputSchema?: unknown;
+}
+
+/** List the tools exposed by an existing (saved) MCP server. */
+export async function listMcpServerTools(server_id: string): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`);
+  const data = await jsonOrThrow<{ tools?: McpToolDef[]; data?: McpToolDef[] }>(res);
+  return data.tools ?? data.data ?? [];
+}
+
+/** Test tools discovery with caller-supplied variable values (for admin test panel). */
+export async function testMcpServerTools(
+  server_id: string,
+  variables: Record<string, string>,
+): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ variables }),
+  });
+  const data = await jsonOrThrow<{ tools?: McpToolDef[] }>(res);
+  return data.tools ?? [];
+}
+
+/** Discover tools from an arbitrary MCP server URL via the server-side proxy.
+ *
+ * The server performs variable substitution in the URL and header values before
+ * calling the upstream MCP server, so CORS and private API keys are never
+ * exposed to the browser.
+ */
+export async function discoverMcpToolsFromUrl(
+  url: string,
+  staticHeaders: Record<string, string> = {},
+  variables: Record<string, string> = {},
+): Promise<McpToolDef[]> {
+  const res = await req("/v1/mcp/discover", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url, static_headers: staticHeaders, variables }),
+  });
+  const data = await jsonOrThrow<{ tools?: McpToolDef[] }>(res);
+  return data.tools ?? [];
+}
+
+/** Store a user credential for a BYOK MCP server. */
+export async function storeMcpUserCredential(
+  server_id: string,
+  credential: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": user_id },
+      body: JSON.stringify({ credential }),
+    }),
+  );
+}
+
+/** Store a per-user variable for a BYOK MCP server in the vault.
+ *  Key format: `mcp_var:{server_id}:{var_name}`, scope "personal". */
+export async function storeMcpVarCredential(
+  server_id: string,
+  var_name: string,
+  value: string,
+  user_id = "default",
+): Promise<void> {
+  const res = await req(`/api/vault/${encodeURIComponent(user_id)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      key: `mcp_var:${server_id}:${var_name}`,
+      value,
+      scope: "personal",
+    }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+}
+
+/** Delete a user credential for an MCP server. */
+export async function deleteMcpUserCredential(
+  server_id: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "DELETE",
+      headers: { "x-user-id": user_id },
+    }),
+  );
+}
+
+/** List the user's connected MCP servers. */
+export async function listMcpUserCredentials(
+  user_id = "default",
+): Promise<{ server_id: string; updated_at?: number }[]> {
+  const res = await req("/v1/mcp/user-credentials", {
+    headers: { "x-user-id": user_id },
+  });
+  const data = await jsonOrThrow<{ data: { server_id: string; updated_at?: number }[] }>(res);
+  return data.data ?? [];
 }
 
 // ── Skills CRUD (DB-backed, /api/skills) ──────────────────────────────────────
@@ -737,39 +1059,119 @@ export interface RuntimeAgentEvent {
   [key: string]: unknown;
 }
 
+export async function listRuntimeEvents(sessionId: string): Promise<RuntimeAgentEvent[]> {
+  // Best-effort history replay. The gateway currently only implements the live
+  // SSE stream (/events/stream), not a list endpoint — a GET to
+  // /v1/sessions/{id}/events falls through to the static UI handler and returns
+  // the HTML app shell. Treat any non-JSON or error response as "no history"
+  // instead of throwing a JSON-parse error the caller would surface to the user.
+  const res = await reqHarness(`/v1/sessions/${encodeURIComponent(sessionId)}/events`);
+  if (!res.ok) return [];
+  if (!res.headers.get("content-type")?.includes("application/json")) return [];
+  const data = (await res.json().catch(() => null)) as
+    | { data?: RuntimeAgentEvent[] }
+    | RuntimeAgentEvent[]
+    | null;
+  if (Array.isArray(data)) return data;
+  return Array.isArray(data?.data) ? data.data : [];
+}
+
 export function subscribeRuntimeEvents(opts: {
   sessionId: string;
   onEvent: (ev: RuntimeAgentEvent) => void;
   onError?: (err: unknown) => void;
 }): () => void {
-  let es: EventSource | null = null;
-  try {
-    es = new EventSource(runtimeEventSourceUrl(opts.sessionId));
-  } catch (e) {
-    opts.onError?.(e);
-    return () => {};
-  }
-  es.onmessage = (msg) => {
+  const abort = new AbortController();
+  const base = getHarnessServerUrl();
+
+  void (async () => {
     try {
-      opts.onEvent(JSON.parse(msg.data) as RuntimeAgentEvent);
+      const init = base
+        ? withHarnessProxyAuth({ headers: { accept: "text/event-stream" } })
+        : withAuth({ headers: { accept: "text/event-stream" } });
+      const res = await fetch(runtimeEventSourceUrl(opts.sessionId), {
+        ...init,
+        signal: abort.signal,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new ApiError(res.status, body);
+      }
+      if (!res.body) throw new Error("Runtime event stream did not return a body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (!abort.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = sseBoundaryIndex(buffer);
+        while (boundary !== -1) {
+          const frame = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary.length);
+          emitRuntimeEventFrame(frame, opts.onEvent, opts.onError);
+          boundary = sseBoundaryIndex(buffer);
+        }
+      }
     } catch (e) {
-      opts.onError?.(e);
+      if (!abort.signal.aborted) opts.onError?.(e);
     }
-  };
-  es.onerror = (e) => opts.onError?.(e);
+  })();
+
   return () => {
-    try {
-      es?.close();
-    } catch {
-      /* noop */
-    }
+    abort.abort();
   };
+}
+
+function sseBoundaryIndex(buffer: string): { index: number; length: number } | -1 {
+  const crlf = buffer.indexOf("\r\n\r\n");
+  const lf = buffer.indexOf("\n\n");
+  if (crlf === -1 && lf === -1) return -1;
+  if (crlf !== -1 && (lf === -1 || crlf < lf)) return { index: crlf, length: 4 };
+  return { index: lf, length: 2 };
+}
+
+function emitRuntimeEventFrame(
+  frame: string,
+  onEvent: (ev: RuntimeAgentEvent) => void,
+  onError?: (err: unknown) => void,
+): void {
+  const data = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+  if (!data || data === "[DONE]") return;
+  try {
+    onEvent(JSON.parse(data) as RuntimeAgentEvent);
+  } catch (e) {
+    onError?.(e);
+  }
 }
 
 export function runtimeEventSourceUrl(sessionId: string): string {
   const localKey = getStoredMasterKey();
-  const qs = localKey ? `?key=${encodeURIComponent(localKey)}` : "";
-  return `${BASE}/session/${encodeURIComponent(sessionId)}/runtime_events${qs}`;
+  const remoteBase = getHarnessServerUrl();
+  const params = new URLSearchParams();
+  if (remoteBase) params.set("base", remoteBase);
+  if (localKey) params.set("key", localKey);
+  const targetKey = getHarnessServerKey();
+  if (targetKey) params.set("target_key", targetKey);
+  const qs = params.toString();
+  const encoded = encodeURIComponent(sessionId);
+  // Always use the canonical /v1 SSE path. In production the built UI is served
+  // same-origin by the Rust gateway; in `next dev` the /v1/:path* rewrite proxies
+  // it to the gateway and streams it correctly. (The old /runtime-events/{id}.sse
+  // dev rewrite never matched and returned the HTML app shell, so the browser saw
+  // 0 events.) Remote harness sessions go through the harness proxy.
+  const path = remoteBase
+    ? `/api/harness-proxy/v1/sessions/${encoded}/events/stream`
+    : `/v1/sessions/${encoded}/events/stream`;
+  return `${BASE}${path}${qs ? `?${qs}` : ""}`;
 }
 
 export function harnessEventSourceUrl(): string {
@@ -820,6 +1222,14 @@ export async function updateAgent(id: string, fields: Partial<Agent>): Promise<A
     body: JSON.stringify(fields),
   });
   return jsonOrThrow<Agent>(res);
+}
+
+export async function createSlackOAuthState(agentId: string): Promise<string> {
+  const res = await req(`/api/agents/${encodeURIComponent(agentId)}/slack/oauth-state`, {
+    method: "POST",
+  });
+  const data = await jsonOrThrow<{ state: string }>(res);
+  return data.state;
 }
 
 export async function deleteAgent(id: string): Promise<void> {
@@ -879,3 +1289,4 @@ export async function deleteMemory(agentId: string, key: string): Promise<void> 
     { method: "DELETE" },
   );
 }
+

@@ -6,25 +6,30 @@ use axum::{
     Json,
 };
 use serde_json::json;
-use sqlx::PgPool;
 
 use crate::{
     agents::events,
-    db::managed_agents::{
-        messages, registry,
-        sessions::{self, schema::SessionRow},
-    },
+    db::managed_agents::{messages, sessions},
     errors::GatewayError,
-    proxy::{auth::master_key::require_master_key, state::AppState},
+    proxy::state::AppState,
 };
 
-mod prompt;
+mod execution;
 mod runtime;
+mod runtime_events_api;
+mod runtime_inputs;
+mod runtime_provision;
+mod runtime_sdk;
+mod storage;
 mod types;
 
-pub use runtime::runtime_events;
-
-use types::{CreateSessionRequest, MessageResponse, PromptRequest, SessionResponse};
+use execution::execute_prompt;
+pub(crate) use runtime::create_runtime_session_for_agent;
+use runtime::{create_runtime_session, execute_runtime_prompt};
+pub(crate) use runtime_events_api::runtime_event_stream_for_session;
+pub use runtime_events_api::{runtime_event_list, runtime_events};
+use storage::{db, persist_message, resolve_session_request, session};
+pub use types::{CreateSessionRequest, MessageResponse, PromptRequest, SessionResponse};
 
 pub async fn list(
     State(state): State<Arc<AppState>>,
@@ -41,12 +46,10 @@ pub async fn create(
     Json(input): Json<CreateSessionRequest>,
 ) -> Result<Json<SessionResponse>, GatewayError> {
     let pool = db(&state, &headers)?.clone();
-    if input.runtime.is_some() {
-        return runtime::create_runtime_session(state, &pool, input)
-            .await
-            .map(Json);
+    if input.has_runtime() {
+        return create_runtime_session(state, &pool, input).await.map(Json);
     }
-    let resolved = resolve_session_request(&pool, input).await?;
+    let resolved = resolve_session_request(&state, &pool, input).await?;
     let row = sessions::repository::create(
         &pool,
         &resolved.harness,
@@ -98,33 +101,39 @@ pub async fn prompt_async(
     Json(input): Json<PromptRequest>,
 ) -> Result<StatusCode, GatewayError> {
     let pool = db(&state, &headers)?.clone();
-    let row = session(&pool, &session_id).await?;
     let prompt = input.prompt_text()?;
-    let model = input
-        .model_id()
-        .unwrap_or_else(|| "claude-sonnet-4-6".to_owned());
+    let model = input.model_id().unwrap_or("claude-sonnet-4-6").to_owned();
+    enqueue_prompt_text(state, pool, &session_id, prompt, model).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 
-    prompt::persist_message(&pool, &session_id, "user", &prompt, None).await?;
+pub(crate) async fn enqueue_prompt_text(
+    state: Arc<AppState>,
+    pool: sqlx::PgPool,
+    session_id: &str,
+    prompt: String,
+    model: String,
+) -> Result<(), GatewayError> {
+    let session_id = session_id.to_owned();
+    let row = session(&pool, &session_id).await?;
+
+    persist_message(&pool, &session_id, "user", &prompt, None).await?;
     state
         .agent_runs
         .track_run(row.agent_id.as_deref().unwrap_or(&row.harness), &session_id);
 
+    if row.runtime.is_some() {
+        execute_runtime_prompt(state, &pool, row, prompt).await?;
+        return Ok(());
+    }
+
     tokio::spawn(async move {
-        if let Err(error) = prompt::execute_prompt(state.clone(), pool, row, prompt, model).await {
-            let message = error.to_string();
-            state.agent_runs.set_error(&session_id, message.clone());
-            state.agent_runs.push_event(
-                &session_id,
-                events::SESSION_ERROR,
-                json!({ "error": { "message": message } }),
-            );
-            state
-                .agent_runs
-                .push_event(&session_id, events::SESSION_IDLE, json!({}));
+        if let Err(error) = execute_prompt(state.clone(), pool, row, prompt, model).await {
+            record_prompt_error(&state, &session_id, error);
         }
     });
 
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 pub async fn send_message(
@@ -168,52 +177,15 @@ pub async fn abort(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn resolve_session_request(
-    pool: &PgPool,
-    input: CreateSessionRequest,
-) -> Result<ResolvedSession, GatewayError> {
-    let requested = input.agent.or(input.harness);
-    if let Some(agent_id) = requested
-        .as_deref()
-        .filter(|value| value.starts_with("agent_"))
-    {
-        let agent = registry::repository::get(pool, agent_id)
-            .await?
-            .ok_or_else(|| GatewayError::UnknownAgent(agent_id.to_owned()))?;
-        return Ok(ResolvedSession {
-            title: input.title.unwrap_or(agent.name),
-            harness: agent.harness,
-            agent_id: Some(agent.id),
-            timezone: input.timezone.or(input.tz),
-        });
-    }
-
-    let harness = requested
-        .filter(|value| value == "claude-code")
-        .unwrap_or_else(|| "claude-code".to_owned());
-    Ok(ResolvedSession {
-        title: input.title.unwrap_or_else(|| "New session".to_owned()),
-        harness,
-        agent_id: None,
-        timezone: input.timezone.or(input.tz),
-    })
-}
-
-pub(super) async fn session(pool: &PgPool, session_id: &str) -> Result<SessionRow, GatewayError> {
-    sessions::repository::get(pool, session_id)
-        .await?
-        .ok_or_else(|| GatewayError::NotFound("session not found".to_owned()))
-}
-
-fn db<'a>(state: &'a AppState, headers: &HeaderMap) -> Result<&'a PgPool, GatewayError> {
-    require_master_key(headers, state.config.general_settings.master_key.as_deref())?;
-    state.db.as_ref().ok_or(GatewayError::MissingDatabase)
-}
-
-#[derive(Debug)]
-struct ResolvedSession {
-    title: String,
-    harness: String,
-    agent_id: Option<String>,
-    timezone: Option<String>,
+fn record_prompt_error(state: &AppState, session_id: &str, error: GatewayError) {
+    let message = error.to_string();
+    state.agent_runs.set_error(session_id, message.clone());
+    state.agent_runs.push_event(
+        session_id,
+        events::SESSION_ERROR,
+        json!({ "error": { "message": message } }),
+    );
+    state
+        .agent_runs
+        .push_event(session_id, events::SESSION_IDLE, json!({}));
 }

@@ -3,18 +3,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use reqwest::{header, Method};
+use reqwest::{header, Method, StatusCode};
 use serde::Serialize;
 use serde_json::Value;
 
 use super::{
     events::{stream_events, AgentEventStream},
-    types::{
-        AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, LapConfig, ManagedAgent, SendEventsParams,
-        SendEventsResponse, Session, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA,
-    },
+    resources::Beta,
+    responses::{ensure_success, response_json},
+    runtime_config::{configured_http_client, runtime_configs, RuntimeConfig},
+    types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
+use crate::sdk::{providers, providers::base::runtime::RuntimeAdapter};
 
 #[derive(Clone)]
 pub struct Lap {
@@ -24,28 +24,33 @@ pub struct Lap {
 struct Inner {
     http: reqwest::Client,
     runtimes: HashMap<AgentRuntime, RuntimeConfig>,
-    session_runtimes: Mutex<HashMap<String, AgentRuntime>>,
+    session_contexts: Mutex<HashMap<String, SessionContext>>,
+    cursor_run_ids: Mutex<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
-struct RuntimeConfig {
-    api_key: String,
-    base_url: String,
+pub(crate) struct SessionContext {
+    pub(crate) runtime: AgentRuntime,
+    pub(crate) provider_session_id: Option<String>,
+    pub(crate) agent_id: Option<String>,
+    pub(crate) run_id: Option<String>,
 }
 
 impl Lap {
     pub fn new(config: LapConfig) -> Self {
-        let mut runtimes = HashMap::new();
-        if let Some(api_key) = config.anthropic_api_key {
-            runtimes.insert(
-                AgentRuntime::ClaudeManagedAgents,
-                RuntimeConfig {
-                    api_key,
-                    base_url: config.anthropic_base_url.trim_end_matches('/').to_owned(),
-                },
-            );
-        }
-        Self::with_http(configured_http_client(), runtimes)
+        Self::with_http(configured_http_client(), runtime_configs(config))
+    }
+
+    pub(crate) fn with_http_client(config: LapConfig, http: reqwest::Client) -> Self {
+        Self::with_http(http, runtime_configs(config))
+    }
+
+    pub fn register_session(&self, session: ManagedSessionRef) -> Result<(), AgentSdkError> {
+        let session_id = session.session_id.clone();
+        let context = self
+            .adapter(session.lap_agent_runtime)?
+            .session_context(session);
+        self.remember_session_context(&session_id, context)
     }
 
     fn with_http(http: reqwest::Client, runtimes: HashMap<AgentRuntime, RuntimeConfig>) -> Self {
@@ -53,7 +58,8 @@ impl Lap {
             inner: Arc::new(Inner {
                 http,
                 runtimes,
-                session_runtimes: Mutex::new(HashMap::new()),
+                session_contexts: Mutex::new(HashMap::new()),
+                cursor_run_ids: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -62,34 +68,66 @@ impl Lap {
         Beta { client: self }
     }
 
-    async fn post<T: Serialize>(
+    pub(crate) async fn post<T: Serialize>(
         &self,
         runtime: AgentRuntime,
         path: &str,
         body: &T,
     ) -> Result<Value, AgentSdkError> {
-        let response = self
+        let mut response = self
             .request(runtime, Method::POST, path)?
             .json(body)
             .send()
             .await?;
+        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(request) = self.opencode_bearer_request(Method::POST, path)? {
+                response = request.json(body).send().await?;
+            }
+        }
         response_json(response).await
     }
 
-    async fn stream(
+    pub(super) async fn get(
+        &self,
+        runtime: AgentRuntime,
+        path: &str,
+    ) -> Result<Value, AgentSdkError> {
+        let mut response = self.request(runtime, Method::GET, path)?.send().await?;
+        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(request) = self.opencode_bearer_request(Method::GET, path)? {
+                response = request.send().await?;
+            }
+        }
+        response_json(response).await
+    }
+
+    pub(crate) async fn stream(
         &self,
         runtime: AgentRuntime,
         path: &str,
     ) -> Result<AgentEventStream, AgentSdkError> {
-        let response = self
+        let mut response = self
             .request(runtime, Method::GET, path)?
             .header(header::ACCEPT, "text/event-stream")
             .send()
             .await?;
-        ensure_success(response).await.map(stream_events)
+        if runtime == AgentRuntime::OpenCode && response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(request) = self.opencode_bearer_request(Method::GET, path)? {
+                response = request
+                    .header(header::ACCEPT, "text/event-stream")
+                    .send()
+                    .await?;
+            }
+        }
+        let stream = stream_events(ensure_success(response).await?);
+        // OpenCode stream normalization is handled in session_events.rs; skip adapter for it.
+        if runtime == AgentRuntime::OpenCode {
+            return Ok(stream);
+        }
+        Ok(self.adapter(runtime)?.normalize_stream(stream))
     }
 
-    fn request(
+    pub(crate) fn request(
         &self,
         runtime: AgentRuntime,
         method: Method,
@@ -100,17 +138,40 @@ impl Lap {
             .runtimes
             .get(&runtime)
             .ok_or(AgentSdkError::RuntimeNotConfigured(runtime))?;
-        Ok(self
+        let request = self
             .inner
             .http
             .request(method, format!("{}{}", config.base_url, path))
-            .header(header::CONTENT_TYPE, "application/json")
-            .header("x-api-key", &config.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("anthropic-beta", MANAGED_AGENTS_BETA))
+            .header(header::CONTENT_TYPE, "application/json");
+        Ok(config.authorize(request))
     }
 
-    fn default_runtime(&self) -> Result<AgentRuntime, AgentSdkError> {
+    fn opencode_bearer_request(
+        &self,
+        method: Method,
+        path: &str,
+    ) -> Result<Option<reqwest::RequestBuilder>, AgentSdkError> {
+        let config = self
+            .inner
+            .runtimes
+            .get(&AgentRuntime::OpenCode)
+            .ok_or(AgentSdkError::RuntimeNotConfigured(AgentRuntime::OpenCode))?;
+        let request = self
+            .inner
+            .http
+            .request(method, format!("{}{}", config.base_url, path))
+            .header(header::CONTENT_TYPE, "application/json");
+        Ok(config.authorize_opencode_bearer(request))
+    }
+
+    pub(super) fn adapter(
+        &self,
+        runtime: AgentRuntime,
+    ) -> Result<Arc<dyn RuntimeAdapter>, AgentSdkError> {
+        providers::adapter(runtime).ok_or(AgentSdkError::RuntimeNotConfigured(runtime))
+    }
+
+    pub(super) fn default_runtime(&self) -> Result<AgentRuntime, AgentSdkError> {
         if self.inner.runtimes.len() == 1 {
             self.inner
                 .runtimes
@@ -125,169 +186,97 @@ impl Lap {
         }
     }
 
-    fn runtime_for_session(&self, session_id: &str) -> Result<AgentRuntime, AgentSdkError> {
-        let sessions = self
+    pub(super) fn runtime_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<AgentRuntime, AgentSdkError> {
+        let contexts = self
             .inner
-            .session_runtimes
+            .session_contexts
             .lock()
             .map_err(|_| AgentSdkError::StateLock)?;
-        sessions
+        contexts
             .get(session_id)
-            .copied()
+            .map(|context| context.runtime)
             .map(Ok)
             .unwrap_or_else(|| self.default_runtime())
     }
 
-    fn remember_session(
+    pub(crate) fn context_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionContext>, AgentSdkError> {
+        let contexts = self
+            .inner
+            .session_contexts
+            .lock()
+            .map_err(|_| AgentSdkError::StateLock)?;
+        Ok(contexts.get(session_id).cloned())
+    }
+
+    pub(crate) fn remember_cursor_run(
+        &self,
+        agent_id: &str,
+        run_id: &str,
+    ) -> Result<(), AgentSdkError> {
+        self.inner
+            .cursor_run_ids
+            .lock()
+            .map_err(|_| AgentSdkError::StateLock)?
+            .insert(agent_id.to_owned(), run_id.to_owned());
+        Ok(())
+    }
+
+    pub(crate) fn cursor_run_for_agent(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<String>, AgentSdkError> {
+        Ok(self
+            .inner
+            .cursor_run_ids
+            .lock()
+            .map_err(|_| AgentSdkError::StateLock)?
+            .get(agent_id)
+            .cloned())
+    }
+
+    pub(crate) fn remember_session_context(
+        &self,
+        session_id: &str,
+        context: SessionContext,
+    ) -> Result<(), AgentSdkError> {
+        self.inner
+            .session_contexts
+            .lock()
+            .map_err(|_| AgentSdkError::StateLock)?
+            .insert(session_id.to_owned(), context);
+        Ok(())
+    }
+
+    pub(crate) fn remember_session(
         &self,
         session_id: &str,
         runtime: AgentRuntime,
     ) -> Result<(), AgentSdkError> {
-        self.inner
-            .session_runtimes
-            .lock()
-            .map_err(|_| AgentSdkError::StateLock)?
-            .insert(session_id.to_owned(), runtime);
-        Ok(())
-    }
-}
-
-pub struct Beta<'a> {
-    client: &'a Lap,
-}
-
-impl<'a> Beta<'a> {
-    pub fn agents(&self) -> Agents<'a> {
-        Agents {
-            client: self.client,
-        }
-    }
-
-    pub fn environments(&self) -> Environments<'a> {
-        Environments {
-            client: self.client,
-        }
-    }
-
-    pub fn sessions(&self) -> Sessions<'a> {
-        Sessions {
-            client: self.client,
-        }
-    }
-}
-
-pub struct Agents<'a> {
-    client: &'a Lap,
-}
-
-impl Agents<'_> {
-    pub async fn create(&self, params: CreateAgentParams) -> Result<ManagedAgent, AgentSdkError> {
-        let runtime = params.lap_agent_runtime;
-        let raw = self.client.post(runtime, "/v1/agents", &params).await?;
-        Ok(ManagedAgent {
-            id: id(&raw)?,
-            version: raw.get("version").and_then(Value::as_u64),
-            raw,
-        })
-    }
-}
-
-pub struct Environments<'a> {
-    client: &'a Lap,
-}
-
-impl Environments<'_> {
-    pub async fn create(
-        &self,
-        params: CreateEnvironmentParams,
-    ) -> Result<Environment, AgentSdkError> {
-        let runtime = params.lap_agent_runtime;
-        let raw = self
-            .client
-            .post(runtime, "/v1/environments", &params)
-            .await?;
-        Ok(Environment { id: id(&raw)?, raw })
-    }
-}
-
-pub struct Sessions<'a> {
-    client: &'a Lap,
-}
-
-impl<'a> Sessions<'a> {
-    pub async fn create(&self, params: CreateSessionParams) -> Result<Session, AgentSdkError> {
-        let runtime = params
-            .lap_agent_runtime
-            .map(Ok)
-            .unwrap_or_else(|| self.client.default_runtime())?;
-        let raw = self.client.post(runtime, "/v1/sessions", &params).await?;
-        let session = Session { id: id(&raw)?, raw };
-        self.client.remember_session(&session.id, runtime)?;
-        Ok(session)
-    }
-
-    pub fn events(&self) -> SessionEvents<'a> {
-        SessionEvents {
-            client: self.client,
-        }
-    }
-}
-
-pub struct SessionEvents<'a> {
-    client: &'a Lap,
-}
-
-impl SessionEvents<'_> {
-    pub async fn send(
-        &self,
-        session_id: &str,
-        params: SendEventsParams,
-    ) -> Result<SendEventsResponse, AgentSdkError> {
-        let runtime = self.client.runtime_for_session(session_id)?;
-        let raw = self
-            .client
-            .post(
+        self.remember_session_context(
+            session_id,
+            SessionContext {
                 runtime,
-                &format!("/v1/sessions/{session_id}/events"),
-                &params,
-            )
-            .await?;
-        Ok(SendEventsResponse { raw })
-    }
-
-    pub async fn stream(&self, session_id: &str) -> Result<AgentEventStream, AgentSdkError> {
-        let runtime = self.client.runtime_for_session(session_id)?;
-        self.client
-            .stream(runtime, &format!("/v1/sessions/{session_id}/events/stream"))
-            .await
+                provider_session_id: Some(session_id.to_owned()),
+                agent_id: None,
+                run_id: None,
+            },
+        )
     }
 }
 
-fn configured_http_client() -> reqwest::Client {
-    reqwest::Client::new()
-}
-
-async fn response_json(response: reqwest::Response) -> Result<Value, AgentSdkError> {
-    let response = ensure_success(response).await?;
-    let text = response.text().await?;
-    if text.trim().is_empty() {
-        return Ok(Value::Object(Default::default()));
+impl SessionContext {
+    pub(crate) fn cursor(agent_id: String, run_id: Option<String>) -> Self {
+        Self {
+            runtime: AgentRuntime::Cursor,
+            provider_session_id: Some(agent_id.clone()),
+            agent_id: Some(agent_id),
+            run_id,
+        }
     }
-    serde_json::from_str(&text).map_err(AgentSdkError::Json)
-}
-
-async fn ensure_success(response: reqwest::Response) -> Result<reqwest::Response, AgentSdkError> {
-    let status = response.status();
-    if status.is_success() {
-        return Ok(response);
-    }
-    let body = response.text().await.unwrap_or_default();
-    Err(AgentSdkError::Provider { status, body })
-}
-
-fn id(raw: &Value) -> Result<String, AgentSdkError> {
-    raw.get("id")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or(AgentSdkError::MissingId)
 }

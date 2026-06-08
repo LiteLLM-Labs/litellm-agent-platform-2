@@ -45,19 +45,29 @@ export function ProvidersPanel() {
     setError(null);
     try {
       const data = await listProviders();
-      setAvailableProviders(data.available_providers);
-      const provider = data.available_providers[0];
+      const requestedProviderId = providerIdFromLocation();
+      const availableModelProviders = data.available_providers.filter(isModelProvider);
+      const connectedModelProviders = data.connected_providers.filter(isModelProvider);
+      setAvailableProviders(availableModelProviders);
+      const requestedProvider =
+        availableModelProviders.find((provider) => provider.id === requestedProviderId) ?? null;
+      const connectedProvider = requestedProvider
+        ? connectedModelProviders.find((provider) => provider.id === requestedProvider.id) ?? null
+        : connectedModelProviders[0] ?? null;
+      const provider =
+        requestedProvider ??
+        availableModelProviders.find((provider) => provider.id === connectedProvider?.id) ??
+        availableModelProviders[0];
       if (provider) {
         setSelectedProviderId(provider.id);
+        const matchingConnected =
+          connectedProvider?.id === provider.id
+            ? connectedProvider
+            : connectedModelProviders.find((entry) => entry.id === provider.id) ?? null;
+        setBaseUrl(matchingConnected?.api_base ?? provider.default_base_url);
+        setStep(matchingConnected ? "connected" : requestedProvider ? "configure" : "catalog");
       }
-      setConnectedProviders(data.connected_providers);
-      const connected = data.connected_providers[0] ?? null;
-      if (connected) {
-        setBaseUrl(connected.api_base);
-        setStep("connected");
-      } else if (provider) {
-        setBaseUrl(provider.default_base_url);
-      }
+      setConnectedProviders(connectedModelProviders);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load providers");
     } finally {
@@ -116,20 +126,23 @@ export function ProvidersPanel() {
   return (
     <>
       <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">AI Providers</h2>
+        <h2 className="text-lg font-semibold">LLM Providers</h2>
         <p className="text-sm text-muted-foreground">
           Connect provider credentials before assigning models to agents.
         </p>
-        {loading && <p className="text-xs text-muted-foreground">Loading providers...</p>}
+        {loading && <p className="text-xs text-muted-foreground">Loading providers…</p>}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
 
       {connectedProviders.length > 0 && (
         <section className="grid gap-2">
-          <h3>Connected providers</h3>
-          <Card className="grid gap-3 p-4">
+          <h3 className="text-[13.5px] font-semibold tracking-tight">Connected LLM providers</h3>
+          <Card className="grid min-w-0 gap-3 p-4">
             {connectedProviders.map((provider) => (
-              <div key={provider.id} className="flex items-center justify-between gap-4">
+              <div
+                key={provider.id}
+                className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between"
+              >
                 <div className="flex min-w-0 items-center gap-3">
                   <ProviderLogo providerId={provider.id} />
                   <div className="min-w-0">
@@ -148,6 +161,7 @@ export function ProvidersPanel() {
                   </div>
                 </div>
                 <Button
+                  className="self-end sm:self-auto"
                   variant="outline"
                   size="sm"
                   onClick={() => disconnect(provider.id)}
@@ -164,56 +178,61 @@ export function ProvidersPanel() {
 
       <section className="grid gap-2">
         <div className="flex items-center justify-between gap-3">
-          <h3>Available providers</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight">Available LLM providers</h3>
           <Badge variant="outline" className="text-[10px]">
-            Rust proxy catalog
+            Model routing
           </Badge>
         </div>
-        <Card className="overflow-hidden p-0">
-          {availableProviders.map((provider) => (
-            <button
-              key={provider.id}
-              type="button"
-              className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/50"
-              onClick={() => {
-                setSelectedProviderId(provider.id);
-                const connectedProvider = connectedProviders.find(
-                  (connected) => connected.id === provider.id,
-                );
-                setBaseUrl(connectedProvider?.api_base ?? provider.default_base_url);
-                setStep(connectedProvider ? "connected" : "configure");
-              }}
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <ProviderLogo providerId={provider.id} />
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{provider.name}</span>
-                    <Badge variant="secondary" className="text-[10px]">
-                      Available
-                    </Badge>
+        <Card className="min-w-0 overflow-hidden p-0">
+          {availableProviders.map((provider) => {
+            const connectedProvider = connectedProviders.find(
+              (connected) => connected.id === provider.id,
+            );
+            return (
+              <button
+                key={provider.id}
+                type="button"
+                className="flex w-full min-w-0 flex-col items-start gap-4 px-4 py-4 text-left transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
+                onClick={() => {
+                  setSelectedProviderId(provider.id);
+                  setBaseUrl(connectedProvider?.api_base ?? provider.default_base_url);
+                  setStep(connectedProvider ? "connected" : "configure");
+                }}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <ProviderLogo providerId={provider.id} />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{provider.name}</span>
+                      <Badge
+                        variant={connectedProvider ? "secondary" : "outline"}
+                        className="text-[10px]"
+                      >
+                        {connectedProvider ? "Connected" : "Available"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">{provider.description}</p>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{provider.description}</p>
                 </div>
-              </div>
-              <span className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-lg border border-border bg-background px-2.5 text-[0.8rem] font-medium shadow-sm">
-                <Plus className="size-3.5" />
-                Connect
-              </span>
-            </button>
-          ))}
+                <span className="inline-flex h-7 shrink-0 items-center justify-center gap-1 self-end rounded-lg border border-border bg-background px-2.5 text-[0.8rem] font-medium shadow-sm sm:self-auto">
+                  <Plus className="size-3.5" />
+                  {connectedProvider ? "Manage" : "Connect"}
+                </span>
+              </button>
+            );
+          })}
         </Card>
       </section>
 
       {step !== "catalog" && selectedProvider && (
         <section className="grid gap-2">
-          <h3>{selectedConnectedProvider ? "Provider details" : `Connect ${selectedProvider.name}`}</h3>
-          <Card className="p-4">
+          <h3 className="text-[13.5px] font-semibold tracking-tight">{selectedConnectedProvider ? "Provider details" : `Connect ${selectedProvider.name}`}</h3>
+          <Card className="min-w-0 p-4">
             <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-              <div className="grid gap-4">
+              <div className="grid min-w-0 gap-4">
                 <div className="flex items-center gap-3">
                   <ProviderLogo providerId={selectedProvider.id} large />
-                  <div>
+                  <div className="min-w-0">
                     <div className="font-medium">{selectedProvider.name}</div>
                     <p className="text-sm text-muted-foreground">
                       Add your provider API key and base URL.
@@ -248,23 +267,25 @@ export function ProvidersPanel() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="min-w-0 rounded-lg border border-border bg-muted/30 p-3">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <Bot className="size-4" />
-                  Agent routing
+                  Model routing
                 </div>
                 <div className="mt-3 space-y-3 text-xs text-muted-foreground">
-                  <div className="flex items-center justify-between gap-3 border-b border-border pb-2">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-b border-border pb-2">
                     <span>Provider</span>
-                    <span className="text-foreground">{selectedProvider.name}</span>
+                    <span className="truncate text-right text-foreground">{selectedProvider.name}</span>
                   </div>
-                  <div className="flex items-center justify-between gap-3 border-b border-border pb-2">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-b border-border pb-2">
                     <span>Models</span>
-                    <span className="font-mono text-foreground">{`${selectedProvider.id}/*`}</span>
+                    <span className="truncate text-right font-mono text-foreground">
+                      {`${selectedProvider.id}/*`}
+                    </span>
                   </div>
-                  <div className="flex items-center justify-between gap-3">
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3">
                     <span>Status</span>
-                    <span className="inline-flex items-center gap-1 text-foreground">
+                    <span className="inline-flex min-w-0 items-center justify-end gap-1 text-foreground">
                       {connected && <Check className="size-3" />}
                       {connected ? "Connected" : "Ready"}
                     </span>
@@ -283,7 +304,7 @@ export function ProvidersPanel() {
                 disabled={saving || !selectedProvider || !apiKey.trim() || !baseUrl.trim()}
               >
                 <Check className="size-3.5" />
-                {saving ? "Saving..." : "Save provider"}
+                {saving ? "Saving…" : "Save provider"}
               </Button>
             </div>
           </Card>
@@ -303,4 +324,13 @@ function ProviderLogo({ providerId, large = false }: { providerId: string; large
       <BrandIcon id={providerId} className={large ? "size-7" : "size-5"} />
     </span>
   );
+}
+
+function providerIdFromLocation() {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("provider") ?? "";
+}
+
+function isModelProvider(provider: { category?: string }) {
+  return provider.category !== "runtime";
 }

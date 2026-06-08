@@ -12,6 +12,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(agent_routes())
         .merge(skill_routes())
         .merge(inbox_routes())
+        .merge(slack_routes())
 }
 
 fn agent_routes() -> Router<Arc<AppState>> {
@@ -92,5 +93,25 @@ fn inbox_routes() -> Router<Arc<AppState>> {
         .route(
             "/api/approvals/{item_id}/reject",
             post(super::inbox::approvals::reject),
+        )
+}
+
+fn slack_routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route(
+            "/api/agents/{agent_id}/slack/events",
+            post(super::slack::events),
+        )
+        .route(
+            "/api/agents/{agent_id}/slack/interactivity",
+            post(super::slack::interactivity),
+        )
+        .route(
+            "/api/agents/{agent_id}/slack/oauth-state",
+            post(super::slack::oauth_state),
+        )
+        .route(
+            "/host-oauth-callback/{provider_id}",
+            get(super::slack::oauth_callback),
         )
 }

@@ -19,7 +19,7 @@ export default function KeysPage() {
           <ThemeToggle />
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main id="main-content" className="flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-4xl flex-col gap-5 px-4 py-6">
             <div className="flex flex-col gap-1">
               <h2 className="text-lg font-semibold">API Keys</h2>
