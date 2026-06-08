@@ -8,7 +8,7 @@ use litellm_rust::sdk::agents::{
 };
 use serde_json::json;
 use wiremock::{
-    matchers::{header, method, path},
+    matchers::{body_json, header, method, path},
     Mock, MockServer, ResponseTemplate,
 };
 
@@ -69,6 +69,47 @@ async fn creates_opencode_session_and_sends_message_parts() {
     assert_eq!(session.id, "sesn_open");
     assert_eq!(sent.raw["info"]["id"], "msg_123");
     assert_eq!(sent.raw["parts"][0]["text"], "done");
+}
+
+#[tokio::test]
+async fn creates_opencode_session_with_optional_agent_context() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/session"))
+        .and(header("authorization", "Basic b3BlbmNvZGU6cHc="))
+        .and(body_json(json!({
+            "title": "OpenCode context session",
+            "system": "Always answer from LAP context.",
+            "model": "claude-sonnet-4-6",
+            "tools": [{ "type": "bash" }],
+            "mcp_servers": [{ "name": "platform" }],
+            "environment": { "repository": "https://github.com/acme/app" },
+            "agent": { "id": "agent_123", "name": "Ops Agent" }
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "sesn_context",
+            "title": "OpenCode context session"
+        })))
+        .mount(&server)
+        .await;
+
+    let mut params = CreateSessionParams::opencode("OpenCode context session");
+    params.resources = Some(json!({
+        "system": "Always answer from LAP context.",
+        "model": "claude-sonnet-4-6",
+        "tools": [{ "type": "bash" }],
+        "mcp_servers": [{ "name": "platform" }],
+        "environment": { "repository": "https://github.com/acme/app" },
+        "agent": { "id": "agent_123", "name": "Ops Agent" }
+    }));
+    let session = sdk_support::opencode_client(&server)
+        .beta()
+        .sessions()
+        .create(params)
+        .await
+        .unwrap();
+
+    assert_eq!(session.id, "sesn_context");
 }
 
 #[tokio::test]

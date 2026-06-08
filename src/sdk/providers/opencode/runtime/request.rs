@@ -2,8 +2,12 @@ use serde_json::{json, Value};
 
 use crate::sdk::agents::{AgentSdkError, SendEventsParams};
 
-pub(super) fn session_body(title: String) -> Value {
-    json!({ "title": title })
+pub(super) fn session_body(title: String, resources: Option<Value>) -> Value {
+    let mut body = serde_json::Map::from_iter([("title".to_owned(), Value::String(title))]);
+    if let Some(resources) = resources.and_then(|value| value.as_object().cloned()) {
+        body.extend(resources);
+    }
+    Value::Object(body)
 }
 
 pub(super) fn message_body(params: &SendEventsParams) -> Result<Value, AgentSdkError> {

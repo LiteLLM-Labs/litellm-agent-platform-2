@@ -20,8 +20,8 @@ use crate::{
 use super::{
     runtime::CreatedRuntimeSession,
     runtime_inputs::{
-        agent_metadata, agent_model, integration_mcp_toolsets, mcp_servers, provider_system,
-        session_metadata, workspace_from_env,
+        agent_metadata, agent_model, integration_mcp_toolsets, mcp_servers,
+        opencode_session_resources, provider_system, session_metadata, workspace_from_env,
     },
     runtime_sdk::agent_sdk_error,
 };
@@ -58,7 +58,7 @@ pub(super) async fn provision_runtime_session(
                 &created.prompt,
             )),
             vault_ids,
-            resources: None,
+            resources: opencode_session_resources(state, sdk_rt, created)?,
         })
         .await
         .map_err(agent_sdk_error)?;
