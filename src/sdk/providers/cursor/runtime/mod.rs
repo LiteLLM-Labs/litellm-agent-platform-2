@@ -1,4 +1,6 @@
-use reqwest::Method;
+use std::time::{Duration, Instant};
+
+use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 
 mod request_body;
@@ -21,14 +23,6 @@ pub(crate) const RUNTIME_ID: &str = "cursor";
 pub(crate) struct CursorRuntime;
 
 impl RuntimeAdapter for CursorRuntime {
-    fn configure_request(
-        &self,
-        request: reqwest::RequestBuilder,
-        api_key: &str,
-    ) -> reqwest::RequestBuilder {
-        request.bearer_auth(api_key)
-    }
-
     fn normalize_stream(&self, stream: AgentEventStream) -> AgentEventStream {
         normalize_cursor_stream(stream)
     }
@@ -155,19 +149,36 @@ impl RuntimeAdapter for CursorRuntime {
         Box::pin(async move {
             let agent_id = cursor_agent_id(client, session_id)?;
             let body = json!({ "prompt": prompt_from_events(&params.events)? });
-            let raw = client
-                .post(
-                    AgentRuntime::Cursor,
-                    &format!("/v1/agents/{agent_id}/runs"),
-                    &body,
-                )
-                .await?;
-            let run_id = nested_string_field(&raw, "run", "id")?;
-            client.remember_session_context(
-                session_id,
-                SessionContext::cursor(agent_id, Some(run_id)),
-            )?;
-            Ok(SendEventsResponse { raw })
+            let deadline = Instant::now() + Duration::from_secs(300);
+            let mut delay = Duration::from_millis(500);
+            loop {
+                let result = client
+                    .post(AgentRuntime::Cursor, &format!("/v1/agents/{agent_id}/runs"), &body)
+                    .await;
+                match result {
+                    Ok(raw) => {
+                        let run_id = nested_string_field(&raw, "run", "id")?;
+                        client.remember_session_context(
+                            session_id,
+                            SessionContext::cursor(agent_id, Some(run_id)),
+                        )?;
+                        return Ok(SendEventsResponse { raw });
+                    }
+                    Err(e) => {
+                        let agent_busy = matches!(
+                            &e,
+                            AgentSdkError::Provider { status, body }
+                                if *status == StatusCode::CONFLICT && body.contains("agent_busy")
+                        );
+                        if agent_busy && Instant::now() < deadline {
+                            tokio::time::sleep(delay).await;
+                            delay = (delay * 2).min(Duration::from_secs(10));
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
         })
     }
 

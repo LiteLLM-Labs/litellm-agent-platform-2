@@ -5,7 +5,7 @@ use crate::{
     errors::GatewayError,
     http::managed_agents::slack::{
         config::{bot_token_key, load_secret, slack_config},
-        web_api,
+        dm_api,
     },
     proxy::state::AppState,
 };
@@ -30,7 +30,7 @@ pub async fn send_message(
     let bot_token = load_secret(state, &bot_token_key(agent_id, &config)).await?;
     let text = required_str(&arguments, "text")?;
     if let Some(channel_id) = optional_str(&arguments, "channel_id") {
-        let ts = web_api::post_direct_message(
+        let ts = dm_api::post_direct_message(
             &state.http,
             &state.config.slack.api_base_url,
             &bot_token,
@@ -41,14 +41,14 @@ pub async fn send_message(
         return Ok(json!({ "channel_id": channel_id, "ts": ts }));
     }
     let user_id = user_id(state, &bot_token, &arguments).await?;
-    let channel_id = web_api::open_dm(
+    let channel_id = dm_api::open_dm(
         &state.http,
         &state.config.slack.api_base_url,
         &bot_token,
         &user_id,
     )
     .await?;
-    let ts = web_api::post_direct_message(
+    let ts = dm_api::post_direct_message(
         &state.http,
         &state.config.slack.api_base_url,
         &bot_token,
@@ -80,7 +80,7 @@ async fn user_id(
         return Ok(user_id.to_owned());
     }
     let email = required_str(arguments, "email")?;
-    web_api::user_id_by_email(
+    dm_api::user_id_by_email(
         &state.http,
         &state.config.slack.api_base_url,
         bot_token,

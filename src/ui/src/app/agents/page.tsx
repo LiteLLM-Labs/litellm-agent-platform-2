@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Plus, Play, Pencil, Trash2, X, Brain, Plug } from "lucide-react";
+import { Bot, Clock, Plus, Play, Pencil, Trash2, X, Brain, Plug } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandIcon } from "@/components/brand-icons";
@@ -24,6 +24,7 @@ import {
   listAgents,
   updateAgent,
   deleteAgent,
+  listRules,
   listSkills,
   listVaultKeys,
   listPlatformMcps,
@@ -34,7 +35,7 @@ import {
   deleteMemory,
 } from "@/lib/api";
 import { DEFAULT_TIMEZONE, scheduleLabel } from "@/lib/schedule";
-import type { Agent, Skill, Memory, VaultKeyEntry, PlatformMcp } from "@/lib/types";
+import type { Agent, Rule, Skill, Memory, VaultKeyEntry, PlatformMcp } from "@/lib/types";
 import {
   slackActionClass,
   slackActionLabel,
@@ -46,22 +47,26 @@ interface FormState {
   name: string;
   description: string;
   prompt: string;
+  rule_ids: string[];
   skill_ids: string[];
   cron: string;
   timezone: string;
   vault_keys: string[];
   platform_mcp_ids: string[];
+  sub_agent_ids: string[];
 }
 
 const EMPTY: FormState = {
   name: "",
   description: "",
   prompt: "",
+  rule_ids: [],
   skill_ids: [],
   cron: "",
   timezone: DEFAULT_TIMEZONE,
   vault_keys: [],
   platform_mcp_ids: [],
+  sub_agent_ids: [],
 };
 
 function agentConfig(agent: Agent): Record<string, unknown> {
@@ -76,9 +81,28 @@ function platformMcpIds(agent: Agent): string[] {
   return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
 }
 
+function subAgentIds(agent: Agent): string[] {
+  const config = agentConfig(agent);
+  const value = config.sub_agents ?? config.subAgents;
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return "";
+          const item = entry as Record<string, unknown>;
+          const id = item.agent_id ?? item.agentId ?? item.id;
+          return typeof id === "string" ? id.trim() : "";
+        })
+        .filter(Boolean),
+    ),
+  ];
+}
+
 export default function AgentsPage() {
   const router = useRouter();
   const [agents, setAgents] = useState<Agent[] | null>(null);
+  const [rules, setRules] = useState<Rule[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [platformMcps, setPlatformMcps] = useState<PlatformMcp[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +129,7 @@ export default function AgentsPage() {
   };
   useEffect(() => {
     load();
+    listRules().then(setRules).catch(() => setRules([]));
     listSkills().then(setSkills).catch(() => setSkills([]));
     listPlatformMcps().then(setPlatformMcps).catch(() => setPlatformMcps([]));
     listVaultKeys().then(setStoredKeyEntries).catch(() => setStoredKeyEntries([]));
@@ -118,7 +143,8 @@ export default function AgentsPage() {
   };
   const removeVaultKey = (k: string) => {
     setForm((f) => ({ ...f, vault_keys: f.vault_keys.filter((x) => x !== k) }));
-    deleteIntegrationKey(k).then(() =>
+    const scope = storedKeyEntries.find((x) => x.key === k)?.scope ?? "personal";
+    deleteIntegrationKey(k, scope).then(() =>
       setStoredKeyEntries((p) => p.filter((x) => x.key !== k))
     ).catch(() => {});
     setVaultValues(({ [k]: _drop, ...rest }) => rest);
@@ -128,11 +154,10 @@ export default function AgentsPage() {
     if (!v) return;
     try {
       await saveIntegrationKey(k, v, "personal");
-      setStoredKeyEntries((p) =>
-        p.some((x) => x.key === k)
-          ? p
-          : [...p, { key: k, scope: "personal" }]
-      );
+      setStoredKeyEntries((p) => [
+        ...p.filter((x) => !(x.key === k && x.scope === "personal")),
+        { key: k, scope: "personal" },
+      ]);
       setVaultValues(({ [k]: _drop, ...rest }) => rest);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : String(e));
@@ -147,6 +172,14 @@ export default function AgentsPage() {
         : [...f.skill_ids, id],
     }));
 
+  const toggleRule = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      rule_ids: f.rule_ids.includes(id)
+        ? f.rule_ids.filter((ruleId) => ruleId !== id)
+        : [...f.rule_ids, id],
+    }));
+
   const togglePlatformMcp = (id: string) =>
     setForm((f) => ({
       ...f,
@@ -155,7 +188,20 @@ export default function AgentsPage() {
         : [...f.platform_mcp_ids, id],
     }));
 
+  const toggleSubAgent = (id: string) =>
+    setForm((f) => {
+      const subAgentIds = f.sub_agent_ids.includes(id)
+        ? f.sub_agent_ids.filter((agentId) => agentId !== id)
+        : [...f.sub_agent_ids, id];
+      const platformMcpIds = f.platform_mcp_ids.filter(
+        (mcpId) => mcpId !== "list_sub_agents" && mcpId !== "run_sub_agent",
+      );
+      if (subAgentIds.length > 0) platformMcpIds.push("list_sub_agents", "run_sub_agent");
+      return { ...f, sub_agent_ids: subAgentIds, platform_mcp_ids: platformMcpIds };
+    });
+
   const skillName = (id: string) => skills.find((s) => s.id === id)?.name ?? id;
+  const ruleName = (id: string) => rules.find((rule) => rule.id === id)?.name ?? id;
   const platformMcpName = (id: string) =>
     platformMcps.find((mcp) => mcp.id === id)?.name ?? id;
 
@@ -195,11 +241,13 @@ export default function AgentsPage() {
       name: ag.name ?? "",
       description: ag.description ?? "",
       prompt: ag.prompt ?? "",
+      rule_ids: Array.isArray(ag.rule_ids) ? ag.rule_ids : [],
       skill_ids: Array.isArray(ag.skill_ids) ? ag.skill_ids : [],
       cron: ag.cron ?? "",
       timezone: ag.timezone ?? DEFAULT_TIMEZONE,
       vault_keys: Array.isArray(ag.vault_keys) ? ag.vault_keys : [],
       platform_mcp_ids: platformMcpIds(ag),
+      sub_agent_ids: subAgentIds(ag),
     });
     setFormError(null);
     setVaultKeyInput("");
@@ -222,11 +270,13 @@ export default function AgentsPage() {
       const config = {
         ...(currentAgent ? agentConfig(currentAgent) : {}),
         platform_mcp_ids: form.platform_mcp_ids,
+        sub_agents: form.sub_agent_ids.map((agent_id) => ({ agent_id })),
       };
       await updateAgent(editingId, {
         name: form.name,
         description: form.description,
         prompt: form.prompt,
+        rule_ids: form.rule_ids,
         skill_ids: form.skill_ids,
         cron: cron || null,
         timezone,
@@ -322,6 +372,15 @@ export default function AgentsPage() {
                       ))}
                     </div>
                   )}
+                  {Array.isArray(ag.rule_ids) && ag.rule_ids.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {ag.rule_ids.map((id) => (
+                        <Badge key={id} variant="outline" className="text-[10px]">
+                          {ruleName(id)}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
                   {attachedPlatformMcps.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {attachedPlatformMcps.map((id) => (
@@ -406,6 +465,46 @@ export default function AgentsPage() {
               onChange={(next) => setForm({ ...form, ...next })}
             />
             <div className="grid gap-1.5">
+              <Label>Rules</Label>
+              {rules.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  No rules available on this server.
+                </p>
+              ) : (
+                <div className="max-h-44 divide-y divide-border overflow-y-auto rounded-md border border-border">
+                  {rules.map((rule) => {
+                    const checked = form.rule_ids.includes(rule.id);
+                    return (
+                      <label
+                        key={rule.id}
+                        className="flex cursor-pointer items-start gap-2 px-2.5 py-1.5 hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={checked}
+                          onChange={() => toggleRule(rule.id)}
+                        />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="text-xs font-medium">{rule.name}</span>
+                          {rule.description && (
+                            <span className="line-clamp-2 text-[11px] text-muted-foreground">
+                              {rule.description}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {form.rule_ids.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  {form.rule_ids.length} rule{form.rule_ids.length === 1 ? "" : "s"} attached
+                </p>
+              )}
+            </div>
+            <div className="grid gap-1.5">
               <Label>Skills</Label>
               {skills.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
@@ -484,6 +583,58 @@ export default function AgentsPage() {
                 <p className="text-[11px] text-muted-foreground">
                   {form.platform_mcp_ids.length} platform MCP
                   {form.platform_mcp_ids.length === 1 ? "" : "s"} attached
+                </p>
+              )}
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="flex items-center gap-1.5">
+                <Bot className="size-3.5" />
+                Sub-agents
+              </Label>
+              <p className="text-[11px] text-muted-foreground -mt-1">
+                Saved LAP agents attached here are exposed to this agent by name through{" "}
+                <span className="font-mono">list_sub_agents</span> and{" "}
+                <span className="font-mono">run_sub_agent</span>.
+              </p>
+              {(agents ?? []).filter((agent) => agent.id !== editingId).length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Create another agent first, then attach it here.
+                </p>
+              ) : (
+                <div className="rounded-md border border-border divide-y divide-border">
+                  {(agents ?? [])
+                    .filter((agent) => agent.id !== editingId)
+                    .map((agent) => {
+                      const checked = form.sub_agent_ids.includes(agent.id);
+                      return (
+                        <label
+                          key={agent.id}
+                          className="flex items-start gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-muted/50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={checked}
+                            onChange={() => toggleSubAgent(agent.id)}
+                          />
+                          <span className="min-w-0 flex flex-col">
+                            <span className="text-xs font-medium">{agent.name}</span>
+                            <span className="font-mono text-[11px] text-muted-foreground truncate">
+                              {agent.id}
+                            </span>
+                            <span className="text-[11px] text-muted-foreground line-clamp-2">
+                              {agent.description || agent.model || "Saved LAP agent"}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                </div>
+              )}
+              {form.sub_agent_ids.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  {form.sub_agent_ids.length} sub-agent
+                  {form.sub_agent_ids.length === 1 ? "" : "s"} attached
                 </p>
               )}
             </div>

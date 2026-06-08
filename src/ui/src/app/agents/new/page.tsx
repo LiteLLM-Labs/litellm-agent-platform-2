@@ -40,9 +40,10 @@ import {
   withRuntimeDefaultTools,
 } from "@/lib/agent-builder";
 import type { AgentDraft, AgentTemplate } from "@/lib/agent-builder";
-import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes, listModels } from "@/lib/api";
+import { INTEGRATIONS } from "@/lib/integrations";
+import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes, listAgents, listModels } from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
-import type { AgentRuntime } from "@/lib/types";
+import type { Agent, AgentRuntime } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type BuilderStep = "create" | "config";
@@ -69,6 +70,7 @@ export default function NewAgentPage() {
   const [configText, setConfigText] = useState(INITIAL_CONFIG);
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
   const [models, setModels] = useState<string[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [view, setView] = useState<BuilderView>("edit");
   const [drafting, setDrafting] = useState(false);
   const [lastRequest, setLastRequest] = useState("");
@@ -82,10 +84,11 @@ export default function NewAgentPage() {
   const canCreate = !saving && !parsed.error && draft.name.trim().length > 0;
 
   useEffect(() => {
-    Promise.all([listAgentRuntimes(), listModels()])
-      .then(([runtimeValues, modelValues]) => {
+    Promise.all([listAgentRuntimes(), listModels(), listAgents()])
+      .then(([runtimeValues, modelValues, agentValues]) => {
         setRuntimes(runtimeValues);
         setModels(modelValues);
+        setAgents(agentValues);
         setConfigText((current) =>
           current === INITIAL_CONFIG
             ? stringifyAgentDraft(withRuntimeDefaultTools(AGENT_TEMPLATES[0].draft, runtimeValues))
@@ -95,6 +98,7 @@ export default function NewAgentPage() {
       .catch(() => {
         setRuntimes([]);
         setModels([]);
+        setAgents([]);
       });
   }, []);
 
@@ -236,6 +240,7 @@ export default function NewAgentPage() {
               drafting={drafting}
               error={error}
               lastRequest={lastRequest}
+              agents={agents}
               models={models}
               parsedError={parsed.error}
               prompt={prompt}
@@ -409,6 +414,7 @@ function ConfigStep({
   drafting,
   error,
   lastRequest,
+  agents,
   models,
   parsedError,
   prompt,
@@ -431,6 +437,7 @@ function ConfigStep({
   drafting: boolean;
   error: string | null;
   lastRequest: string;
+  agents: Agent[];
   models: string[];
   parsedError: string | null;
   prompt: string;
@@ -579,7 +586,13 @@ function ConfigStep({
           </div>
 
           {view === "edit" ? (
-            <AgentDraftControls draft={draft} models={models} runtimes={runtimes} onChange={onDraftChange} />
+            <AgentDraftControls
+              agents={agents}
+              draft={draft}
+              models={models}
+              runtimes={runtimes}
+              onChange={onDraftChange}
+            />
           ) : view === "config" ? (
             <Textarea
               value={configText}
@@ -687,11 +700,13 @@ function TemplateBrowser({
 }
 
 function AgentDraftControls({
+  agents,
   draft,
   models,
   runtimes,
   onChange,
 }: {
+  agents: Agent[];
   draft: AgentDraft;
   models: string[];
   runtimes: AgentRuntime[];
@@ -704,6 +719,7 @@ function AgentDraftControls({
     runtime?.tools?.map((tool) => tool.id).filter(Boolean) ??
     draft.tools.map((tool) => tool.type).filter(Boolean);
   const selectedTools = new Set(draft.tools.map((tool) => tool.type).filter(Boolean));
+  const selectedSubAgents = new Set(draft.sub_agents.map((agent) => agent.agent_id));
   const setTool = (toolId: string, enabled: boolean) => {
     const next = new Set(selectedTools);
     if (enabled) next.add(toolId);
@@ -796,6 +812,106 @@ function AgentDraftControls({
             ))}
           </div>
         </div>
+
+        <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-sm font-medium">MCP integrations</Label>
+            <span className="font-mono text-xs text-[#9d9384]">
+              {draft.mcp_server_ids.length} connected
+            </span>
+          </div>
+          <div className="grid gap-2">
+            {INTEGRATIONS.map((integration) => {
+              const enabled = draft.mcp_server_ids.includes(integration.id);
+              const toggle = (on: boolean) => {
+                const next = on
+                  ? [...draft.mcp_server_ids, integration.id]
+                  : draft.mcp_server_ids.filter((id) => id !== integration.id);
+                update({ mcp_server_ids: next });
+              };
+              return (
+                <label
+                  key={integration.id}
+                  className="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs hover:bg-white/10"
+                >
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => toggle(e.target.checked)}
+                    className="mt-0.5 size-3.5 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{integration.name}</span>
+                      <span className="truncate font-mono text-[#9d9384]">{integration.envKey}</span>
+                    </div>
+                    <div className="mt-0.5 text-[#9d9384]">{integration.description}</div>
+                    {enabled && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {integration.tools.map((tool) => (
+                          <span
+                            key={tool}
+                            className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#c9c0b1]"
+                          >
+                            {tool}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-sm font-medium">Sub-agents</Label>
+            <span className="font-mono text-xs text-[#9d9384]">
+              {draft.sub_agents.length} attached
+            </span>
+          </div>
+          {agents.length === 0 ? (
+            <div className="rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-[#9d9384]">
+              Create helper agents first, then attach them here.
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              {agents.map((agent) => {
+                const enabled = selectedSubAgents.has(agent.id);
+                const toggle = (on: boolean) => {
+                  const next = on
+                    ? [...draft.sub_agents, { agent_id: agent.id }]
+                    : draft.sub_agents.filter((entry) => entry.agent_id !== agent.id);
+                  update({ sub_agents: next });
+                };
+                return (
+                  <label
+                    key={agent.id}
+                    className="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs hover:bg-white/10"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(event) => toggle(event.target.checked)}
+                      className="mt-0.5 size-3.5 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-medium">{agent.name}</span>
+                        <span className="truncate font-mono text-[#9d9384]">{agent.id}</span>
+                      </div>
+                      <div className="mt-0.5 line-clamp-2 text-[#9d9384]">
+                        {agent.description || agent.model || "Saved LAP agent"}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -828,6 +944,9 @@ function ConfigPreview({ draft }: { draft: AgentDraft }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <TokenList label="Vault keys" values={draft.vault_keys} />
           <TokenList label="Skill IDs" values={draft.skill_ids} />
+          <TokenList label="Rule IDs" values={draft.rule_ids} />
+          <TokenList label="MCP integrations" values={draft.mcp_server_ids} />
+          <TokenList label="Sub-agents" values={draft.sub_agents.map((agent) => agent.agent_id)} />
         </div>
       </div>
     </div>

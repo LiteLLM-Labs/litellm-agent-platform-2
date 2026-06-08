@@ -62,6 +62,7 @@ fn build_state(pool: PgPool, e2b_api_base: String, slack_api_base_url: String) -
         mcp_servers: HashMap::new(),
         general_settings: GeneralSettings {
             master_key: Some("sk-local".to_owned()),
+            public_base_url: Some("http://localhost".to_owned()),
             database_url: Some("postgres://test".to_owned()),
             sandbox_choice: Some("e2b".to_owned()),
             e2b_sandbox_params: E2bSandboxParams {
@@ -122,6 +123,25 @@ pub async fn request_json(
         String::from_utf8_lossy(&body)
     );
     serde_json::from_slice(&body).unwrap_or_else(|_| json!({}))
+}
+
+pub async fn request_json_raw(
+    app: axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (StatusCode, String) {
+    let response = request(
+        app,
+        method,
+        uri,
+        body.map(|value| value.to_string()),
+        "application/json",
+    )
+    .await;
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, String::from_utf8_lossy(&body).to_string())
 }
 
 pub async fn read_events_until_completed(

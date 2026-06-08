@@ -5,9 +5,11 @@ import type {
   AgentRuntime,
   AgentRuntimeId,
   HarnessMessage,
+  McpServer,
   Memory,
   OpencodeSession,
   PlatformMcp,
+  Rule,
   Skill,
   SpendLog,
   VaultKeyEntry,
@@ -576,7 +578,7 @@ export async function draftAgentConfigWithModel(
       model,
       max_tokens: 1200,
       system:
-        "You design managed agent configs for LiteLLM Agent Platform. Return only valid YAML, with no markdown fence and no prose. Use exactly these primary keys: name, description, model, runtime, system, tools. The runtime must be claude_managed_agents unless the user explicitly names another supported runtime. The model should be claude-sonnet-4-6 unless a different model is clearly requested. Use tools as YAML list items with a type equal to a tool id available for the selected runtime, for example `- type: bash`. Do not emit provider-native toolset identifiers such as agent_toolset_20260401. If the selected runtime has no explicit LAP-managed tools, use tools: []. Do not include harness. Do not paste the user's request as a generic mission; synthesize a complete, specific system prompt that tells the agent how to behave, what to avoid, and when to ask for approval. Include schedule, vault_keys, or skill_ids only when the request clearly needs them.\n\n" +
+        "You design managed agent configs for LiteLLM Agent Platform. Return only valid YAML, with no markdown fence and no prose. Use these primary keys when relevant: name, description, model, runtime, system, tools, schedule, vault_keys, skill_ids, rule_ids, sub_agents. The runtime must be claude_managed_agents unless the user explicitly names another supported runtime. The model should be claude-sonnet-4-6 unless a different model is clearly requested. Use tools as YAML list items with a type equal to a tool id available for the selected runtime, for example `- type: bash`. Do not emit provider-native toolset identifiers such as agent_toolset_20260401. If the selected runtime has no explicit LAP-managed tools, use tools: []. Do not include harness. Do not include provider-native multiagent or callable_agents. For sub-agents, only emit existing LAP agent references if the user provided exact IDs, using `sub_agents:` entries with `agent_id`. If useful helper agents are implied but no IDs are known, describe them in the system prompt as suggested roles instead of inventing IDs. Do not paste the user's request as a generic mission; synthesize a complete, specific system prompt that tells the agent how to behave, what to avoid, when to delegate to attached sub-agents, and when to ask for approval. Include schedule, vault_keys, skill_ids, or rule_ids only when the request clearly needs them.\n\n" +
         runtimeToolCatalogPrompt(runtimes),
       messages: [
         {
@@ -696,8 +698,12 @@ export async function resolveInboxItem(id: string, note?: string): Promise<void>
 // `next dev`), we transparently fall back to sessionStorage so the flow still
 // works. Per project policy, secrets only ever touch sessionStorage — never
 // localStorage.
+//
+// Scopes:
+//   "personal" — stored under the current user's namespace (default)
+//   "global"   — admin-managed keys visible to all users
 
-const VAULT_USER = "default";
+const VAULT_USER = "local";
 const VAULT_FALLBACK_PREFIX = "lite-harness-integration:";
 
 function fallbackSet(key: string, value: string): void {
@@ -740,10 +746,18 @@ export async function saveIntegrationKey(
   value: string,
   scope: "personal" | "global" = "personal",
 ): Promise<"vault" | "session"> {
-  try {
-    const endpoint =
-      scope === "global" ? `/api/vault/global` : `/api/vault/${VAULT_USER}`;
+  if (scope === "global") {
+    const endpoint = `/api/vault/global`;
     const res = await req(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: envKey, value, scope }),
+    });
+    if (!res.ok) throw new Error(`Failed to save global key: ${res.status}`);
+    return "vault";
+  }
+  try {
+    const res = await req(`/api/vault/${VAULT_USER}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ key: envKey, value, scope }),
@@ -773,7 +787,7 @@ export async function deleteIntegrationKey(
   fallbackDelete(envKey);
 }
 
-/** List the env-key names that currently have a stored value. */
+/** List the env-key names that currently have a stored value (personal + global). */
 export async function listIntegrationKeys(): Promise<string[]> {
   const keys = new Set<string>(fallbackList());
   try {
@@ -797,17 +811,224 @@ export async function listVaultKeys(): Promise<VaultKeyEntry[]> {
     key: k,
     scope: "personal" as const,
   }));
-  const byKey = new Map<string, VaultKeyEntry>(fallback.map((e) => [e.key, e]));
+  const byKey = new Map<string, VaultKeyEntry>(
+    fallback.map((e) => [`${e.scope}:${e.key}`, e]),
+  );
   try {
-    const res = await req(`/api/vault/${VAULT_USER}`);
-    if (res.ok) {
-      const data = (await res.json()) as { keys?: VaultKeyEntry[] };
-      for (const k of data.keys ?? []) byKey.set(k.key, k);
+    const [personalRes, globalRes] = await Promise.all([
+      req(`/api/vault/${VAULT_USER}`).catch(() => null),
+      req(`/api/vault/global`).catch(() => null),
+    ]);
+    for (const res of [personalRes, globalRes]) {
+      if (res?.ok) {
+        const data = (await res.json()) as { keys?: VaultKeyEntry[] };
+        for (const k of data.keys ?? []) {
+          const scope = k.scope ?? "personal";
+          byKey.set(`${scope}:${k.key}`, { ...k, scope });
+        }
+      }
     }
   } catch {
     /* vault unavailable — sessionStorage only */
   }
   return [...byKey.values()];
+}
+
+// ── MCP Server Registry ───────────────────────────────────────────────────────
+
+/** List all MCP servers (admin). Returns full rows including server-side secrets. */
+export async function listMcpServers(): Promise<McpServer[]> {
+  const res = await req("/v1/mcp/server");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+/**
+ * List MCP servers for the user connect flow via the public hub.
+ * Server-side secrets (credentials, static_headers, env) are stripped by the backend.
+ */
+export async function listPublicMcpServers(): Promise<McpServer[]> {
+  const res = await req("/public/mcp_hub");
+  const data = await jsonOrThrow<{ data: McpServer[] }>(res);
+  return data.data ?? [];
+}
+
+
+/** Create an MCP server (admin). */
+export async function createMcpServer(input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Update an MCP server (admin). */
+export async function updateMcpServer(server_id: string, input: Partial<McpServer>): Promise<McpServer> {
+  const res = await req("/v1/mcp/server", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...input, server_id }),
+  });
+  return jsonOrThrow<McpServer>(res);
+}
+
+/** Delete an MCP server (admin). */
+export async function deleteMcpServer(server_id: string): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}`, { method: "DELETE" }),
+  );
+}
+
+export interface McpToolDef {
+  name: string;
+  description?: string | null;
+  inputSchema?: unknown;
+}
+
+/** List the tools exposed by an existing (saved) MCP server. */
+export async function listMcpServerTools(server_id: string): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`);
+  const data = await jsonOrThrow<{ tools?: McpToolDef[]; data?: McpToolDef[] }>(res);
+  return data.tools ?? data.data ?? [];
+}
+
+/** Test tools discovery with caller-supplied variable values (for admin test panel). */
+export async function testMcpServerTools(
+  server_id: string,
+  variables: Record<string, string>,
+): Promise<McpToolDef[]> {
+  const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ variables }),
+  });
+  const data = await jsonOrThrow<{ tools?: McpToolDef[] }>(res);
+  return data.tools ?? [];
+}
+
+/** Discover tools from an arbitrary MCP server URL via the server-side proxy.
+ *
+ * The server performs variable substitution in the URL and header values before
+ * calling the upstream MCP server, so CORS and private API keys are never
+ * exposed to the browser.
+ */
+export async function discoverMcpToolsFromUrl(
+  url: string,
+  staticHeaders: Record<string, string> = {},
+  variables: Record<string, string> = {},
+): Promise<McpToolDef[]> {
+  const res = await req("/v1/mcp/discover", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url, static_headers: staticHeaders, variables }),
+  });
+  const data = await jsonOrThrow<{ tools?: McpToolDef[] }>(res);
+  return data.tools ?? [];
+}
+
+/** Store a user credential for a BYOK MCP server. */
+export async function storeMcpUserCredential(
+  server_id: string,
+  credential: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-user-id": user_id },
+      body: JSON.stringify({ credential }),
+    }),
+  );
+}
+
+/** Store a per-user variable for a BYOK MCP server in the vault.
+ *  Key format: `mcp_var:{server_id}:{var_name}`, scope "personal". */
+export async function storeMcpVarCredential(
+  server_id: string,
+  var_name: string,
+  value: string,
+  user_id = "default",
+): Promise<void> {
+  const res = await req(`/api/vault/${encodeURIComponent(user_id)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      key: `mcp_var:${server_id}:${var_name}`,
+      value,
+      scope: "personal",
+    }),
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+}
+
+/** Delete a user credential for an MCP server. */
+export async function deleteMcpUserCredential(
+  server_id: string,
+  user_id = "default",
+): Promise<void> {
+  await jsonOrThrow(
+    await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/user-credential`, {
+      method: "DELETE",
+      headers: { "x-user-id": user_id },
+    }),
+  );
+}
+
+/** List the user's connected MCP servers. */
+export async function listMcpUserCredentials(
+  user_id = "default",
+): Promise<{ server_id: string; updated_at?: number }[]> {
+  const res = await req("/v1/mcp/user-credentials", {
+    headers: { "x-user-id": user_id },
+  });
+  const data = await jsonOrThrow<{ data: { server_id: string; updated_at?: number }[] }>(res);
+  return data.data ?? [];
+}
+
+// ── Rules CRUD (DB-backed, /api/rules) ───────────────────────────────────────
+// Rules are reusable Markdown instructions persisted in the harness DB and
+// attached to agents via agents.rule_ids.
+
+export async function listRules(): Promise<Rule[]> {
+  const res = await req("/api/rules");
+  const data = await jsonOrThrow<{ rules: Rule[] }>(res);
+  return data.rules ?? [];
+}
+
+export async function createRule(input: {
+  name: string;
+  content: string;
+  description?: string | null;
+}): Promise<Rule> {
+  const res = await req("/api/rules", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<Rule>(res);
+}
+
+export async function getRule(id: string): Promise<Rule> {
+  const res = await req(`/api/rules/${encodeURIComponent(id)}`);
+  return jsonOrThrow<Rule>(res);
+}
+
+export async function updateRule(
+  id: string,
+  fields: { name?: string; description?: string | null; content?: string },
+): Promise<Rule> {
+  const res = await req(`/api/rules/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  return jsonOrThrow<Rule>(res);
+}
+
+export async function deleteRule(id: string): Promise<void> {
+  await req(`/api/rules/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 // ── Skills CRUD (DB-backed, /api/skills) ──────────────────────────────────────

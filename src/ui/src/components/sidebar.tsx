@@ -12,6 +12,8 @@ import {
   MessageCircle,
   Plus,
   Puzzle,
+  ScrollText,
+  Server,
   ServerCog,
   Settings,
   ShieldCheck,
@@ -139,6 +141,12 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           icon: ServerCog,
           active: (path) => path.startsWith("/runtimes"),
         },
+        {
+          label: "MCP Servers",
+          href: "/mcp-servers/",
+          icon: Server,
+          active: (path) => path.startsWith("/mcp-servers"),
+        },
       ],
     },
     {
@@ -177,6 +185,12 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           href: "/skills/",
           icon: FileText,
           active: (path) => path.startsWith("/skills"),
+        },
+        {
+          label: "Rules",
+          href: "/rules/",
+          icon: ScrollText,
+          active: (path) => path.startsWith("/rules"),
         },
         {
           label: "Vault",

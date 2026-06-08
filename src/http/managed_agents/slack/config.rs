@@ -3,17 +3,18 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
+    db::credentials,
     db::managed_agents::registry::{
         self,
         schema::{ManagedAgentRow, UpdateManagedAgent},
     },
     errors::GatewayError,
-    proxy::{state::AppState, vault},
+    proxy::{credential_crypto, state::AppState, vault},
 };
 
 use super::types::{SlackAgentConfig, DEFAULT_VAULT_USER};
 
-pub(super) async fn load_agent(
+pub(crate) async fn load_agent(
     pool: &PgPool,
     agent_id: &str,
 ) -> Result<ManagedAgentRow, GatewayError> {
@@ -35,23 +36,51 @@ pub(crate) fn slack_config(agent: &ManagedAgentRow) -> Result<SlackAgentConfig, 
 
 pub(crate) async fn load_secret(state: &AppState, key: &str) -> Result<String, GatewayError> {
     let pool = state.db.as_ref().ok_or(GatewayError::MissingDatabase)?;
-    vault::load(pool, &state.config, DEFAULT_VAULT_USER, key)
-        .await?
-        .ok_or_else(|| GatewayError::InvalidConfig(format!("vault key is not configured: {key}")))
+    if let Some(value) = vault::load(pool, &state.config, DEFAULT_VAULT_USER, key).await? {
+        return Ok(value);
+    }
+    let legacy_key = format!("vault:{DEFAULT_VAULT_USER}:{key}");
+    if let Some(value) = load_legacy_secret(state, pool, &legacy_key).await? {
+        return Ok(value);
+    }
+    Err(GatewayError::InvalidConfig(format!(
+        "vault key is not configured: {key}"
+    )))
 }
 
-pub(super) fn signing_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+async fn load_legacy_secret(
+    state: &AppState,
+    pool: &PgPool,
+    key: &str,
+) -> Result<Option<String>, GatewayError> {
+    let Some(encrypted) = credentials::resolve_vault_key(pool, key, DEFAULT_VAULT_USER).await?
+    else {
+        return Ok(None);
+    };
+    let encryption_key =
+        credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
+    credential_crypto::decrypt_value(&encrypted, &encryption_key).map(Some)
+}
+
+pub(crate) fn signing_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
     config
         .signing_secret_key
         .clone()
         .unwrap_or_else(|| format!("SLACK_{agent_id}_SIGNING_SECRET"))
 }
 
-pub(super) fn client_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+pub(crate) fn client_secret_key(agent_id: &str, config: &SlackAgentConfig) -> String {
     config
         .client_secret_key
         .clone()
         .unwrap_or_else(|| format!("SLACK_{agent_id}_CLIENT_SECRET"))
+}
+
+pub(crate) fn app_config_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
+    config
+        .app_config_token_key
+        .clone()
+        .unwrap_or_else(|| format!("SLACK_{agent_id}_APP_CONFIG_TOKEN"))
 }
 
 pub(crate) fn bot_token_key(agent_id: &str, config: &SlackAgentConfig) -> String {
@@ -61,7 +90,7 @@ pub(crate) fn bot_token_key(agent_id: &str, config: &SlackAgentConfig) -> String
         .unwrap_or_else(|| format!("SLACK_{agent_id}_BOT_TOKEN"))
 }
 
-pub(super) async fn update_slack_config(
+pub(crate) async fn update_slack_config(
     pool: &PgPool,
     agent: &ManagedAgentRow,
     patch: Value,
@@ -87,13 +116,14 @@ pub(super) async fn update_slack_config(
             description: None,
             harness: None,
             skill_ids: None,
+            rule_ids: None,
         },
     )
     .await?;
     Ok(())
 }
 
-pub(super) fn provider_id_for(agent_id: &str) -> String {
+pub(crate) fn provider_id_for(agent_id: &str) -> String {
     let mut output = String::new();
     let mut last_dash = false;
     for ch in agent_id.to_lowercase().chars() {

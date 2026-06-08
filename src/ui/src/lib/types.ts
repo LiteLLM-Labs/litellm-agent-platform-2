@@ -94,7 +94,10 @@ export interface Agent {
   owner_id?: string | null;
   /** IDs of DB-backed skills attached to this agent (agents.skill_ids). */
   skill_ids?: string[];
+  /** IDs of DB-backed rules attached to this agent (agents.rule_ids). */
+  rule_ids?: string[];
   vault_keys?: string[];
+  config?: Record<string, unknown>;
   created_at?: number;
   [k: string]: unknown;
 }
@@ -139,6 +142,17 @@ export interface Skill {
   created_at: number;
 }
 
+/** A reusable, DB-backed Markdown rule attachable to an agent. */
+export interface Rule {
+  id: string;
+  name: string;
+  description: string | null;
+  content: string;
+  owner_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 /** A durable key→value note an agent has stored in its memory. */
 export interface Memory {
   id: string;
@@ -148,6 +162,27 @@ export interface Memory {
   always_on?: boolean | number;
   created_at: number;
   updated_at: number;
+}
+
+export interface McpServer {
+  server_id: string;
+  server_name?: string | null;
+  alias?: string | null;
+  description?: string | null;
+  instructions?: string | null;
+  url?: string | null;
+  transport: string;
+  auth_type?: string | null;
+  is_byok: boolean;
+  byok_description?: string[];
+  byok_api_key_help_url?: string | null;
+  allowed_tools?: string[];
+  available_on_public_internet: boolean;
+  approval_status?: string | null;
+  status?: string | null;
+  created_at?: number | null;
+  updated_at?: number | null;
+  [k: string]: unknown;
 }
 
 export interface SpendLog {

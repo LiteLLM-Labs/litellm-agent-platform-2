@@ -64,7 +64,7 @@ export default function VaultPage() {
   const globalKeys = keys?.filter((k) => k.scope === "global" && k.source !== "env") ?? [];
   const personalKeys = keys?.filter((k) => k.scope === "personal" && k.source !== "env") ?? [];
   const envKeys = keys?.filter((k) => k.source === "env") ?? [];
-  const empty = globalKeys.length === 0 && personalKeys.length === 0;
+  const empty = globalKeys.length === 0 && personalKeys.length === 0 && envKeys.length === 0;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

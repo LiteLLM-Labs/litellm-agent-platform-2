@@ -62,14 +62,7 @@ impl RuntimeAdapterRegistry {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
-    fn configure_request(
-        &self,
-        request: reqwest::RequestBuilder,
-        api_key: &str,
-    ) -> reqwest::RequestBuilder;
-
     fn normalize_stream(&self, stream: AgentEventStream) -> AgentEventStream {
         stream
     }
@@ -104,15 +97,29 @@ pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
 
     fn create_agent<'a>(
         &'a self,
-        client: &'a Lap,
+        _client: &'a Lap,
         params: CreateAgentParams,
-    ) -> AdapterFuture<'a, ManagedAgent>;
+    ) -> AdapterFuture<'a, ManagedAgent> {
+        let runtime = params.lap_agent_runtime;
+        Box::pin(async move {
+            Err(AgentSdkError::InvalidRequest(format!(
+                "agents.create is not supported for {runtime}"
+            )))
+        })
+    }
 
     fn create_environment<'a>(
         &'a self,
-        client: &'a Lap,
+        _client: &'a Lap,
         params: CreateEnvironmentParams,
-    ) -> AdapterFuture<'a, Environment>;
+    ) -> AdapterFuture<'a, Environment> {
+        let runtime = params.lap_agent_runtime;
+        Box::pin(async move {
+            Err(AgentSdkError::InvalidRequest(format!(
+                "environments.create is not supported for {runtime}"
+            )))
+        })
+    }
 
     fn create_session<'a>(
         &'a self,
@@ -132,4 +139,12 @@ pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
         client: &'a Lap,
         session_id: &'a str,
     ) -> AdapterFuture<'a, AgentEventStream>;
+
+    fn list_events<'a>(
+        &'a self,
+        _client: &'a Lap,
+        _session_id: &'a str,
+    ) -> AdapterFuture<'a, Value> {
+        Box::pin(async { Ok(serde_json::json!({ "data": [] })) })
+    }
 }

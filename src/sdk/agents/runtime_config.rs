@@ -48,10 +48,7 @@ impl RuntimeConfig {
         }
     }
 
-    pub(super) fn authorize_opencode_bearer(
-        &self,
-        request: RequestBuilder,
-    ) -> Option<RequestBuilder> {
+    pub(super) fn fallback_authorize(&self, request: RequestBuilder) -> Option<RequestBuilder> {
         match &self.auth {
             RuntimeAuth::OpenCode {
                 bearer_token: Some(api_key),

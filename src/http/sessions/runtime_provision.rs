@@ -20,8 +20,8 @@ use crate::{
 use super::{
     runtime::CreatedRuntimeSession,
     runtime_inputs::{
-        agent_metadata, agent_model, mcp_servers, provider_system, session_metadata,
-        workspace_from_env,
+        agent_metadata, agent_model, integration_mcp_toolsets, mcp_servers, provider_system,
+        session_metadata, workspace_from_env,
     },
     runtime_sdk::agent_sdk_error,
 };
@@ -121,6 +121,7 @@ async fn create_provider_agent(
                 tools.extend(crate::http::platform_mcps::platform_mcp_toolsets(
                     &created.agent.config,
                 ));
+                tools.extend(integration_mcp_toolsets(&created.agent.config));
                 tools
             },
             mcp_servers: mcp_servers(state, &created.agent)?,

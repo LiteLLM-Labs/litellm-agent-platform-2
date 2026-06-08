@@ -2,10 +2,11 @@ use serde_json::{json, Value};
 
 use super::{
     super::{request_json, AppFixture},
-    slack_helpers::assert_slack_api_call_count,
+    slack_helpers::{assert_slack_api_call_count, slack_api_call_count},
 };
 
 pub async fn enable_and_assert_slack_messages(fixture: &AppFixture, agent_id: &str) {
+    let post_baseline = slack_api_call_count(fixture, "/chat.postMessage").await;
     request_json(
         fixture.app.clone(),
         "PATCH",
@@ -52,7 +53,7 @@ pub async fn enable_and_assert_slack_messages(fixture: &AppFixture, agent_id: &s
 
     assert_slack_api_call_count(fixture, "/users.lookupByEmail", 1).await;
     assert_slack_api_call_count(fixture, "/conversations.open", 1).await;
-    assert_slack_api_call_count(fixture, "/chat.postMessage", 4).await;
+    assert_slack_api_call_count(fixture, "/chat.postMessage", post_baseline + 2).await;
     disable_slack_mcp(fixture, agent_id).await;
 }
 

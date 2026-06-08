@@ -8,44 +8,80 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { IntegrationDialog } from "@/components/integration-dialog";
 import { BrandIcon } from "@/components/brand-icons";
-import { listIntegrationKeys } from "@/lib/api";
-import {
-  integrationsByCategory,
-  type Integration,
-} from "@/lib/integrations";
+import { listPublicMcpServers, listMcpUserCredentials } from "@/lib/api";
+import type { McpServer } from "@/lib/types";
+
+/** Derive a display name from an MCP server record. */
+function serverDisplayName(s: McpServer): string {
+  return s.server_name ?? s.alias ?? s.server_id;
+}
+
+/** Derive the category to group this server under. */
+function serverCategory(s: McpServer): string {
+  const info = s.mcp_info as { category?: string } | undefined;
+  return info?.category ?? "Other";
+}
+
+/** Priority order for category headers. Unlisted categories fall to the end. */
+const CATEGORY_ORDER = ["Google", "Microsoft", "Other"];
+
+function categoryIndex(cat: string): number {
+  const i = CATEGORY_ORDER.indexOf(cat);
+  return i === -1 ? CATEGORY_ORDER.length : i;
+}
+
+function groupByCategory(servers: McpServer[]): [string, McpServer[]][] {
+  const groups = new Map<string, McpServer[]>();
+  for (const s of servers) {
+    const cat = serverCategory(s);
+    const arr = groups.get(cat) ?? [];
+    arr.push(s);
+    groups.set(cat, arr);
+  }
+  return [...groups.entries()].sort(
+    (a, b) => categoryIndex(a[0]) - categoryIndex(b[0]),
+  );
+}
 
 export default function IntegrationsPage() {
+  const [servers, setServers] = useState<McpServer[]>([]);
   const [connected, setConnected] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState<Integration | null>(null);
+  const [active, setActive] = useState<McpServer | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const refresh = async () => {
-    const keys = await listIntegrationKeys();
-    setConnected(new Set(keys));
+    const [srvs, creds] = await Promise.all([
+      listPublicMcpServers().catch(() => [] as McpServer[]),
+      listMcpUserCredentials().catch(() => [] as { server_id: string }[]),
+    ]);
+    setServers(srvs);
+    setConnected(new Set(creds.map((c) => c.server_id)));
+    setLoading(false);
   };
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, []);
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return integrationsByCategory()
+    return groupByCategory(servers)
       .map(([cat, items]) => {
         const filtered = q
           ? items.filter(
               (it) =>
-                it.name.toLowerCase().includes(q) ||
-                it.description.toLowerCase().includes(q),
+                serverDisplayName(it).toLowerCase().includes(q) ||
+                (it.description ?? "").toLowerCase().includes(q),
             )
           : items;
-        return [cat, filtered] as [string, Integration[]];
+        return [cat, filtered] as [string, McpServer[]];
       })
       .filter(([, items]) => items.length > 0);
-  }, [query]);
+  }, [query, servers]);
 
-  const openDialog = (it: Integration) => {
+  const openDialog = (it: McpServer) => {
     setActive(it);
     setDialogOpen(true);
   };
@@ -77,23 +113,20 @@ export default function IntegrationsPage() {
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search…"
+                placeholder="Search..."
                 className="h-9 pl-8"
               />
             </div>
 
-            {groups.length === 0 && (
-              <div className="rounded-xl border border-dashed border-border py-12 text-center">
-                <Puzzle className="mx-auto mb-2 size-6 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  No integrations match &ldquo;{query}&rdquo;.
-                </p>
-                <button
-                  onClick={() => setQuery("")}
-                  className="mt-3 text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                >
-                  Clear search
-                </button>
+            {!loading && servers.length === 0 && (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                No integrations available. Ask your admin to add MCP servers.
+              </div>
+            )}
+
+            {!loading && servers.length > 0 && groups.length === 0 && (
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                No integrations match &ldquo;{query}&rdquo;.
               </div>
             )}
 
@@ -105,19 +138,20 @@ export default function IntegrationsPage() {
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {items.map((it) => {
-                      const isConnected = connected.has(it.envKey);
+                      const isConnected = connected.has(it.server_id);
+                      const displayName = serverDisplayName(it);
                       return (
                         <div
-                          key={it.id}
-                          className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/30"
+                          key={it.server_id}
+                          className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition-colors hover:border-foreground/20"
                         >
                           <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40">
-                            <BrandIcon id={it.id} className="size-5" />
+                            <BrandIcon id={it.server_id} className="size-5" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="font-medium leading-none">{it.name}</div>
+                            <div className="font-medium leading-none">{displayName}</div>
                             <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">
-                              {it.description}
+                              {it.description ?? ""}
                             </p>
                           </div>
                           <Button
@@ -146,9 +180,9 @@ export default function IntegrationsPage() {
       </div>
 
       <IntegrationDialog
-        integration={active}
+        server={active}
         open={dialogOpen}
-        connected={active ? connected.has(active.envKey) : false}
+        connected={active ? connected.has(active.server_id) : false}
         onOpenChange={setDialogOpen}
         onChange={refresh}
       />

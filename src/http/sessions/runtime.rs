@@ -4,13 +4,16 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
-    db::managed_agents::{
-        registry::{self, schema::ManagedAgentRow},
-        sessions::{self, schema::SessionRow},
+    db::{
+        credentials,
+        managed_agents::{
+            registry::{self, schema::ManagedAgentRow},
+            sessions::{self, schema::SessionRow},
+        },
     },
     errors::GatewayError,
-    http::agent_runtimes::{load_credential, RuntimeCredential},
-    proxy::state::AppState,
+    http::agent_runtimes::RuntimeCredential,
+    proxy::{credential_crypto, state::AppState},
     sdk::providers,
 };
 
@@ -63,6 +66,7 @@ pub(crate) async fn create_runtime_session_for_agent(
     state: Arc<AppState>,
     pool: &PgPool,
     agent_id: String,
+    runtime: String,
     title: String,
     prompt: String,
     environment: Value,
@@ -75,7 +79,7 @@ pub(crate) async fn create_runtime_session_for_agent(
             harness: None,
             agent: Some(agent_id.clone()),
             agent_id: Some(agent_id),
-            runtime: Some(crate::sdk::agents::CLAUDE_MANAGED_AGENTS.to_owned()),
+            runtime: Some(runtime),
             prompt: Some(prompt),
             environment: Some(environment),
             timezone: None,
@@ -93,15 +97,11 @@ async fn create_runtime_session_row(
 ) -> Result<CreatedRuntimeSession, GatewayError> {
     let runtime = validated_runtime(&input)?;
     let mut agent = load_agent(pool, &input).await?;
-    // Compose the agent's attached skills into its system prompt so the runtime
-    // provider (e.g. claude_managed_agents) receives skill content downstream.
-    // Without this the provider agent is created with the bare base system and
-    // skills are silently dropped.
     agent.system =
         crate::db::managed_agents::skills::compose::compose_agent_system_prompt(pool, &agent)
             .await?;
-    let credential = load_credential(state, &runtime).await?;
-    let environment = input.environment.clone().unwrap_or_else(|| json!({}));
+    let credential = crate::http::agent_runtimes::load_credential(state, &runtime).await?;
+    let stored_environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
     let initial_user_prompt = input
         .prompt
@@ -117,18 +117,20 @@ async fn create_runtime_session_row(
             title: &title,
             timezone: input.timezone.as_deref().or(input.tz.as_deref()),
             runtime_agent_ref_id: None,
-            environment: environment.clone(),
+            environment: stored_environment.clone(),
             provider_session_id: None,
             provider_run_id: None,
         },
     )
     .await?;
+    let mut provision_environment = stored_environment;
+    resolve_agent_vault_keys(state, pool, &agent, &mut provision_environment).await?;
     let prompt = runtime_prompt(input.prompt, &agent);
     Ok(CreatedRuntimeSession {
         runtime,
         agent,
         credential,
-        environment,
+        environment: provision_environment,
         initial_user_prompt,
         prompt,
         row,
@@ -191,4 +193,36 @@ fn runtime_prompt(prompt: Option<String>, agent: &ManagedAgentRow) -> String {
     prompt
         .filter(|prompt| !prompt.trim().is_empty())
         .unwrap_or_else(|| format!("Start a session for {}.", agent.name))
+}
+
+async fn resolve_agent_vault_keys(
+    state: &AppState,
+    pool: &PgPool,
+    agent: &ManagedAgentRow,
+    environment: &mut Value,
+) -> Result<(), GatewayError> {
+    let key_names: Vec<String> = agent
+        .vault_keys
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    if key_names.is_empty() {
+        return Ok(());
+    }
+    let enc_key =
+        credential_crypto::encryption_key(state.config.general_settings.master_key.as_deref())?;
+    let owner_id = agent.owner_id.as_deref().unwrap_or("");
+    let env_obj = environment.as_object_mut().ok_or_else(|| {
+        GatewayError::InvalidJsonMessage("environment must be an object".to_owned())
+    })?;
+    for key_name in &key_names {
+        if let Some(encrypted) = credentials::resolve_vault_key(pool, key_name, owner_id).await? {
+            if let Ok(plaintext) = credential_crypto::decrypt_value(&encrypted, &enc_key) {
+                env_obj.insert(key_name.clone(), serde_json::Value::String(plaintext));
+            }
+        }
+    }
+    Ok(())
 }

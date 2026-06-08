@@ -1,8 +1,12 @@
 use axum::http::StatusCode;
 use hmac::{Hmac, Mac};
+use serde_json::json;
 use sha2::Sha256;
 
-use super::super::{request_with_headers, AppFixture};
+use super::{
+    super::{request_json, request_with_headers, AppFixture},
+    slack_url_verification::assert_url_verification,
+};
 
 pub(super) async fn assert_slack_api_called(fixture: &AppFixture, path: &str) {
     for _ in 0..20 {
@@ -27,6 +31,35 @@ pub(super) async fn assert_slack_api_call_count(fixture: &AppFixture, path: &str
         expected,
         "unexpected call count for {path}"
     );
+}
+
+pub(super) async fn assert_legacy_prefixed_slack_secret(fixture: &AppFixture, agent_id: &str) {
+    let key = format!("SLACK_{agent_id}_SIGNING_SECRET");
+    request_json(
+        fixture.app.clone(),
+        "DELETE",
+        &format!("/api/vault/default/{key}"),
+        None,
+    )
+    .await;
+    request_json(
+        fixture.app.clone(),
+        "POST",
+        "/api/vault/default",
+        Some(json!({
+            "key": format!("vault:default:{key}"),
+            "value": "slack-secret",
+        })),
+    )
+    .await;
+    assert_url_verification(fixture, agent_id).await;
+    request_json(
+        fixture.app.clone(),
+        "POST",
+        "/api/vault/default",
+        Some(json!({ "key": key, "value": "slack-secret" })),
+    )
+    .await;
 }
 
 pub(super) fn provider_id_for(agent_id: &str) -> String {
@@ -88,7 +121,7 @@ pub(super) fn now_seconds() -> i64 {
         .as_secs() as i64
 }
 
-async fn slack_api_call_count(fixture: &AppFixture, path: &str) -> usize {
+pub(super) async fn slack_api_call_count(fixture: &AppFixture, path: &str) -> usize {
     fixture
         .slack
         .received_requests()
