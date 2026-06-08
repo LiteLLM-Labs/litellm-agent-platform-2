@@ -95,13 +95,13 @@ export function translateOpencodeEvent(raw, ctx) {
   if (sid != null && sid !== ctx.sessionId) return null;
 
   switch (raw.type) {
-    case "message.part.delta":
-    case "message.part.updated": {
+    // Stream assistant tokens from deltas only. `message.part.updated` is
+    // skipped: it fires for the echoed user message and again as the final
+    // assistant duplicate, so emitting it would double-send and echo input.
+    case "message.part.delta": {
       const text =
         props.delta?.text ||
         (typeof props.delta === "string" ? props.delta : "") ||
-        props.part?.text ||
-        props.text ||
         "";
       if (!text) return null;
       return {
@@ -112,6 +112,8 @@ export function translateOpencodeEvent(raw, ctx) {
         },
       };
     }
+    case "message.part.updated":
+      return null;
     case "session.status": {
       const status = props.status?.type;
       if (status === "busy") {

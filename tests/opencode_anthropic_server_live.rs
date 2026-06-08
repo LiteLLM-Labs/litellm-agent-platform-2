@@ -31,7 +31,11 @@ use serde_json::json;
 async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
     let base =
         std::env::var("OPENCODE_ANTHROPIC_BASE").unwrap_or_else(|_| "http://localhost:8080".into());
-    println!("[live] target server: {base}");
+    // Model the agent runs. Against a gateway-backed server use the gateway
+    // provider id, e.g. "litellm/claude-sonnet-4-5".
+    let model = std::env::var("OPENCODE_ANTHROPIC_MODEL")
+        .unwrap_or_else(|_| "litellm/claude-sonnet-4-5".into());
+    println!("[live] target server: {base} | model: {model}");
 
     // Construct the SDK pointed at the local server. No opencode-specific config — just
     // the Anthropic base URL + key. The server speaks the Anthropic managed-agents spec.
@@ -49,7 +53,7 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
             lap_provider_options: None,
             name: "Live SDK Test".into(),
-            model: AgentModel::from("anthropic/claude-sonnet-4-5"),
+            model: AgentModel::from(model.as_str()),
             system: "You are a terse assistant.".into(),
             description: None,
             tools: Vec::new(),
@@ -106,7 +110,7 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             SendEventsParams {
                 events: vec![json!({
                     "type": "user.message",
-                    "content": [{ "type": "text", "text": "Say hello in three words." }]
+                    "content": [{ "type": "text", "text": "Name the three primary colors, comma separated." }]
                 })],
             },
         )
@@ -127,11 +131,29 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
     // 6. Read any events that arrive, with a per-read timeout. We do not require a
     //    specific assistant message — token output needs a provider key on the server.
     let mut received = 0usize;
+    let mut assistant_text = String::new();
     loop {
-        match tokio::time::timeout(Duration::from_secs(20), stream.next()).await {
+        match tokio::time::timeout(Duration::from_secs(30), stream.next()).await {
             Ok(Some(Ok(event))) => {
                 received += 1;
                 println!("[live] event #{received}: event_type={}", event.event_type);
+                // For agent.message events, surface the actual model text so we can see
+                // the real assistant response (requires a provider key on the server).
+                if event.event_type == "agent.message" {
+                    if let Some(content) = event.data.get("content").and_then(|c| c.as_array()) {
+                        for block in content {
+                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                assistant_text.push_str(text);
+                                print!("{text}");
+                            }
+                        }
+                    }
+                }
+                // Stop once the turn is done.
+                if event.event_type == "session.status_idle" {
+                    println!("[live] session idle — turn complete");
+                    break;
+                }
             }
             Ok(Some(Err(err))) => {
                 println!("[live] stream yielded an error (acceptable for plumbing test): {err}");
@@ -148,6 +170,9 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
         }
     }
 
+    if !assistant_text.trim().is_empty() {
+        println!("\n[live] >>> ASSISTANT SAID: {}", assistant_text.trim());
+    }
     println!(
         "[live] SUCCESS: SDK claude_managed_agents path drove the opencode-behind-Anthropic \
          server unchanged — agent={}, environment={}, session={}, stream connected, \

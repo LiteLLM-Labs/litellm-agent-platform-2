@@ -6,7 +6,7 @@ import crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
 
 import { createStore } from "./store.mjs";
-import { startOpencode, provisionAgent, ocFetch } from "./opencode.mjs";
+import { startOpencode, provisionAgent, ocFetch, writeProviderConfig } from "./opencode.mjs";
 import {
   modelId,
   agentResponse,
@@ -24,6 +24,25 @@ const DB_PATH = process.env.DB_PATH || "/data/agents.db";
 mkdirSync(WORKDIR, { recursive: true });
 
 const store = createStore(DB_PATH);
+
+// Optionally route opencode's model calls through a LiteLLM gateway. When
+// LITELLM_BASE_URL + LITELLM_API_KEY are set, opencode addresses models as
+// "litellm/<model>" (e.g. litellm/claude-sonnet-4-5).
+const LITELLM_BASE_URL = process.env.LITELLM_BASE_URL || null;
+const LITELLM_API_KEY = process.env.LITELLM_API_KEY || null;
+const LITELLM_MODELS = (process.env.LITELLM_MODELS || "claude-sonnet-4-5,gpt-5.5")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+if (LITELLM_BASE_URL && LITELLM_API_KEY) {
+  await writeProviderConfig(WORKDIR, {
+    id: "litellm",
+    baseURL: LITELLM_BASE_URL,
+    apiKey: LITELLM_API_KEY,
+    models: LITELLM_MODELS,
+  });
+  console.log(`[boot] litellm provider configured -> ${LITELLM_BASE_URL} (models: ${LITELLM_MODELS.join(", ")})`);
+}
 
 console.log(`[boot] starting opencode on port ${OC_PORT} (cwd=${WORKDIR})`);
 const oc = await startOpencode({ port: OC_PORT, cwd: WORKDIR });
@@ -43,6 +62,16 @@ app.use((req, _res, next) => {
   req.anthropicBeta = req.get("anthropic-beta") || null;
   next();
 });
+
+// opencode's message API wants the model as { providerID, modelID }, not a
+// "provider/model" string. Split on the first slash. Returns undefined for a
+// bare model (opencode then falls back to its default).
+function opencodeModel(model) {
+  if (!model || typeof model !== "string") return undefined;
+  const i = model.indexOf("/");
+  if (i < 0) return undefined;
+  return { providerID: model.slice(0, i), modelID: model.slice(i + 1) };
+}
 
 // Wrap async handlers so throws become 500 {error}.
 const wrap = (fn) => (req, res) =>
@@ -134,13 +163,23 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: agent?.model || undefined,
+      model: opencodeModel(agent?.model),
       system: agent?.system || undefined,
       parts,
     }),
   });
 
   res.status(202).json({ ok: true });
+}));
+
+// Interrupt the in-flight turn — proxies opencode's session abort.
+app.post("/v1/sessions/:id/abort", wrap(async (req, res) => {
+  const r = await ocFetch(oc.baseUrl, `/session/${req.params.id}/abort`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  res.status(r.ok ? 200 : r.status).json({ aborted: r.ok });
 }));
 
 // Historical events (stub).

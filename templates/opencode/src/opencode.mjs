@@ -6,6 +6,30 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+// Write an opencode provider into <cwd>/opencode.json so opencode routes model
+// calls through a LiteLLM gateway (via opencode's native Anthropic adapter,
+// which POSTs to {baseURL}/messages). Models are addressed as "<id>/<model>".
+// Merges into any existing config (preserves mcp). No-op if baseURL/apiKey unset.
+export async function writeProviderConfig(cwd, { id = "litellm", name = "LiteLLM", baseURL, apiKey, models = [] }) {
+  if (!baseURL || !apiKey) return;
+  const file = path.join(cwd, "opencode.json");
+  let obj = {};
+  try {
+    obj = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    obj = {};
+  }
+  obj.provider = obj.provider || {};
+  obj.provider[id] = {
+    npm: "@ai-sdk/anthropic",
+    name,
+    options: { baseURL, apiKey },
+    models: Object.fromEntries(models.map((m) => [m, {}])),
+  };
+  await mkdir(cwd, { recursive: true });
+  await writeFile(file, JSON.stringify(obj, null, 2));
+}
+
 // Spawns `opencode serve`, returns once health check passes.
 // Returns { baseUrl, proc, stop() }
 export async function startOpencode({ port = 4096, cwd, env } = {}) {

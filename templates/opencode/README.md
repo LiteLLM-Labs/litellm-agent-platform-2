@@ -213,7 +213,41 @@ These map straight onto opencode config the server provisions per session:
 | `OPENCODE_PORT` | `4096` | port the child `opencode serve` binds |
 | `WORKDIR` | `/tmp/opencode-workspace` | workspace where per-agent config is provisioned |
 | `DB_PATH` | `/data/agents.db` | SQLite file for agents/environments/sessions |
-| `ANTHROPIC_API_KEY` | — | model provider key opencode uses to answer prompts |
+| `ANTHROPIC_API_KEY` | — | model provider key opencode uses to answer prompts (native Anthropic) |
+| `LITELLM_BASE_URL` | — | route models through a LiteLLM gateway instead (e.g. `https://your-gw/v1`) |
+| `LITELLM_API_KEY` | — | LiteLLM gateway key |
+| `LITELLM_MODELS` | `claude-sonnet-4-5,gpt-5.5` | gateway models to register |
+
+When `LITELLM_BASE_URL` + `LITELLM_API_KEY` are set, the server configures an
+opencode provider `litellm` (via opencode's native Anthropic adapter pointed at
+`{LITELLM_BASE_URL}/messages`). Address models as `litellm/<model>`, e.g. an
+agent with `"model": "litellm/claude-sonnet-4-5"`.
+
+## Interrupting a turn — `POST /v1/sessions/:id/abort`
+
+Stops the in-flight generation (proxies opencode's session abort):
+
+```bash
+curl -X POST $BASE/v1/sessions/$SID/abort -H "x-api-key: k"   # -> {"aborted":true}
+```
+
+The event stream stops emitting `agent.message` and settles on
+`session.status_idle`.
+
+## Verified scenarios
+
+Driven through the **LAP SDK** (`claude_managed_agents`, only `api_base`/`api_key`
+pointed here) against a LiteLLM-gateway-backed server:
+
+- **query → response** — `Name the three primary colors` → streamed
+  `agent.message` deltas → `Red, yellow, blue.` → `session.status_idle`.
+- **query → interrupt** — a 500-word essay request streamed
+  (`# The Rise, Glory, and Fall of the Roman Empire …`), then `POST …/abort`
+  → `{"aborted":true}` and **zero further tokens**; the turn ended.
+
+Reproduce the SDK path with:
+`cargo test --test opencode_anthropic_server_live -- --ignored --nocapture`
+(set `OPENCODE_ANTHROPIC_BASE` + `OPENCODE_ANTHROPIC_MODEL`).
 
 ## Deploy to Render
 
