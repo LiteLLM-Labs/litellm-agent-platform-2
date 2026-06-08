@@ -1,20 +1,34 @@
-# opencode-agent-server
+# opencode behind the Anthropic Managed Agents API
 
-A durable, opencode-compatible agent server. Register agents once (system prompt, model, tool permissions, MCP servers); run sessions against them over HTTP.
+This server exposes [opencode](https://opencode.ai) through the **Anthropic Managed Agents API spec**. Any client that already speaks that spec — including the **LiteLLM Agent Platform (LAP) SDK's `claude_managed_agents` runtime** — drives it with **zero code changes**: just point `api_base` + `api_key` at this server. Under the hood the server translates Anthropic Managed Agents calls into opencode: it spawns `opencode serve`, provisions per-agent config, proxies prompts, and translates opencode's SSE events back into Anthropic event shapes.
+
+In other words: to the SDK this looks exactly like Anthropic's Managed Agents service. opencode is an implementation detail nobody on the client side ever sees.
+
+## Why this design
+
+The whole point is that the **front speaks the Anthropic Managed Agents spec**, so a client SDK needs no opencode-specific code — and the SDK's mature, already-shipped `claude_managed_agents` path is reused verbatim, no second runtime, no adapter, no fork. Every method the SDK already has maps cleanly onto opencode:
+
+- `create_agent` → durable agent record + a provisioned `.opencode/agent/<id>.md` (system prompt, model, permissions).
+- `create_environment` → a named workspace config (optionally a git `repository`/`ref`).
+- `create_session` → boots/attaches the child opencode for that agent and opens an opencode session.
+- `events().send(...)` → forwards a `user.message` to opencode as a prompt.
+- `events().stream(...)` → opencode's SSE is translated into Anthropic event types (`agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`, `session.status_*`, `session.error`).
+
+Because the contract is identical, you change only `api_base`/`api_key` and the existing managed-agents code path drives opencode.
 
 ## Architecture
 
-- **Wrapper server** — a small Express app that exposes a product API for agents + sessions and proxies session/message/event traffic to opencode, injecting per-agent system prompt, model, and tool permissions.
-- **Durable agent store** — agent definitions and session→agent bindings persisted in SQLite (`better-sqlite3`, WAL) at `DB_PATH`, so agents survive restarts.
-- **Child opencode** — the server boots one `opencode serve` child and provisions per-agent config (an agent `.md` file plus `opencode.json` MCP entries) into the workspace before each session.
+- **Anthropic-spec front** — an Express app that implements the Anthropic Managed Agents endpoints (`POST /v1/agents`, `POST /v1/environments`, `POST /v1/sessions`, `POST /v1/sessions/:id/events`, `GET /v1/sessions/:id/events/stream`, …) and honors `x-api-key` / `anthropic-version` / `anthropic-beta: managed-agents-2026-04-01`.
+- **Durable agent store** — agents, environments, and session→agent bindings persisted in SQLite (`better-sqlite3`, WAL) at `DB_PATH`, so agents survive restarts and keep stable `agt_…` / `env_…` / session ids.
+- **Child opencode provisioned per session + SSE translation** — the server boots one `opencode serve` child, provisions per-agent config (an agent `.md` file plus `opencode.json` MCP entries) per session, proxies prompts to it, and rewrites opencode's event stream into Anthropic event frames.
 
 ## Quickstart
 
 ### Docker
 
 ```bash
-docker build -t opencode-agent-server .
-docker run -p 8080:8080 -e ANTHROPIC_API_KEY=sk-... opencode-agent-server
+docker build -t opencode-anthropic-server .
+docker run -p 8080:8080 -e ANTHROPIC_API_KEY=sk-ant-... opencode-anthropic-server
 ```
 
 ### Local (Node 20+)
@@ -28,175 +42,190 @@ npm i -g opencode-ai
 Then:
 
 ```bash
-npm install
-ANTHROPIC_API_KEY=... npm start
+npm install && ANTHROPIC_API_KEY=... npm start
 ```
 
-> **Model provider key required.** To actually answer prompts, the child opencode needs a model provider key in the server's environment (e.g. `ANTHROPIC_API_KEY` for `anthropic/*` models, `OPENAI_API_KEY` for `openai/*`, etc.). Without it, agents register and sessions create fine, but prompts will not produce assistant output.
+> **Model provider key required.** To actually answer prompts, the child opencode needs a model provider key in the server's environment (e.g. `ANTHROPIC_API_KEY` for `anthropic/*` models). Without it, agents/environments/sessions create fine, but prompts won't produce assistant output. This key is the *server's* — it is not the `x-api-key` your clients send.
+
+## The killer demo — the LAP SDK, no new code
+
+The LiteLLM Agent Platform SDK already ships a `claude_managed_agents` runtime that speaks the Anthropic Managed Agents spec. Point it at this server and it drives opencode without a single new line of integration code:
+
+```rust
+let lap = Lap::new(LapConfig {
+    anthropic_api_key: Some("any-key".into()),
+    anthropic_base_url: "https://<this-server>".into(),
+    ..Default::default()
+});
+// runtime: claude_managed_agents
+let agent = lap.beta().agents().create(/* name, model, system */).await?;
+let session = lap.beta().sessions().create(/* agent, environment */).await?;
+lap.beta().sessions().events().send(&session.id, /* user.message */).await?;
+let mut stream = lap.beta().sessions().events().stream(&session.id).await?;
+```
+
+> opencode, driven through the Anthropic Managed Agents SDK path, by changing only `api_base`/`api_key`.
 
 ## API reference
 
-Base URL defaults to `http://localhost:8080`.
+Base URL defaults to `http://localhost:8080`. All `/v1/*` calls honor `x-api-key`, `anthropic-version`, and `anthropic-beta: managed-agents-2026-04-01` (the API key is accepted loosely for the demo).
 
-| Method | Path | Body | Returns |
-| --- | --- | --- | --- |
-| `GET` | `/health` | — | `{ ok: true, opencode: bool }` |
-| `POST` | `/agents` | `{name, system, model, permissions?, mcp_servers?, workspace?}` | agent row `{id:"agt_...", ...}` |
-| `GET` | `/agents` | — | `[agent, ...]` |
-| `GET` | `/agents/:id` | — | agent row |
-| `PATCH` | `/agents/:id` | partial agent fields | updated agent row |
-| `DELETE` | `/agents/:id` | — | `{deleted:true}` |
-| `POST` | `/session` | `{title?, agent:"agt_...", harness?}` | `{id, agent, harness}` |
-| `POST` | `/session/:id/message` | `{model?, parts:[{type:"text",text}]}` | opencode `{info, parts}` (sync) |
-| `POST` | `/session/:id/prompt_async` | same as message | `204 No Content` |
-| `POST` | `/session/:id/abort` | — | opencode abort result |
-| `DELETE` | `/session/:id` | — | opencode delete result |
-| `GET` | `/event` | — | SSE stream (opencode event shapes) |
+### Create an agent — `POST /v1/agents`
 
-### Health
+Body: `{name, model, system, description?, tools?, mcp_servers?, permissions?, metadata?}`. `model` is a string (`"anthropic/claude-sonnet-4-5"`) or `{id}`. Returns a durable agent `{id:"agt_...", type:"agent", name, model:{id}, system, version, created_at, ...}`.
 
 ```bash
-curl -s http://localhost:8080/health
-# {"ok":true,"opencode":true}
-```
-
-### Create an agent
-
-```bash
-curl -s http://localhost:8080/agents \
-  -H 'content-type: application/json' \
+curl -s -X POST "$BASE/v1/agents" \
+  -H "content-type: application/json" \
+  -H "x-api-key: any-key" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: managed-agents-2026-04-01" \
   -d '{
-    "name": "Terse Assistant",
-    "system": "You are a terse assistant.",
+    "name": "Docs Helper",
     "model": "anthropic/claude-sonnet-4-5",
-    "permissions": { "bash": "deny", "edit": "deny" }
+    "system": "You are a terse documentation assistant.",
+    "permissions": { "bash": "ask", "edit": "allow" },
+    "mcp_servers": []
   }'
-# {"id":"agt_...","name":"Terse Assistant","system":"...","model":"...","permissions":{...},"mcp_servers":[],"workspace":null,...}
 ```
 
-### List / get / update / delete agents
+`GET /v1/agents` lists agents; `GET /v1/agents/:id` fetches one.
+
+### Create an environment — `POST /v1/environments`
+
+Body: `{name, config?, description?, scope?}` → `{id:"env_...", type:"environment"}`. `config` may carry a workspace `repository`/`ref`.
 
 ```bash
-curl -s http://localhost:8080/agents
-curl -s http://localhost:8080/agents/agt_abc123
-curl -s -X PATCH http://localhost:8080/agents/agt_abc123 \
-  -H 'content-type: application/json' \
-  -d '{"model":"anthropic/claude-opus-4-1"}'
-curl -s -X DELETE http://localhost:8080/agents/agt_abc123
+curl -s -X POST "$BASE/v1/environments" \
+  -H "content-type: application/json" \
+  -H "x-api-key: any-key" \
+  -d '{
+    "name": "docs-env",
+    "config": { "repository": "https://github.com/acme/docs", "ref": "main" }
+  }'
 ```
 
-### Create a session
+### Create a session — `POST /v1/sessions`
+
+Body: `{agent:"agt_...", environment_id?, title?, metadata?}` → `{id, type:"session", agent, environment_id, status:"running"}`. Provisions opencode for the agent.
 
 ```bash
-curl -s http://localhost:8080/session \
-  -H 'content-type: application/json' \
-  -d '{"agent":"agt_abc123"}'
-# {"id":"ses_...","agent":"agt_abc123","harness":"opencode"}
+curl -s -X POST "$BASE/v1/sessions" \
+  -H "content-type: application/json" \
+  -H "x-api-key: any-key" \
+  -d '{ "agent": "agt_123", "environment_id": "env_123", "title": "hello" }'
 ```
 
-### Send a message (synchronous)
+### Send events (a prompt) — `POST /v1/sessions/:id/events`
 
-Blocks until opencode finishes, then returns the opencode `{info, parts}` shape:
+Body: `{events:[{type:"user.message", content:"..." | [{type:"text",text:"..."}]}]}`. Forwards the prompt to opencode and returns `202 Accepted`; the agent's reply arrives on the SSE stream.
 
 ```bash
-curl -s http://localhost:8080/session/ses_xyz/message \
-  -H 'content-type: application/json' \
-  -d '{"parts":[{"type":"text","text":"Say hello in 3 words."}]}'
+curl -s -X POST "$BASE/v1/sessions/ses_123/events" \
+  -H "content-type: application/json" \
+  -H "x-api-key: any-key" \
+  -d '{ "events": [ { "type": "user.message", "content": [ { "type": "text", "text": "Say hello in 3 words." } ] } ] }'
 ```
 
-### Prompt asynchronously
+### Stream events — `GET /v1/sessions/:id/events/stream`
 
-Returns `204` immediately; observe output on `/event`:
+Server-Sent Events. Frames are `event: <type>\ndata: <json>\n\n`. Anthropic event types emitted:
+
+| Event | Data |
+| --- | --- |
+| `agent.message` | `{content:[{type:"text",text}], model}` |
+| `agent.thinking` | reasoning delta |
+| `agent.tool_use` | tool call |
+| `agent.tool_result` | tool result |
+| `session.status_running` | session became active |
+| `session.status_idle` | turn finished |
+| `session.error` | error payload |
 
 ```bash
-curl -s -X POST http://localhost:8080/session/ses_xyz/prompt_async \
-  -H 'content-type: application/json' \
-  -d '{"parts":[{"type":"text","text":"Say hello in 3 words."}]}'
+curl -sN "$BASE/v1/sessions/ses_123/events/stream" -H "x-api-key: any-key"
 ```
 
-### Stream events (SSE)
+`GET /v1/sessions/:id/events` returns the buffered list as `{data:[...]}`.
 
-A passthrough of opencode's event stream. Filter client-side on `properties.sessionID`:
+### Health — `GET /health`
 
 ```bash
-curl -sN http://localhost:8080/event
+curl -s "$BASE/health"   # {"ok":true,"opencode":true}
 ```
 
-### Abort / delete a session
+## End-to-end (pure curl)
+
+Create an agent → environment → session, open the SSE stream in the background, POST a `user.message`, and watch `agent.message` followed by `session.status_idle`.
 
 ```bash
-curl -s -X POST http://localhost:8080/session/ses_xyz/abort
-curl -s -X DELETE http://localhost:8080/session/ses_xyz
-```
-
-## End-to-end example
-
-```bash
-#!/usr/bin/env bash
 set -euo pipefail
-BASE=${BASE:-http://localhost:8080}
+BASE="${BASE:-http://localhost:8080}"
+H=(-H "content-type: application/json" -H "x-api-key: any-key")
 
-# 1. Create an agent.
-AGENT=$(curl -s "$BASE/agents" \
-  -H 'content-type: application/json' \
-  -d '{"name":"Demo","system":"You are a terse assistant.","model":"anthropic/claude-sonnet-4-5","permissions":{"bash":"deny","edit":"deny"}}')
-AID=$(printf '%s' "$AGENT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
-echo "agent: $AID"
+# 1. create an agent
+aid=$(curl -s "${H[@]}" -X POST "$BASE/v1/agents" \
+  -d '{"name":"E2E","model":"anthropic/claude-sonnet-4-5","system":"You are terse."}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
 
-# 2. Create a session bound to that agent.
-SESSION=$(curl -s "$BASE/session" \
-  -H 'content-type: application/json' \
-  -d "{\"agent\":\"$AID\"}")
-SID=$(printf '%s' "$SESSION" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
-echo "session: $SID"
+# 2. create an environment
+eid=$(curl -s "${H[@]}" -X POST "$BASE/v1/environments" \
+  -d '{"name":"e2e-env","config":{}}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))')
 
-# 3. Subscribe to /event in the background.
-curl -sN "$BASE/event" > /tmp/events.log &
-EV=$!
+# 3. create a session bound to the agent + environment
+sid=$(curl -s "${H[@]}" -X POST "$BASE/v1/sessions" \
+  -d "{\"agent\":\"$aid\",\"environment_id\":\"$eid\",\"title\":\"e2e\"}" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+
+# 4. open the SSE stream in the background
+curl -sN "$BASE/v1/sessions/$sid/events/stream" -H "x-api-key: any-key" &
+sse_pid=$!
 sleep 1
 
-# 4. Prompt asynchronously.
-curl -s -X POST "$BASE/session/$SID/prompt_async" \
-  -H 'content-type: application/json' \
-  -d '{"parts":[{"type":"text","text":"Say hello in 3 words."}]}'
+# 5. send a user.message
+curl -s "${H[@]}" -X POST "$BASE/v1/sessions/$sid/events" \
+  -d '{"events":[{"type":"user.message","content":[{"type":"text","text":"Say hello in 3 words."}]}]}'
 
-# 5. Wait, then read the events that arrived.
+# 6. watch agent.message ... then session.status_idle, then stop
 sleep 8
-kill "$EV" 2>/dev/null || true
-echo "--- events ---"
-cat /tmp/events.log
+kill "$sse_pid" 2>/dev/null || true
 ```
+
+You should see `session.status_running`, one or more `agent.message` frames, and finally `session.status_idle`.
 
 ## Agent config fields
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `name` | string | Human label for the agent. |
-| `system` | string | System prompt injected for every session/message. |
-| `model` | string | `"provider/model"`, e.g. `"anthropic/claude-sonnet-4-5"`. |
-| `permissions` | object | Per-tool gating, e.g. `{ "bash": "deny", "edit": "ask" }`. Values: `"deny" \| "allow" \| "ask"`. |
-| `mcp_servers` | array | MCP servers. Remote: `{ "name": "...", "url": "https://..." }`. Local: `{ "name": "...", "command": "npx", "args": ["..."] }`. |
-| `workspace` | object | Optional repo context: `{ "repository": "...", "ref": "..." }`. |
+These map straight onto opencode config the server provisions per session:
+
+| Field | Type | Maps to | Notes |
+| --- | --- | --- | --- |
+| `system` | string | body of `.opencode/agent/<id>.md` | the agent's system prompt |
+| `model` | string or `{id}` | frontmatter `model:` | e.g. `anthropic/claude-sonnet-4-5` |
+| `permissions` | object | frontmatter | per-tool `bash` / `edit` set to `allow` \| `deny` \| `ask` |
+| `mcp_servers` | array | `opencode.json` `mcp` entries | MCP servers wired into the session |
+| `workspace` (via environment `config`) | object | checkout dir | optional git `repository` / `ref` |
 
 ## Environment variables
 
 | Var | Default | Purpose |
 | --- | --- | --- |
-| `PORT` | `8080` | Port the wrapper server listens on. |
-| `OPENCODE_PORT` | `4096` | Port for the child `opencode serve`. |
-| `WORKDIR` | `/tmp/opencode-workspace` | Working directory opencode runs in; where per-agent config is provisioned. |
-| `DB_PATH` | `/data/agents.db` | SQLite file for the durable agent store. |
-| `ANTHROPIC_API_KEY` (or other provider key) | — | Passed through to opencode so it can call the model. Required to answer prompts. |
+| `PORT` | `8080` | port the Anthropic-spec front listens on |
+| `OPENCODE_PORT` | `4096` | port the child `opencode serve` binds |
+| `WORKDIR` | `/tmp/opencode-workspace` | workspace where per-agent config is provisioned |
+| `DB_PATH` | `/data/agents.db` | SQLite file for agents/environments/sessions |
+| `ANTHROPIC_API_KEY` | — | model provider key opencode uses to answer prompts |
 
 ## Deploy to Render
 
-Deploy as a **Docker web service** (a `render.yaml` blueprint is included):
+Deploy as a **Docker web service**:
 
-1. Create a new **Web Service** from this repo, runtime **Docker**, root dir `templates/opencode`.
-2. Set the health check path to `/health`.
-3. **Mount a disk for durability.** The SQLite store lives at `DB_PATH`; without a persistent disk the agent database is wiped on every deploy. Add a disk and point `DB_PATH` at its mount path (the blueprint mounts a 1 GB disk at `/var/data` and sets `DB_PATH=/var/data/agents.db`).
-4. Set a **model provider key** (e.g. `ANTHROPIC_API_KEY`) as an environment variable so opencode can answer prompts.
+1. New → Web Service → point at this repo; Render builds the `Dockerfile`.
+2. Add a **mounted disk** and set its mount path to the directory of `DB_PATH` (e.g. mount at `/var/data` and set `DB_PATH=/var/data/agents.db`) so the SQLite agent store survives deploys/restarts.
+3. Set the **model provider key** env var (`ANTHROPIC_API_KEY=...`) so the child opencode can answer prompts.
+4. Health check path: `/health` (returns `{ok:true, opencode:bool}`).
 
-## Where this fits
+`PORT` is provided by Render; `OPENCODE_PORT` and `WORKDIR` can be left at defaults.
 
-This server is the standalone **"Layer 2"** that the lite-harness / LAP SDK talks to via the opencode-compatible HTTP contract. It owns durable agent definitions and session orchestration; callers drive it entirely over the HTTP API documented above.
+## Closing
+
+This is a **standalone server** the **LAP / lite-harness SDK** talks to via the **Anthropic Managed Agents contract** — the same `claude_managed_agents` runtime, with only `api_base`/`api_key` changed. opencode is purely an implementation detail behind that contract.
