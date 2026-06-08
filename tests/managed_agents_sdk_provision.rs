@@ -170,6 +170,7 @@ async fn send_prompt_if_needed(rt: &RuntimeUnderTest, session: &Session) {
                     "type": "user.message",
                     "content": [{ "type": "text", "text": "ok" }]
                 })],
+                model: None,
             },
         )
         .await

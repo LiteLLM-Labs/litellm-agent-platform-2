@@ -163,6 +163,7 @@ async fn assert_session_uses_mcp_tool(
                     "type": "user.message",
                     "content": [{ "type": "text", "text": "Use deepwiki to get the wiki structure for the anthropics/anthropic-sdk-python repository." }]
                 })],
+                model: None,
             },
         )
         .await

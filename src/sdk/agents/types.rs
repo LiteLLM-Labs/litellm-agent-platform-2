@@ -251,6 +251,12 @@ impl CreateSessionParams {
 #[derive(Debug, Clone, Serialize)]
 pub struct SendEventsParams {
     pub events: Vec<Value>,
+    /// Model the agent should run for this turn. Carried alongside the events
+    /// for runtimes whose message API takes the model in the request body
+    /// (e.g. opencode); `skip`ped from serialization so runtimes that post
+    /// params verbatim never receive an unexpected field.
+    #[serde(skip)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
