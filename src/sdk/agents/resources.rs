@@ -2,9 +2,8 @@ use super::{
     client::Lap,
     events::AgentEventStream,
     types::{
-        AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-        CreateSessionParams, Environment, ManagedAgent, SendEventsParams, SendEventsResponse,
-        Session,
+        AgentSdkError, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
+        Environment, ManagedAgent, SendEventsParams, SendEventsResponse, Session,
     },
 };
 
