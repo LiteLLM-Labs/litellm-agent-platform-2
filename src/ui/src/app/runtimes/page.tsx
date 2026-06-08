@@ -93,7 +93,8 @@ export default function RuntimesPage() {
             <div className="min-w-0">
               <h2 className="text-lg font-semibold tracking-tight">Agent Runtime Credentials</h2>
               <p className="text-sm text-muted-foreground">
-                Connect SDK agent runtimes before starting runtime sessions.
+                Add the provider key LAP uses to create and drive managed agent sessions. The
+                agent does not receive this key in its prompt, environment, or runtime resources.
               </p>
               {loading && <p className="mt-2 text-xs text-muted-foreground">Loading runtimes…</p>}
               {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
