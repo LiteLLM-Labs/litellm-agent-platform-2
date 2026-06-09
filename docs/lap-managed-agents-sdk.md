@@ -32,6 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             description: None,
             tools: vec![json!({ "type": "agent_toolset_20260401" })],
             mcp_servers: Vec::new(),
+            env_vars: None,
+            workspace: None,
+            metadata: None,
         })
         .await?;
 
@@ -63,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             title: "Quickstart session".to_owned(),
             lap_agent_runtime: None,
             metadata: None,
+            vault_ids: None,
             resources: None,
         })
         .await?;
@@ -128,6 +132,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 - `LapConfig::anthropic(...)` configures the `claude_managed_agents` runtime.
 - `LapConfig::cursor(...)` configures the `cursor` runtime.
+- `LapConfig::gemini_antigravity(...)` configures the `gemini_antigravity` runtime.
+- `LapConfig::opencode(...)` configures the `opencode` runtime.
 - Gateway and UI runtime configuration uses `claude_agents`; the SDK runtime id
   remains `claude_managed_agents`.
 - `lap_agent_runtime` selects the runtime.
@@ -150,6 +156,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 client.beta().agents().create(...)
+client.beta().agents().list(...)
+client.beta().agents().get(...)
+client.beta().agents().delete(...)
 client.beta().environments().create(...)
 client.beta().sessions().create(...)
 client.beta().sessions().events().send(...)
@@ -161,6 +170,8 @@ Implemented runtimes:
 ```text
 claude_managed_agents
 cursor
+gemini_antigravity
+opencode
 ```
 
 ## Possible Python Wrapper

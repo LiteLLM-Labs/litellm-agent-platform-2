@@ -3,7 +3,8 @@ use super::{
     events::AgentEventStream,
     types::{
         AgentSdkError, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
-        Environment, ManagedAgent, SendEventsParams, SendEventsResponse, Session,
+        DeleteAgentParams, DeleteAgentResponse, Environment, GetAgentParams, ListAgentsParams,
+        ManagedAgent, ManagedAgentList, SendEventsParams, SendEventsResponse, Session,
     },
 };
 
@@ -44,6 +45,33 @@ impl Agents<'_> {
         self.client
             .adapter(runtime)?
             .create_agent(self.client, params)
+            .await
+    }
+
+    pub async fn list(&self, params: ListAgentsParams) -> Result<ManagedAgentList, AgentSdkError> {
+        let runtime = params.lap_agent_runtime;
+        self.client
+            .adapter(runtime)?
+            .list_agents(self.client, params)
+            .await
+    }
+
+    pub async fn get(&self, params: GetAgentParams) -> Result<ManagedAgent, AgentSdkError> {
+        let runtime = params.lap_agent_runtime;
+        self.client
+            .adapter(runtime)?
+            .get_agent(self.client, params)
+            .await
+    }
+
+    pub async fn delete(
+        &self,
+        params: DeleteAgentParams,
+    ) -> Result<DeleteAgentResponse, AgentSdkError> {
+        let runtime = params.lap_agent_runtime;
+        self.client
+            .adapter(runtime)?
+            .delete_agent(self.client, params)
             .await
     }
 }

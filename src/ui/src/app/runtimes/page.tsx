@@ -191,5 +191,6 @@ function RuntimeLogo({ id }: { id: AgentRuntimeId }) {
 }
 
 function runtimeIconId(id: AgentRuntimeId) {
+  if (id === "gemini_antigravity") return "gemini";
   return id === "claude_managed_agents" ? "claude" : id;
 }

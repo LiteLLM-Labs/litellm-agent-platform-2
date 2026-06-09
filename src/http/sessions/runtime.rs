@@ -173,9 +173,23 @@ pub(super) async fn execute_runtime_prompt(
         .await
         .map_err(agent_sdk_error)?;
     if let Some(run_id) = provider_run_id(runtime, &sent.raw) {
-        sessions::repository::set_provider_run(pool, &row.id, &run_id, "running").await?;
+        let status = provider_run_status(&sent.raw);
+        sessions::repository::set_provider_run(pool, &row.id, &run_id, status).await?;
+        if status == "idle" {
+            state
+                .agent_runs
+                .update_status(&row.id, crate::agents::runs::AgentRunStatus::Completed);
+        }
     }
     Ok(())
+}
+
+fn provider_run_status(raw: &Value) -> &'static str {
+    match raw.get("status").and_then(Value::as_str) {
+        Some("completed") => "idle",
+        Some("failed" | "cancelled" | "incomplete" | "budget_exceeded") => "error",
+        _ => "running",
+    }
 }
 
 fn validated_runtime(input: &CreateSessionRequest) -> Result<String, GatewayError> {

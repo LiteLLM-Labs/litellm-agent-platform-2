@@ -16,7 +16,7 @@ export interface OpencodeSession {
   [k: string]: unknown;
 }
 
-export type AgentRuntimeId = "claude_managed_agents" | "cursor" | "opencode";
+export type AgentRuntimeId = "claude_managed_agents" | "cursor" | "gemini_antigravity" | "opencode";
 
 export interface AgentRuntimeTool {
   id: string;

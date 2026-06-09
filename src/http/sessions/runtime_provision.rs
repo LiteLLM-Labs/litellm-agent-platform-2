@@ -65,7 +65,7 @@ pub(super) async fn provision_runtime_session(
     let provision = runtime_provision(
         &created.runtime,
         &provider_agent.id,
-        Some(provider_session.id.clone()),
+        provider_session_id(&created.runtime, &provider_session),
         &provider_agent.raw,
         serde_json::json!({
             "runtime": created.runtime,
@@ -75,6 +75,17 @@ pub(super) async fn provision_runtime_session(
         }),
     );
     persist_runtime_refs(pool, created, provision).await
+}
+
+fn provider_session_id(runtime: &str, session: &crate::sdk::agents::Session) -> Option<String> {
+    providers::runtime_registry()
+        .entry_for_id(runtime)
+        .and_then(|entry| {
+            entry
+                .adapter
+                .provider_session_id_from_session_raw(&session.raw)
+        })
+        .or_else(|| Some(session.id.clone()))
 }
 
 fn runtime_client(state: &AppState, runtime: AgentRuntime, created: &CreatedRuntimeSession) -> Lap {
@@ -87,6 +98,10 @@ fn runtime_client(state: &AppState, runtime: AgentRuntime, created: &CreatedRunt
         AgentRuntime::Cursor => {
             config.cursor_api_key = Some(created.credential.api_key.clone());
             config.cursor_base_url = created.credential.api_base.clone();
+        }
+        AgentRuntime::GeminiAntigravity => {
+            config.gemini_api_key = Some(created.credential.api_key.clone());
+            config.gemini_base_url = created.credential.api_base.clone();
         }
         AgentRuntime::OpenCode => {
             config.opencode_base_url = Some(created.credential.api_base.clone());
@@ -116,14 +131,7 @@ async fn create_provider_agent(
             }),
             system: provider_system(runtime, created),
             description: created.agent.description.clone(),
-            tools: {
-                let mut tools = vec![serde_json::json!({ "type": "agent_toolset_20260401" })];
-                tools.extend(crate::http::platform_mcps::platform_mcp_toolsets(
-                    &created.agent.config,
-                ));
-                tools.extend(integration_mcp_toolsets(&created.agent.config));
-                tools
-            },
+            tools: provider_tools(runtime, created),
             mcp_servers: mcp_servers(state, &created.agent)?,
             workspace: workspace_from_env(&created.environment)?,
             env_vars: None,
@@ -131,6 +139,40 @@ async fn create_provider_agent(
         })
         .await
         .map_err(agent_sdk_error)
+}
+
+fn provider_tools(runtime: AgentRuntime, created: &CreatedRuntimeSession) -> Vec<Value> {
+    if runtime == AgentRuntime::GeminiAntigravity {
+        return gemini_tools(created);
+    }
+    let mut tools = vec![serde_json::json!({ "type": "agent_toolset_20260401" })];
+    tools.extend(crate::http::platform_mcps::platform_mcp_toolsets(
+        &created.agent.config,
+    ));
+    tools.extend(integration_mcp_toolsets(&created.agent.config));
+    tools
+}
+
+fn gemini_tools(created: &CreatedRuntimeSession) -> Vec<Value> {
+    created
+        .agent
+        .tools
+        .as_array()
+        .or_else(|| created.agent.config.get("tools").and_then(Value::as_array))
+        .into_iter()
+        .flatten()
+        .filter(|tool| {
+            tool.get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|tool_type| {
+                    matches!(
+                        tool_type,
+                        "code_execution" | "google_search" | "url_context"
+                    )
+                })
+        })
+        .cloned()
+        .collect()
 }
 
 async fn platform_mcp_vault_ids(

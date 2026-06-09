@@ -828,7 +828,7 @@ export default function AgentsPage() {
 }
 
 function isAgentRuntimeId(value: unknown): value is AgentRuntimeId {
-  return value === "claude_managed_agents" || value === "cursor" || value === "opencode";
+  return value === "claude_managed_agents" || value === "cursor" || value === "gemini_antigravity" || value === "opencode";
 }
 
 function runtimeFromAgent(agent: Agent): AgentRuntimeId {
@@ -859,6 +859,15 @@ function runtimeOptions(runtimes: AgentRuntime[]): AgentRuntime[] {
       default_api_base: "",
       credential_provider_id: "cursor",
       credential_provider_name: "Cursor",
+      tools: [],
+      connected: false,
+    },
+    {
+      id: "gemini_antigravity",
+      name: "Gemini Antigravity",
+      default_api_base: "",
+      credential_provider_id: "gemini",
+      credential_provider_name: "Gemini",
       tools: [],
       connected: false,
     },

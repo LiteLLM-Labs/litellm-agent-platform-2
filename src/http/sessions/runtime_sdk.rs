@@ -40,6 +40,10 @@ pub(super) fn lap_from_credential(
             config.cursor_api_key = Some(credential.api_key.clone());
             config.cursor_base_url = credential.api_base.clone();
         }
+        AgentRuntime::GeminiAntigravity => {
+            config.gemini_api_key = Some(credential.api_key.clone());
+            config.gemini_base_url = credential.api_base.clone();
+        }
         AgentRuntime::OpenCode => {
             config.opencode_base_url = Some(credential.api_base.clone());
             config.opencode_api_key = Some(credential.api_key.clone());
@@ -62,7 +66,8 @@ pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result
         .and_then(|e| {
             e.adapter
                 .provider_agent_id_from_session_id(&provider_session_id)
-        });
+        })
+        .or_else(|| row.runtime_agent_ref_id.clone());
     client
         .register_session(ManagedSessionRef {
             session_id: row.id.clone(),

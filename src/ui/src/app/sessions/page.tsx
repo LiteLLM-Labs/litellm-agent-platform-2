@@ -27,6 +27,7 @@ const NEW_AGENT_VALUE = "__new_agent__";
 const CLAUDE_RUNTIME: AgentRuntimeId = "claude_managed_agents";
 
 function runtimeIconId(id: string) {
+  if (id === "gemini_antigravity") return "gemini";
   return id === "claude_managed_agents" || id === "claude_agents" ? "claude" : id;
 }
 
@@ -34,6 +35,7 @@ function runtimeLabel(runtime: AgentRuntime | string): string {
   if (typeof runtime !== "string") return runtime.name;
   if (runtime === "claude_managed_agents") return "Claude Agents";
   if (runtime === "cursor") return "Cursor";
+  if (runtime === "gemini_antigravity") return "Gemini Antigravity";
   if (runtime === "opencode") return "OpenCode";
   if (runtime === "claude-code" || runtime === "cc") return "Claude Code";
   return runtime;
@@ -43,12 +45,14 @@ function runtimeSubtitle(runtime: AgentRuntime): string {
   if (!runtime.connected) return "missing key";
   if (runtime.id === "claude_managed_agents") return "Anthropic sessions and tools";
   if (runtime.id === "cursor") return "Background repo agents";
+  if (runtime.id === "gemini_antigravity") return "Google managed agent sandbox";
   if (runtime.id === "opencode") return "OpenCode server sessions";
   return "Managed runtime sessions";
 }
 
 function modelForRuntime(runtime: AgentRuntimeId): string {
   if (runtime === "claude_managed_agents") return "claude-sonnet-4-6";
+  if (runtime === "gemini_antigravity") return "antigravity-preview-05-2026";
   if (runtime === "opencode") return "opencode/default";
   return "claude-4-sonnet";
 }
@@ -56,12 +60,13 @@ function modelForRuntime(runtime: AgentRuntimeId): string {
 function runtimeRoutePrefix(runtime: AgentRuntimeId | ""): string {
   if (runtime === "claude_managed_agents") return "anthropic/*";
   if (runtime === "cursor") return "cursor/*";
+  if (runtime === "gemini_antigravity") return "gemini/*";
   if (runtime === "opencode") return "opencode/*";
   return "runtime/*";
 }
 
 function isAgentRuntimeId(value: unknown): value is AgentRuntimeId {
-  return value === "claude_managed_agents" || value === "cursor" || value === "opencode";
+  return value === "claude_managed_agents" || value === "cursor" || value === "gemini_antigravity" || value === "opencode";
 }
 
 function configuredRuntime(agent: Agent | null): AgentRuntimeId | "" {

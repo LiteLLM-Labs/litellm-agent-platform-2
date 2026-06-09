@@ -101,6 +101,20 @@ impl Lap {
         response_json(response).await
     }
 
+    pub(crate) async fn delete(
+        &self,
+        runtime: AgentRuntime,
+        path: &str,
+    ) -> Result<Value, AgentSdkError> {
+        let mut response = self.request(runtime, Method::DELETE, path)?.send().await?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(fallback) = self.fallback_request(runtime, Method::DELETE, path)? {
+                response = fallback.send().await?;
+            }
+        }
+        response_json(response).await
+    }
+
     pub(crate) async fn stream(
         &self,
         runtime: AgentRuntime,
@@ -274,6 +288,19 @@ impl SessionContext {
             provider_session_id: Some(agent_id.clone()),
             agent_id: Some(agent_id),
             run_id,
+        }
+    }
+
+    pub(crate) fn gemini(
+        environment_id: String,
+        agent_id: String,
+        interaction_id: Option<String>,
+    ) -> Self {
+        Self {
+            runtime: AgentRuntime::GeminiAntigravity,
+            provider_session_id: Some(environment_id),
+            agent_id: Some(agent_id),
+            run_id: interaction_id,
         }
     }
 }
