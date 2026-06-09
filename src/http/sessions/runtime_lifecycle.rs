@@ -88,9 +88,8 @@ pub(super) async fn drain_provider_stream(
         }
         persist_runtime_event(pool, session_id, &event).await?;
     }
-    if let Some(status) = terminal_status {
-        mark_session_status(state, pool, session_id, status, terminal_error).await?;
-    }
+    let status = terminal_status.unwrap_or("idle");
+    mark_session_status(state, pool, session_id, status, terminal_error).await?;
     Ok(())
 }
 
