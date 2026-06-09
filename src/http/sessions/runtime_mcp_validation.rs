@@ -1,6 +1,63 @@
 use serde_json::Value;
 
-use crate::errors::GatewayError;
+use crate::{errors::GatewayError, proxy::state::AppState};
+
+/// Registered MCP servers attached to an agent store the *raw* upstream URL,
+/// which may carry `${VAR}` placeholders resolved per-user at call time (e.g.
+/// Composio's `${COMPOSIO_USER_ID}` / `${COMPOSIO_MCP_SERVER_ID}`). The
+/// managed-agents runtime (Anthropic) calls the MCP URL directly and rejects an
+/// unresolved `${...}` URL as an invalid URI. So any templated entry is
+/// rewritten to route through this gateway's own MCP proxy
+/// (`{proxy_base}/{name}/mcp`), which resolves the caller's vault variables,
+/// injects the server's static headers, and forwards upstream — the same path
+/// tool discovery already uses. The proxy requires a gateway key, supplied as
+/// the entry's `authorization_token` (mirrors the platform-MCP auth pattern).
+/// `name` is the server id; the dynamic proxy resolves it by id, name, or alias.
+///
+/// v0: on-behalf-of identity is the default owner. Per-user identity over this
+/// path is tracked separately (signed-token auth) — see issue.
+pub(super) fn rewrite_registered_mcp_servers(
+    state: &AppState,
+    servers: &mut [Value],
+) -> Result<(), GatewayError> {
+    for server in servers.iter_mut() {
+        let Some(obj) = server.as_object_mut() else {
+            continue;
+        };
+        let needs_proxy = obj
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|u| u.contains("${"));
+        if !needs_proxy {
+            continue;
+        }
+        let name = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|n| !n.trim().is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                GatewayError::InvalidConfig(
+                    "mcp_servers entry with ${variables} requires a name (server id)".to_owned(),
+                )
+            })?;
+        let base = state.resolved_mcp_proxy_base_url().ok_or_else(|| {
+            GatewayError::InvalidConfig(
+                "mcp_servers.proxy_base_url is required to proxy MCP servers with variables"
+                    .to_owned(),
+            )
+        })?;
+        obj.insert(
+            "url".to_owned(),
+            Value::String(format!("{}/{}/mcp", base.trim_end_matches('/'), name)),
+        );
+        if let Some(key) = state.config.general_settings.master_key.as_deref() {
+            obj.entry("authorization_token".to_owned())
+                .or_insert_with(|| Value::String(key.to_owned()));
+        }
+    }
+    Ok(())
+}
 
 pub(super) fn validate_runtime_mcp_servers(
     agent_id: &str,
