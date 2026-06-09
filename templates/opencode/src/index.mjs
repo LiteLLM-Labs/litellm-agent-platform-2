@@ -41,11 +41,11 @@ await gitInit(WORKDIR);
 
 // Optionally route opencode's model calls through a LiteLLM gateway. When
 // LITELLM_BASE_URL + LITELLM_API_KEY are set, opencode addresses models as
-// "litellm/<model>" (e.g. litellm/claude-sonnet-4-5).
+// "litellm/<model>" (e.g. litellm/claude-sonnet-4-6).
 const LITELLM_BASE_URL = process.env.LITELLM_BASE_URL || null;
 const LITELLM_API_KEY = process.env.LITELLM_API_KEY || null;
 const LITELLM_PROVIDER_ID = "litellm";
-const LITELLM_MODELS = (process.env.LITELLM_MODELS || "claude-sonnet-4-5,gpt-5.5")
+const LITELLM_MODELS = (process.env.LITELLM_MODELS || "claude-sonnet-4-6")
   .split(",")
   .map((m) => m.trim())
   .filter(Boolean);
