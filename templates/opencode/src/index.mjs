@@ -13,8 +13,10 @@ import {
   writeSandboxConfig,
   ocFetch,
   writeProviderConfig,
+  ensureProviderModel,
   gitInit,
 } from "./opencode.mjs";
+import { opencodeModel, opencodeModelString } from "./models.mjs";
 import { buildSandboxProvider } from "./sandbox.mjs";
 import {
   modelId,
@@ -42,13 +44,14 @@ await gitInit(WORKDIR);
 // "litellm/<model>" (e.g. litellm/claude-sonnet-4-5).
 const LITELLM_BASE_URL = process.env.LITELLM_BASE_URL || null;
 const LITELLM_API_KEY = process.env.LITELLM_API_KEY || null;
+const LITELLM_PROVIDER_ID = "litellm";
 const LITELLM_MODELS = (process.env.LITELLM_MODELS || "claude-sonnet-4-5,gpt-5.5")
   .split(",")
   .map((m) => m.trim())
   .filter(Boolean);
 if (LITELLM_BASE_URL && LITELLM_API_KEY) {
   await writeProviderConfig(WORKDIR, {
-    id: "litellm",
+    id: LITELLM_PROVIDER_ID,
     baseURL: LITELLM_BASE_URL,
     apiKey: LITELLM_API_KEY,
     models: LITELLM_MODELS,
@@ -77,6 +80,7 @@ if (sandbox.error) {
     `[boot] sandbox execution enabled (${sandbox.provider.providerName}) — bash/edit denied, routed to sandbox MCP`
   );
 }
+const DEFAULT_MODEL_PROVIDER_ID = LITELLM_BASE_URL && LITELLM_API_KEY ? LITELLM_PROVIDER_ID : null;
 
 const ocOpts = { port: OC_PORT, cwd: WORKDIR };
 
@@ -147,16 +151,6 @@ app.use((req, _res, next) => {
   next();
 });
 
-// opencode's message API wants the model as { providerID, modelID }, not a
-// "provider/model" string. Split on the first slash. Returns undefined for a
-// bare model (opencode then falls back to its default).
-function opencodeModel(model) {
-  if (!model || typeof model !== "string") return undefined;
-  const i = model.indexOf("/");
-  if (i < 0) return undefined;
-  return { providerID: model.slice(0, i), modelID: model.slice(i + 1) };
-}
-
 // Wrap async handlers so throws become 500 {error}.
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((err) => {
@@ -187,7 +181,16 @@ app.get("/health", wrap(async (_req, res) => {
 // no hot-reload). The mcp section is rebuilt from ALL agents so one agent's
 // servers never leak into another's sessions.
 async function applyAgentsAndReboot(provisionRow) {
-  if (provisionRow) await provisionAgent(WORKDIR, provisionRow);
+  if (provisionRow) {
+    const model = opencodeModel(provisionRow.model, DEFAULT_MODEL_PROVIDER_ID);
+    if (model?.providerID === LITELLM_PROVIDER_ID) {
+      await ensureProviderModel(WORKDIR, model);
+    }
+    await provisionAgent(WORKDIR, {
+      ...provisionRow,
+      model: opencodeModelString(provisionRow.model, DEFAULT_MODEL_PROVIDER_ID),
+    });
+  }
   await writeMcpConfig(WORKDIR, store.listAgents());
   await rebootOpencode();
 }
@@ -287,7 +290,7 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
       // Select the agent loaded from disk so opencode applies its system
       // prompt, tool permissions, and MCP servers.
       agent: agentId || undefined,
-      model: opencodeModel(agent?.model),
+      model: opencodeModel(agent?.model, DEFAULT_MODEL_PROVIDER_ID),
       parts,
     }),
   });

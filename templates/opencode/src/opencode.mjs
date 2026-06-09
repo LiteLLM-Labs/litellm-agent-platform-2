@@ -58,6 +58,23 @@ export async function writeProviderConfig(cwd, { id = "litellm", name = "LiteLLM
   await writeFile(file, JSON.stringify(obj, null, 2));
 }
 
+export async function ensureProviderModel(cwd, { providerID, modelID }) {
+  if (!providerID || !modelID) return;
+  const file = path.join(cwd, "opencode.json");
+  let obj = {};
+  try {
+    obj = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    obj = {};
+  }
+  const provider = obj.provider?.[providerID];
+  if (!provider) return;
+  provider.models = provider.models || {};
+  provider.models[modelID] = provider.models[modelID] || {};
+  await mkdir(cwd, { recursive: true });
+  await writeFile(file, JSON.stringify(obj, null, 2));
+}
+
 // Spawns `opencode serve`, returns once health check passes.
 // Returns { baseUrl, proc, stop() }
 export async function startOpencode({ port = 4096, cwd, env } = {}) {
