@@ -2,9 +2,68 @@
 mod support;
 
 use serde_json::{json, Value};
-use support::{flows, request_json, AppFixture};
+use support::{flows, request_json, request_json_raw, AppFixture};
 
 static DB_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[tokio::test]
+async fn mcp_proxy_base_url_setting_round_trip_against_postgres() {
+    let _guard = DB_TEST_LOCK.lock().await;
+    let Some(fixture) = AppFixture::new().await else {
+        eprintln!("skipping managed agent integration test: TEST_DATABASE_URL is not set");
+        return;
+    };
+
+    let initial = request_json(
+        fixture.app.clone(),
+        "GET",
+        "/v1/mcp/settings/proxy-base-url",
+        None,
+    )
+    .await;
+    assert_eq!(initial["proxy_base_url"], "http://localhost");
+    assert_eq!(initial["source"], "config");
+
+    let saved = request_json(
+        fixture.app.clone(),
+        "PUT",
+        "/v1/mcp/settings/proxy-base-url",
+        Some(json!({ "proxy_base_url": "https://gateway.example.com/" })),
+    )
+    .await;
+    assert_eq!(saved["proxy_base_url"], "https://gateway.example.com");
+    assert_eq!(saved["source"], "database");
+    assert_eq!(
+        litellm_rust::http::platform_mcps::platform_mcp_url(&fixture.state, "agent_test", None)
+            .unwrap(),
+        "https://gateway.example.com/mcp/platform/agent_test"
+    );
+
+    let (status, body) = request_json_raw(
+        fixture.app.clone(),
+        "PUT",
+        "/v1/mcp/settings/proxy-base-url",
+        Some(json!({ "proxy_base_url": "localhost:4000" })),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+    assert!(body.contains("absolute http(s) URL"));
+
+    let cleared = request_json(
+        fixture.app.clone(),
+        "PUT",
+        "/v1/mcp/settings/proxy-base-url",
+        Some(json!({ "proxy_base_url": null })),
+    )
+    .await;
+    assert_eq!(cleared["proxy_base_url"], "http://localhost");
+    assert_eq!(cleared["source"], "config");
+    assert_eq!(
+        litellm_rust::http::platform_mcps::platform_mcp_url(&fixture.state, "agent_test", None)
+            .unwrap(),
+        "http://localhost/mcp/platform/agent_test"
+    );
+}
 
 #[tokio::test]
 async fn managed_agent_endpoints_round_trip_against_postgres() {

@@ -8,6 +8,7 @@ use crate::{
 };
 
 use super::runtime::CreatedRuntimeSession;
+use super::runtime_mcp_validation::validate_runtime_mcp_servers;
 
 pub(super) fn provider_system(runtime: AgentRuntime, created: &CreatedRuntimeSession) -> String {
     if runtime != AgentRuntime::Cursor {
@@ -77,6 +78,7 @@ pub(super) fn mcp_servers(
         &agent.config,
         session_id,
     )?);
+    validate_runtime_mcp_servers(&agent.id, &servers)?;
     Ok(servers)
 }
 

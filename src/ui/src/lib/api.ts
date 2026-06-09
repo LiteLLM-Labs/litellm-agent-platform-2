@@ -1023,6 +1023,27 @@ export interface McpToolDef {
   inputSchema?: unknown;
 }
 
+export interface McpProxyBaseUrlSetting {
+  proxy_base_url: string | null;
+  source: "database" | "config" | "unset";
+}
+
+export async function getMcpProxyBaseUrl(): Promise<McpProxyBaseUrlSetting> {
+  const res = await req("/v1/mcp/settings/proxy-base-url");
+  return jsonOrThrow<McpProxyBaseUrlSetting>(res);
+}
+
+export async function saveMcpProxyBaseUrl(
+  proxyBaseUrl: string | null,
+): Promise<McpProxyBaseUrlSetting> {
+  const res = await req("/v1/mcp/settings/proxy-base-url", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ proxy_base_url: proxyBaseUrl }),
+  });
+  return jsonOrThrow<McpProxyBaseUrlSetting>(res);
+}
+
 /** List the tools exposed by an existing (saved) MCP server. */
 export async function listMcpServerTools(server_id: string): Promise<McpToolDef[]> {
   const res = await req(`/v1/mcp/server/${encodeURIComponent(server_id)}/tools`);

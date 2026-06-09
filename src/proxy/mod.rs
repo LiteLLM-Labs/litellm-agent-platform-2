@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod config;
+mod config_types;
 pub mod credential_crypto;
 mod mcp_config;
 pub mod provider_credentials;

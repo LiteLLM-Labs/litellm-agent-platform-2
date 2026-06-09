@@ -122,7 +122,9 @@ fn mcp_routes() -> Router<Arc<AppState>> {
 }
 
 fn mcp_registry_routes() -> Router<Arc<AppState>> {
-    use crate::http::mcp_registry::{admin, discover, proxy, public, tools, user_credentials};
+    use crate::http::mcp_registry::{
+        admin, discover, proxy, public, settings, tools, user_credentials,
+    };
     Router::new()
         // Public (no auth)
         .route("/public/mcp_hub", get(public::mcp_hub))
@@ -140,6 +142,10 @@ fn mcp_registry_routes() -> Router<Arc<AppState>> {
         .route(
             "/v1/mcp/server/{server_id}",
             get(admin::get_one).delete(admin::delete_one),
+        )
+        .route(
+            "/v1/mcp/settings/proxy-base-url",
+            get(settings::get_proxy_base_url).put(settings::update_proxy_base_url),
         )
         // User credentials (BYOK)
         .route(

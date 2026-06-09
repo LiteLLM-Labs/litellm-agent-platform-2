@@ -80,18 +80,7 @@ pub fn platform_mcp_url(
     agent_id: &str,
     session_id: Option<&str>,
 ) -> Result<String, GatewayError> {
-    let Some(base_url) = state
-        .config
-        .general_settings
-        .public_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Err(GatewayError::InvalidConfig(
-            "general_settings.public_base_url is required for platform MCPs".to_owned(),
-        ));
-    };
+    let base_url = proxy_base_url(state)?;
     let url = format!(
         "{}/mcp/platform/{}",
         base_url.trim_end_matches('/'),
@@ -222,19 +211,15 @@ pub(crate) fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str,
 }
 
 pub(super) fn public_base_url(state: &AppState) -> Result<String, GatewayError> {
-    state
-        .config
-        .general_settings
-        .public_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            GatewayError::InvalidConfig(
-                "general_settings.public_base_url is required for platform MCPs".to_owned(),
-            )
-        })
+    proxy_base_url(state)
+}
+
+fn proxy_base_url(state: &AppState) -> Result<String, GatewayError> {
+    state.resolved_mcp_proxy_base_url().ok_or_else(|| {
+        GatewayError::InvalidConfig(
+            "mcp_servers.proxy_base_url is required for platform MCPs".to_owned(),
+        )
+    })
 }
 
 fn rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {

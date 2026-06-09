@@ -13,6 +13,7 @@ pub mod runtime_events;
 pub mod runtime_refs;
 pub mod saved;
 pub mod sessions;
+pub mod settings;
 pub mod skills;
 pub mod slack;
 pub mod spend_logs;
