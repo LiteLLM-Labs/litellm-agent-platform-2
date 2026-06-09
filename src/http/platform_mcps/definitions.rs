@@ -2,8 +2,8 @@ use serde_json::{json, Value};
 
 use super::{
     factory, session_management, AGENT_MEMORY_MCP_ID, CHECK_HUMAN_APPROVAL_MCP_ID,
-    LIST_SUB_AGENTS_MCP_ID, REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID,
-    SEND_SLACK_MESSAGE_MCP_ID,
+    EDIT_AGENT_SKILL_MCP_ID, LIST_SUB_AGENTS_MCP_ID, REQUEST_HUMAN_APPROVAL_MCP_ID,
+    RUN_SUB_AGENT_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID,
 };
 
 pub fn tool_defs() -> Vec<Value> {
@@ -11,6 +11,7 @@ pub fn tool_defs() -> Vec<Value> {
         session_management::read_tool_def(),
         session_management::send_tool_def(),
         agent_memory_tool(),
+        edit_agent_skill_tool(),
         send_slack_message_tool(),
         list_sub_agents_tool(),
         run_sub_agent_tool(),
@@ -114,6 +115,30 @@ fn agent_memory_tool() -> Value {
                 "key": { "type": "string" },
                 "value": { "type": "string" },
                 "always_on": { "type": "boolean" }
+            },
+            "required": ["action"]
+        }
+    })
+}
+
+fn edit_agent_skill_tool() -> Value {
+    json!({
+        "name": EDIT_AGENT_SKILL_MCP_ID,
+        "description": "List, read, or update DB-backed skills attached to this agent. Updates are limited to this agent's own attached skill_ids.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": { "type": "string", "enum": ["list", "get", "update"] },
+                "skill_id": {
+                    "type": "string",
+                    "description": "Attached skill ID. May be omitted for get/update only when exactly one skill is attached."
+                },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "content": {
+                    "type": "string",
+                    "description": "Full replacement markdown content for the skill."
+                }
             },
             "required": ["action"]
         }
