@@ -7,6 +7,20 @@ use crate::{
 
 use super::schema::{RuntimeRefRow, UpsertRuntimeRef};
 
+pub async fn get_by_id(pool: &PgPool, id: &str) -> Result<Option<RuntimeRefRow>, GatewayError> {
+    sqlx::query_as::<_, RuntimeRefRow>(
+        r#"
+        SELECT *
+        FROM "LiteLLM_ManagedAgentRuntimeRefsTable"
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(GatewayError::Database)
+}
+
 pub async fn get(
     pool: &PgPool,
     agent_id: &str,

@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::{
-    db::managed_agents::sessions::schema::SessionRow,
+    db::managed_agents::{runtime_refs, sessions::schema::SessionRow},
     errors::GatewayError,
     http::agent_runtimes::{load_credential, RuntimeCredential},
     proxy::state::AppState,
@@ -16,6 +16,7 @@ use crate::{
         providers,
     },
 };
+use sqlx::PgPool;
 
 pub(super) async fn runtime_sdk_client(
     state: &AppState,
@@ -53,7 +54,11 @@ pub(super) fn lap_from_credential(
     Ok(Lap::new(config))
 }
 
-pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result<(), GatewayError> {
+pub(super) async fn register_runtime_session(
+    client: &Lap,
+    pool: &PgPool,
+    row: &SessionRow,
+) -> Result<(), GatewayError> {
     let runtime = row.runtime.as_deref().ok_or_else(|| {
         GatewayError::InvalidConfig("runtime session is missing runtime".to_owned())
     })?;
@@ -66,8 +71,11 @@ pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result
         .and_then(|e| {
             e.adapter
                 .provider_agent_id_from_session_id(&provider_session_id)
-        })
-        .or_else(|| row.runtime_agent_ref_id.clone());
+        });
+    let provider_agent_id = match provider_agent_id {
+        Some(provider_agent_id) => Some(provider_agent_id),
+        None => runtime_agent_id_from_ref(pool, row).await?,
+    };
     client
         .register_session(ManagedSessionRef {
             session_id: row.id.clone(),
@@ -77,6 +85,20 @@ pub(super) fn register_runtime_session(client: &Lap, row: &SessionRow) -> Result
             provider_run_id: row.provider_run_id.clone(),
         })
         .map_err(agent_sdk_error)
+}
+
+async fn runtime_agent_id_from_ref(
+    pool: &PgPool,
+    row: &SessionRow,
+) -> Result<Option<String>, GatewayError> {
+    let Some(runtime_agent_ref_id) = row.runtime_agent_ref_id.as_deref() else {
+        return Ok(None);
+    };
+    Ok(
+        runtime_refs::repository::get_by_id(pool, runtime_agent_ref_id)
+            .await?
+            .map(|runtime_ref| runtime_ref.runtime_agent_id),
+    )
 }
 
 pub(super) fn send_events_params(prompt: String) -> SendEventsParams {

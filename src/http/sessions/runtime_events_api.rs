@@ -43,7 +43,7 @@ pub async fn runtime_events(
         GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
     let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, &row)?;
+    register_runtime_session(&client, pool, &row).await?;
     let provider_stream = client
         .beta()
         .sessions()
@@ -95,7 +95,7 @@ pub async fn runtime_event_list(
         GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
     let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, &row)?;
+    register_runtime_session(&client, pool, &row).await?;
     let events = client
         .beta()
         .sessions()
@@ -117,7 +117,7 @@ pub(crate) async fn runtime_event_stream_for_session(
         GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
     let client = runtime_sdk_client(state, runtime).await?;
-    register_runtime_session(&client, &row)?;
+    register_runtime_session(&client, pool, &row).await?;
     client
         .beta()
         .sessions()

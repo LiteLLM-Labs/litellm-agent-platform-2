@@ -161,7 +161,7 @@ pub(super) async fn execute_runtime_prompt(
         GatewayError::InvalidConfig("runtime session is missing runtime".to_owned())
     })?;
     let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, &row)?;
+    register_runtime_session(&client, pool, &row).await?;
     state
         .agent_runs
         .update_status(&row.id, crate::agents::runs::AgentRunStatus::Running);

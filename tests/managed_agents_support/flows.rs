@@ -6,6 +6,7 @@ use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
 mod claude_runtime;
 mod cursor_runtime;
+mod gemini_runtime;
 mod platform_factory;
 mod platform_factory_oauth;
 mod platform_factory_payloads;
@@ -20,6 +21,7 @@ mod slack_url_verification;
 
 pub use claude_runtime::exercise_claude_runtime_session_storage;
 pub use cursor_runtime::exercise_cursor_runtime_stream;
+pub use gemini_runtime::exercise_gemini_runtime_session;
 pub use platform_mcps::exercise_platform_mcps;
 pub use routines::exercise_routines;
 pub use rules::exercise_rules;

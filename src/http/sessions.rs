@@ -167,7 +167,7 @@ pub async fn abort(
     if let Ok(Some(row)) = sessions::repository::get(pool, &session_id).await {
         if let Some(runtime) = row.runtime.as_deref() {
             if let Ok(client) = runtime_sdk_client(&state, runtime).await {
-                if register_runtime_session(&client, &row).is_ok() {
+                if register_runtime_session(&client, pool, &row).await.is_ok() {
                     let _ = client
                         .beta()
                         .sessions()
@@ -207,7 +207,7 @@ pub async fn interrupt(
     let Ok(client) = runtime_sdk_client(&state, runtime).await else {
         return Ok(StatusCode::NO_CONTENT);
     };
-    if register_runtime_session(&client, &row).is_ok() {
+    if register_runtime_session(&client, pool, &row).await.is_ok() {
         let _ = client
             .beta()
             .sessions()
