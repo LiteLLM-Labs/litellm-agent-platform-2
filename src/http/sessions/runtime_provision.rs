@@ -107,6 +107,10 @@ fn runtime_client(state: &AppState, created: &CreatedRuntimeSession) -> Lap {
             config.gemini_api_key = Some(created.resolved.credential.api_key.clone());
             config.gemini_base_url = created.resolved.credential.api_base.clone();
         }
+        AgentRuntime::Hermes => {
+            config.hermes_api_key = Some(created.resolved.credential.api_key.clone());
+            config.hermes_base_url = created.resolved.credential.api_base.clone();
+        }
         AgentRuntime::OpenCode => {
             config.opencode_base_url = Some(created.resolved.credential.api_base.clone());
             config.opencode_api_key = Some(created.resolved.credential.api_key.clone());

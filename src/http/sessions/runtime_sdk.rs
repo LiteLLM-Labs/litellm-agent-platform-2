@@ -36,6 +36,10 @@ pub(super) fn lap_from_credential(
             config.gemini_api_key = Some(resolved.credential.api_key.clone());
             config.gemini_base_url = resolved.credential.api_base.clone();
         }
+        AgentRuntime::Hermes => {
+            config.hermes_api_key = Some(resolved.credential.api_key.clone());
+            config.hermes_base_url = resolved.credential.api_base.clone();
+        }
         AgentRuntime::OpenCode => {
             config.opencode_base_url = Some(resolved.credential.api_base.clone());
             config.opencode_api_key = Some(resolved.credential.api_key.clone());
