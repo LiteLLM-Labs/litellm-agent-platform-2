@@ -39,13 +39,19 @@ pub(super) fn agent_model(agent: &ManagedAgentRow, environment: &Value) -> Strin
 pub(super) fn mcp_servers(
     state: &AppState,
     agent: &ManagedAgentRow,
+    session_id: Option<&str>,
 ) -> Result<Vec<Value>, GatewayError> {
     let Some(value) = agent
         .config
         .get("mcp_servers")
         .or_else(|| agent.config.get("mcpServers"))
     else {
-        return crate::http::platform_mcps::platform_mcp_servers(state, &agent.id, &agent.config);
+        return crate::http::platform_mcps::platform_mcp_servers(
+            state,
+            &agent.id,
+            &agent.config,
+            session_id,
+        );
     };
     let mut servers = if let Some(servers) = value.as_array() {
         servers.clone()
@@ -70,6 +76,7 @@ pub(super) fn mcp_servers(
         state,
         &agent.id,
         &agent.config,
+        session_id,
     )?);
     validate_runtime_mcp_servers(&agent.id, &servers)?;
     Ok(servers)
@@ -129,7 +136,7 @@ pub(super) fn opencode_session_resources(
         "system": &created.agent.system,
         "model": agent_model(&created.agent, &created.environment),
         "tools": &created.agent.tools,
-        "mcp_servers": mcp_servers(state, &created.agent)?,
+        "mcp_servers": mcp_servers(state, &created.agent, Some(&created.row.id))?,
         "environment": &created.environment,
     })))
 }

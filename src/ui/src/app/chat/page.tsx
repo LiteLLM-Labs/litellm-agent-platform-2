@@ -33,7 +33,7 @@ import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
-import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel, listRuntimeEvents } from "@/lib/api";
+import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, interruptSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel, listRuntimeEvents } from "@/lib/api";
 import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
 import type { Agent, AgentRuntimeId, HarnessMessage } from "@/lib/types";
@@ -448,6 +448,8 @@ function ChatInner() {
   const eventBufferRef = useRef<Frame[]>([]);
   const [runtimeEvents, setRuntimeEvents] = useState<RuntimeAgentEvent[]>([]);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  const [interruptingQueuedPromptId, setInterruptingQueuedPromptId] = useState<string | null>(null);
+  const [runtimeStreamVersion, setRuntimeStreamVersion] = useState(0);
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -460,7 +462,6 @@ function ChatInner() {
   const wasNearBottomRef = useRef(true);
   const activeSessionRef = useRef<string | null>(null);
   const autostartedRef = useRef<string | null>(null);
-  const flushingQueuedPromptRef = useRef(false);
 
   const refetch = useCallback(async () => {
     if (!sid) return;
@@ -544,7 +545,7 @@ function ChatInner() {
     setMessages(null);
     setRuntimeEvents([]);
     setQueuedPrompts([]);
-    flushingQueuedPromptRef.current = false;
+    setInterruptingQueuedPromptId(null);
     setError(null);
     setSessionLoaded(false);
     setProviderSessionId(undefined);
@@ -678,29 +679,47 @@ function ChatInner() {
     setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
   }, []);
 
-  useEffect(() => {
-    if (!sid || !sessionRuntime || sessionStatus !== "idle" || queuedPrompts.length === 0) return;
-    if (flushingQueuedPromptRef.current) return;
+  const interruptAndSendQueuedPrompt = useCallback(async (id: string) => {
+    if (!sid || !sessionRuntime || interruptingQueuedPromptId) return;
+    const prompt = queuedPrompts.find((item) => item.id === id);
+    if (!prompt) return;
 
-    const [nextPrompt] = queuedPrompts;
-    flushingQueuedPromptRef.current = true;
-    setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== nextPrompt.id));
-    beginRuntimeTurn(nextPrompt.text);
-    sendMessageWithRuntimeModel({
-      sessionId: sid,
-      text: nextPrompt.text,
-      model,
-      runtime: sessionRuntime,
-    })
-      .catch((err) => {
-        if (activeSessionRef.current !== sid) return;
-        setError(err instanceof Error ? err.message : String(err));
-        setSessionStatus("idle");
-      })
-      .finally(() => {
-        flushingQueuedPromptRef.current = false;
+    setError(null);
+    setInterruptingQueuedPromptId(id);
+    try {
+      if (sessionStatus === "busy") {
+        await interruptSession(sid);
+      }
+      if (activeSessionRef.current !== sid) return;
+      setQueuedPrompts((current) => current.filter((item) => item.id !== id));
+      beginRuntimeTurn(prompt.text);
+      await sendMessageWithRuntimeModel({
+        sessionId: sid,
+        text: prompt.text,
+        model,
+        runtime: sessionRuntime,
       });
-  }, [beginRuntimeTurn, model, queuedPrompts, sessionRuntime, sessionStatus, sid]);
+      if (activeSessionRef.current === sid) {
+        setRuntimeStreamVersion((version) => version + 1);
+      }
+    } catch (err) {
+      if (activeSessionRef.current !== sid) return;
+      setError(err instanceof Error ? err.message : String(err));
+      setSessionStatus("idle");
+    } finally {
+      if (activeSessionRef.current === sid) {
+        setInterruptingQueuedPromptId(null);
+      }
+    }
+  }, [
+    beginRuntimeTurn,
+    interruptingQueuedPromptId,
+    model,
+    queuedPrompts,
+    sessionRuntime,
+    sessionStatus,
+    sid,
+  ]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
@@ -752,7 +771,7 @@ function ChatInner() {
     }
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime]);
+  }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, runtimeStreamVersion]);
 
   useEffect(() => {
     if (!sid || !sessionRuntime || sessionStatus !== "busy") return;
@@ -1083,6 +1102,8 @@ function ChatInner() {
                 key={(m.info.id as string | undefined) ?? i}
                 msg={m}
                 onCancelQueued={cancelQueuedPrompt}
+                onSendQueued={interruptAndSendQueuedPrompt}
+                queuedActionBusy={interruptingQueuedPromptId === m.info.id}
               />
             ))}
             {approvals.map((a) => (

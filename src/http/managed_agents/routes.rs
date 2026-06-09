@@ -11,6 +11,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .merge(agent_routes())
         .merge(rule_routes())
+        .merge(routine_routes())
         .merge(skill_routes())
         .merge(inbox_routes())
         .merge(slack_routes())
@@ -76,6 +77,23 @@ fn rule_routes() -> Router<Arc<AppState>> {
             get(super::rules::get::get)
                 .patch(super::rules::update::update)
                 .delete(super::rules::delete::delete),
+        )
+}
+
+fn routine_routes() -> Router<Arc<AppState>> {
+    Router::new()
+        .route(
+            "/api/routines",
+            post(super::routines::create::create).get(super::routines::list::list),
+        )
+        .route(
+            "/api/routines/{routine_id}",
+            axum::routing::patch(super::routines::update::update)
+                .delete(super::routines::delete::delete),
+        )
+        .route(
+            "/api/routines/{routine_id}/trigger",
+            post(super::routines::trigger::trigger),
         )
 }
 

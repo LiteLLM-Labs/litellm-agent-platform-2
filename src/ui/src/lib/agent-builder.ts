@@ -1,5 +1,6 @@
 import { DEFAULT_TIMEZONE } from "@/lib/schedule";
 import { INTEGRATIONS } from "@/lib/integrations";
+import type { Integration } from "@/lib/integrations";
 import type { AgentRuntime } from "@/lib/types";
 
 export interface AgentDraft {
@@ -16,7 +17,7 @@ export interface AgentDraft {
   skill_ids: string[];
   rule_ids: string[];
   sub_agents: AgentSubAgent[];
-  /** IDs of integrations from INTEGRATIONS catalog to attach as MCP servers. */
+  /** IDs of integrations from the resolved MCP catalog to attach as MCP servers. */
   mcp_server_ids: string[];
   max_runtime_minutes: number;
   on_failure: string;
@@ -657,16 +658,19 @@ export function parseAgentDraftConfig(source: string): ParsedAgentDraft {
   return { draft, error: null };
 }
 
-export function createInputFromDraft(draft: AgentDraft) {
+export function createInputFromDraft(
+  draft: AgentDraft,
+  integrations: Integration[] = INTEGRATIONS,
+) {
   const cron = draft.cron.trim();
   const runtime = draft.runtime.trim() || DEFAULT_RUNTIME;
 
   const resolvedMcpServers = draft.mcp_server_ids
     .map((id) => {
-      const integration = INTEGRATIONS.find((i) => i.id === id);
+      const integration = integrations.find((i) => i.id === id);
       return integration ? { id, type: "url", name: id, url: integration.mcpUrl } : null;
     })
-    .filter((s): s is NonNullable<typeof s> => s !== null);
+    .filter((s): s is NonNullable<typeof s> => s !== null && s.url.trim().length > 0);
   const mcpServers = resolvedMcpServers.map(({ id: _id, ...rest }) => rest);
   const baseTools = draft.tools.filter((t) => t.type !== "mcp_toolset");
   const mcpToolsets = resolvedMcpServers.map(({ id }) => ({ type: "mcp_toolset", mcp_server_name: id }));

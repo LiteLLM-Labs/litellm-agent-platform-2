@@ -124,7 +124,7 @@ async fn create_provider_agent(
                 tools.extend(integration_mcp_toolsets(&created.agent.config));
                 tools
             },
-            mcp_servers: mcp_servers(state, &created.agent)?,
+            mcp_servers: mcp_servers(state, &created.agent, Some(&created.row.id))?,
             workspace: workspace_from_env(&created.environment)?,
             env_vars: None,
             metadata: Some(agent_metadata(&created.agent)),
@@ -154,7 +154,11 @@ async fn platform_mcp_vault_ids(
                 "master_key is required for platform MCP vault auth".to_owned(),
             )
         })?;
-    let url = crate::http::platform_mcps::platform_mcp_url(state, &created.agent.id)?;
+    let url = crate::http::platform_mcps::platform_mcp_url(
+        state,
+        &created.agent.id,
+        Some(&created.row.id),
+    )?;
     let vault_id =
         create_platform_mcp_vault(state, &created.credential.api_key, &url, token).await?;
     Ok(Some(vec![vault_id]))

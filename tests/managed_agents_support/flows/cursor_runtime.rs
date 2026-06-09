@@ -28,6 +28,9 @@ pub async fn exercise_cursor_runtime_stream(fixture: &AppFixture, agent_id: &str
     assert_updated_run(fixture, &session_id).await;
     assert_followup_stream(fixture, &session_id).await;
     assert_session_status(fixture, &session_id, "idle").await;
+    mount_interrupt_run(&cursor).await;
+    interrupt_session(fixture, &session_id).await;
+    assert_interrupt_does_not_emit_abort_error(fixture, &session_id).await;
 }
 
 async fn mount_create_agent(cursor: &MockServer, request: Value) {
@@ -78,6 +81,18 @@ async fn mount_followup_run(cursor: &MockServer) {
                 "status": "CREATING"
             }
         })))
+        .mount(cursor)
+        .await;
+}
+
+async fn mount_interrupt_run(cursor: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/v1/agents/{CURSOR_AGENT_ID}/runs/{SECOND_RUN_ID}/cancel"
+        )))
+        .and(header("authorization", "Bearer cursor-test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .expect(1)
         .mount(cursor)
         .await;
 }
@@ -194,6 +209,31 @@ async fn assert_session_status(fixture: &AppFixture, session_id: &str, status: &
     )
     .await;
     assert_eq!(session["status"], status);
+}
+
+async fn interrupt_session(fixture: &AppFixture, session_id: &str) {
+    request_raw(
+        fixture.app.clone(),
+        "POST",
+        &format!("/session/{session_id}/interrupt"),
+        None,
+        "application/json",
+        StatusCode::NO_CONTENT,
+    )
+    .await;
+}
+
+async fn assert_interrupt_does_not_emit_abort_error(fixture: &AppFixture, session_id: &str) {
+    let events = request_json(
+        fixture.app.clone(),
+        "GET",
+        &format!("/v1/sessions/{session_id}/events"),
+        None,
+    )
+    .await
+    .to_string();
+    assert!(!events.contains("MessageAbortedError"));
+    assert!(!events.contains("\"message\":\"aborted\""));
 }
 
 async fn runtime_events(fixture: &AppFixture, session_id: &str) -> String {

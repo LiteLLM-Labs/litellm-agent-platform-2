@@ -24,6 +24,7 @@ use crate::{
 use super::{
     factory::{agent_url, FACTORY_RUNTIME},
     factory_slack_manifest::{build_child_manifest, install_url},
+    required_str,
 };
 
 pub(crate) async fn create_child_slack_app(
@@ -52,6 +53,15 @@ pub(crate) async fn create_child_slack_app(
     save_child_credentials(state, pool, &app).await?;
     let child = save_child_slack_app(pool, &child, app.config).await?;
     let oauth_state = slack::repository::create_oauth_state(pool, &child.id, &provider_id).await?;
+    create_pending_install(
+        pool,
+        platform,
+        &child,
+        arguments,
+        source_thread_ts,
+        &oauth_state,
+    )
+    .await?;
     let install_url = install_url(
         state,
         required_child_client_id(&child)?,
@@ -67,6 +77,32 @@ pub(crate) async fn create_child_slack_app(
         "source_thread_ts": source_thread_ts,
         "agent": child
     }))
+}
+
+async fn create_pending_install(
+    pool: &PgPool,
+    platform: &ManagedAgentRow,
+    child: &ManagedAgentRow,
+    arguments: &Value,
+    source_thread_ts: &str,
+    oauth_state: &str,
+) -> Result<(), GatewayError> {
+    let channel_id = required_str(arguments, "channel_id")?;
+    slack::bindings::create_pending_install(
+        pool,
+        slack::bindings::PendingInstallInput {
+            state: oauth_state,
+            platform_agent_id: &platform.id,
+            agent_id: &child.id,
+            team_id: optional_str(arguments, "team_id"),
+            channel_id,
+            thread_ts: source_thread_ts,
+            dm_user_id: optional_str(arguments, "dm_user_id"),
+            requested_by: optional_str(arguments, "requested_by"),
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 async fn create_slack_manifest(
@@ -180,6 +216,7 @@ async fn save_child_slack_app(
         UpdateManagedAgent {
             name: None,
             model: None,
+            runtime: None,
             system: None,
             prompt: None,
             cron: None,

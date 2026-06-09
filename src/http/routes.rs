@@ -178,5 +178,6 @@ fn session_routes() -> Router<Arc<AppState>> {
             "/session/{session_id}/runtime_events/list",
             get(sessions::runtime_event_list),
         )
+        .route("/session/{session_id}/interrupt", post(sessions::interrupt))
         .route("/session/{session_id}/abort", post(sessions::abort))
 }

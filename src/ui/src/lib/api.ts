@@ -10,6 +10,7 @@ import type {
   OpencodeSession,
   PlatformMcp,
   Rule,
+  Routine,
   Skill,
   SpendLog,
   VaultKeyEntry,
@@ -238,6 +239,29 @@ export async function createSession(
   },
 ): Promise<OpencodeSession> {
   const res = await reqHarness("/session", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title,
+      ...(agent ? { agent, agent_id: agent, harness: agent } : {}),
+      ...(options?.runtime ? { runtime: options.runtime } : {}),
+      ...(options?.prompt ? { prompt: options.prompt } : {}),
+      ...(options?.environment ? { environment: options.environment } : {}),
+    }),
+  });
+  return jsonOrThrow<OpencodeSession>(res);
+}
+
+export async function createGatewaySession(
+  title?: string,
+  agent?: string,
+  options?: {
+    runtime?: AgentRuntimeId;
+    prompt?: string;
+    environment?: Record<string, unknown>;
+  },
+): Promise<OpencodeSession> {
+  const res = await req("/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -491,6 +515,10 @@ export async function abortSession(id: string): Promise<void> {
   await reqHarness(`/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
 }
 
+export async function interruptSession(id: string): Promise<void> {
+  await reqHarness(`/session/${encodeURIComponent(id)}/interrupt`, { method: "POST" });
+}
+
 export async function listModels(): Promise<string[]> {
   const res = await req("/v1/models");
   if (!res.ok) return [];
@@ -626,10 +654,25 @@ export interface PendingApproval {
   createdAt: number;
 }
 
+interface RawPendingApproval {
+  id: string;
+  tool?: string;
+  title?: string;
+  arguments?: Record<string, unknown>;
+  args_json?: string | null;
+  created_at?: number;
+  createdAt?: number;
+}
+
 export async function listApprovals(): Promise<PendingApproval[]> {
   const res = await req("/api/approvals");
-  const data = await jsonOrThrow<{ approvals: PendingApproval[] }>(res);
-  return data.approvals ?? [];
+  const data = await jsonOrThrow<{ approvals: RawPendingApproval[] }>(res);
+  return (data.approvals ?? []).map((approval) => ({
+    id: approval.id,
+    tool: approval.tool ?? approval.title ?? "approval",
+    arguments: approval.arguments ?? parseArgsJson(approval.args_json) ?? {},
+    createdAt: approval.createdAt ?? approval.created_at ?? 0,
+  }));
 }
 
 export async function acceptApproval(
@@ -676,10 +719,54 @@ export interface InboxItem {
   resolvedAt: number | null;
 }
 
+interface RawInboxItem {
+  id: string;
+  kind: InboxKind;
+  title: string;
+  session_id?: string | null;
+  sessionId?: string | null;
+  agent?: string | null;
+  body?: string | null;
+  args_json?: string | null;
+  args?: Record<string, unknown>;
+  status: InboxStatus;
+  feedback?: string | null;
+  created_at?: number;
+  createdAt?: number;
+  resolved_at?: number | null;
+  resolvedAt?: number | null;
+}
+
 export async function listInbox(filter: InboxFilter = "all"): Promise<InboxItem[]> {
   const res = await req(`/api/inbox?filter=${encodeURIComponent(filter)}`);
-  const data = await jsonOrThrow<{ items: InboxItem[] }>(res);
-  return data.items ?? [];
+  const data = await jsonOrThrow<{ items: RawInboxItem[] }>(res);
+  return (data.items ?? []).map(normalizeInboxItem);
+}
+
+function normalizeInboxItem(item: RawInboxItem): InboxItem {
+  return {
+    id: item.id,
+    kind: item.kind,
+    title: item.title,
+    sessionId: item.sessionId ?? item.session_id ?? null,
+    agent: item.agent ?? null,
+    body: item.body ?? null,
+    args: item.args ?? parseArgsJson(item.args_json),
+    status: item.status,
+    feedback: item.feedback ?? null,
+    createdAt: item.createdAt ?? item.created_at ?? 0,
+    resolvedAt: item.resolvedAt ?? item.resolved_at ?? null,
+  };
+}
+
+function parseArgsJson(argsJson?: string | null): Record<string, unknown> | undefined {
+  if (!argsJson) return undefined;
+  try {
+    const parsed = JSON.parse(argsJson);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Mark an inbox issue done. */
@@ -1141,12 +1228,12 @@ export interface RuntimeAgentEvent {
   [key: string]: unknown;
 }
 
+const RUNTIME_STREAM_RECONNECT_INITIAL_MS = 500;
+const RUNTIME_STREAM_RECONNECT_MAX_MS = 5000;
+
 export async function listRuntimeEvents(sessionId: string): Promise<RuntimeAgentEvent[]> {
-  // Best-effort history replay. The gateway currently only implements the live
-  // SSE stream (/events/stream), not a list endpoint — a GET to
-  // /v1/sessions/{id}/events falls through to the static UI handler and returns
-  // the HTML app shell. Treat any non-JSON or error response as "no history"
-  // instead of throwing a JSON-parse error the caller would surface to the user.
+  // Best-effort history replay. Older gateways only expose the live SSE stream,
+  // so keep non-JSON/error responses non-fatal for local dev and remote harnesses.
   const res = await reqHarness(`/v1/sessions/${encodeURIComponent(sessionId)}/events`);
   if (!res.ok) return [];
   if (!res.headers.get("content-type")?.includes("application/json")) return [];
@@ -1165,8 +1252,17 @@ export function subscribeRuntimeEvents(opts: {
 }): () => void {
   const abort = new AbortController();
   const base = getHarnessServerUrl();
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  void (async () => {
+  const connect = (delayMs: number) => {
+    if (abort.signal.aborted) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void readStream(delayMs);
+    }, delayMs);
+  };
+
+  const readStream = async (lastDelayMs: number) => {
     try {
       const init = base
         ? withHarnessProxyAuth({ headers: { accept: "text/event-stream" } })
@@ -1184,10 +1280,12 @@ export function subscribeRuntimeEvents(opts: {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let sawChunk = false;
 
       while (!abort.signal.aborted) {
         const { done, value } = await reader.read();
         if (done) break;
+        sawChunk = true;
         buffer += decoder.decode(value, { stream: true });
 
         let boundary = sseBoundaryIndex(buffer);
@@ -1198,12 +1296,24 @@ export function subscribeRuntimeEvents(opts: {
           boundary = sseBoundaryIndex(buffer);
         }
       }
+      if (!abort.signal.aborted) {
+        const nextDelayMs = sawChunk
+          ? RUNTIME_STREAM_RECONNECT_INITIAL_MS
+          : Math.min(lastDelayMs * 2, RUNTIME_STREAM_RECONNECT_MAX_MS);
+        connect(nextDelayMs);
+      }
     } catch (e) {
-      if (!abort.signal.aborted) opts.onError?.(e);
+      if (!abort.signal.aborted) {
+        opts.onError?.(e);
+        connect(Math.min(lastDelayMs * 2, RUNTIME_STREAM_RECONNECT_MAX_MS));
+      }
     }
-  })();
+  };
+
+  void readStream(RUNTIME_STREAM_RECONNECT_INITIAL_MS);
 
   return () => {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     abort.abort();
   };
 }
@@ -1304,6 +1414,48 @@ export async function updateAgent(id: string, fields: Partial<Agent>): Promise<A
     body: JSON.stringify(fields),
   });
   return jsonOrThrow<Agent>(res);
+}
+
+export async function listRoutines(agentId?: string): Promise<Routine[]> {
+  const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+  const res = await req(`/api/routines${query}`);
+  const data = await jsonOrThrow<{ routines: Routine[] }>(res);
+  return data.routines ?? [];
+}
+
+export async function createRoutine(
+  input: Pick<Routine, "agent_id" | "name" | "cron"> &
+    Partial<Pick<Routine, "prompt" | "timezone" | "status">>,
+): Promise<Routine> {
+  const res = await req("/api/routines", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<Routine>(res);
+}
+
+export async function updateRoutine(
+  id: string,
+  fields: Partial<Pick<Routine, "agent_id" | "name" | "prompt" | "cron" | "timezone" | "status">>,
+): Promise<Routine> {
+  const res = await req(`/api/routines/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  return jsonOrThrow<Routine>(res);
+}
+
+export async function deleteRoutine(id: string): Promise<void> {
+  await req(`/api/routines/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function triggerRoutine(id: string): Promise<AgentRunStart> {
+  const res = await req(`/api/routines/${encodeURIComponent(id)}/trigger`, {
+    method: "POST",
+  });
+  return jsonOrThrow<AgentRunStart>(res);
 }
 
 export async function createSlackOAuthState(agentId: string): Promise<string> {

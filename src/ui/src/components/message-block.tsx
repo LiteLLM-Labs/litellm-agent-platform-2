@@ -11,6 +11,7 @@ import {
   Globe,
   Loader2,
   Search,
+  Send,
   Terminal,
   Wrench,
   X,
@@ -100,10 +101,14 @@ function InnerMessageBlock({
   msg,
   isFirstUser,
   onCancelQueued,
+  onSendQueued,
+  queuedActionBusy,
 }: {
   msg: LocalMessage;
   isFirstUser: boolean;
   onCancelQueued?: (msgId: string) => void;
+  onSendQueued?: (msgId: string) => void;
+  queuedActionBusy?: boolean;
 }) {
   if (msg.role === "user") {
     return (
@@ -113,10 +118,19 @@ function InnerMessageBlock({
         emphasized={isFirstUser}
         status={msg.status}
         onCancelQueued={onCancelQueued}
+        onSendQueued={onSendQueued}
+        queuedActionBusy={queuedActionBusy}
       />
     );
   }
-  return <AssistantBlock msg={msg} onCancelQueued={onCancelQueued} />;
+  return (
+    <AssistantBlock
+      msg={msg}
+      onCancelQueued={onCancelQueued}
+      onSendQueued={onSendQueued}
+      queuedActionBusy={queuedActionBusy}
+    />
+  );
 }
 
 function UserPromptBlock({
@@ -125,12 +139,16 @@ function UserPromptBlock({
   emphasized,
   status,
   onCancelQueued,
+  onSendQueued,
+  queuedActionBusy,
 }: {
   id: string;
   content: string;
   emphasized: boolean;
   status?: LocalMessage["status"];
   onCancelQueued?: (msgId: string) => void;
+  onSendQueued?: (msgId: string) => void;
+  queuedActionBusy?: boolean;
 }) {
   const queued = status === "queued";
   return (
@@ -147,12 +165,30 @@ function UserPromptBlock({
           <div className="flex items-center gap-1.5 pr-1 text-[12px] text-muted-foreground">
             <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/40" />
             queued
+            {onSendQueued && (
+              <button
+                type="button"
+                onClick={() => onSendQueued(id)}
+                disabled={queuedActionBusy}
+                title="Interrupt active run and send queued message"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                aria-label="Interrupt active run and send queued message"
+              >
+                {queuedActionBusy ? (
+                  <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
+                ) : (
+                  <Send className="size-3" />
+                )}
+                <span>Interrupt and send</span>
+              </button>
+            )}
             {onCancelQueued && (
               <button
                 type="button"
                 onClick={() => onCancelQueued(id)}
+                disabled={queuedActionBusy}
                 title="Cancel queued message"
-                className="rounded p-0.5 transition-colors hover:bg-muted hover:text-foreground"
+                className="rounded p-0.5 transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
                 aria-label="Cancel queued message"
               >
                 <X className="size-3" />
@@ -168,9 +204,13 @@ function UserPromptBlock({
 function AssistantBlock({
   msg,
   onCancelQueued,
+  onSendQueued,
+  queuedActionBusy,
 }: {
   msg: LocalMessage;
   onCancelQueued?: (msgId: string) => void;
+  onSendQueued?: (msgId: string) => void;
+  queuedActionBusy?: boolean;
 }) {
   const failed = msg.status === "failed";
   const inProgress = msg.status === "in_progress";
@@ -201,13 +241,31 @@ function AssistantBlock({
       ) : queued ? (
         <div className="flex items-center gap-2 text-[13px] text-muted-foreground leading-relaxed">
           <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/40" />
-          queued — will send when current finishes
+          queued
+          {onSendQueued && (
+            <button
+              type="button"
+              onClick={() => onSendQueued(msg.id)}
+              disabled={queuedActionBusy}
+              title="Interrupt active run and send queued message"
+              className="ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+              aria-label="Interrupt active run and send queued message"
+            >
+              {queuedActionBusy ? (
+                <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
+              ) : (
+                <Send className="size-3" />
+              )}
+              <span>Interrupt and send</span>
+            </button>
+          )}
           {onCancelQueued && (
             <button
               type="button"
               onClick={() => onCancelQueued(msg.id)}
+              disabled={queuedActionBusy}
               title="Cancel queued message"
-              className="ml-1 p-0.5 rounded hover:bg-muted hover:text-foreground transition-colors"
+              className="ml-1 p-0.5 rounded hover:bg-muted hover:text-foreground transition-colors disabled:pointer-events-none disabled:opacity-50"
               aria-label="Cancel queued message"
             >
               <X className="w-3 h-3" />
@@ -544,10 +602,22 @@ function ToolKv({ label, value }: { label: string; value: unknown }) {
 export function MessageBlock({
   msg,
   onCancelQueued,
+  onSendQueued,
+  queuedActionBusy,
 }: {
   msg: HarnessMessage;
   onCancelQueued?: (msgId: string) => void;
+  onSendQueued?: (msgId: string) => void;
+  queuedActionBusy?: boolean;
 }) {
   const local = toLocal(msg);
-  return <InnerMessageBlock msg={local} isFirstUser={false} onCancelQueued={onCancelQueued} />;
+  return (
+    <InnerMessageBlock
+      msg={local}
+      isFirstUser={false}
+      onCancelQueued={onCancelQueued}
+      onSendQueued={onSendQueued}
+      queuedActionBusy={queuedActionBusy}
+    />
+  );
 }

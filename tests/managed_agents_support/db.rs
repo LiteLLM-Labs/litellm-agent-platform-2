@@ -11,6 +11,7 @@ pub async fn reset_tables(pool: &PgPool) {
           "LiteLLM_CredentialsTable",
           "LiteLLM_ManagedAgentSlackThreadSessionsTable",
           "LiteLLM_ManagedAgentInboxItemsTable",
+          "LiteLLM_ManagedAgentRoutinesTable",
           "LiteLLM_ManagedAgentRunsTable",
           "LiteLLM_ManagedAgentFilesTable",
           "LiteLLM_ManagedAgentMemoriesTable",

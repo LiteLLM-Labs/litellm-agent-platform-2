@@ -102,6 +102,7 @@ pub(crate) async fn update_slack_config(
         UpdateManagedAgent {
             name: None,
             model: None,
+            runtime: None,
             system: None,
             prompt: None,
             cron: None,

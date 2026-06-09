@@ -193,6 +193,32 @@ pub async fn abort(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn interrupt(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(session_id): Path<String>,
+) -> Result<StatusCode, GatewayError> {
+    let pool = db(&state, &headers)?;
+    let Ok(Some(row)) = sessions::repository::get(pool, &session_id).await else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    let Some(runtime) = row.runtime.as_deref() else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    let Ok(client) = runtime_sdk_client(&state, runtime).await else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    if register_runtime_session(&client, &row).is_ok() {
+        let _ = client
+            .beta()
+            .sessions()
+            .events()
+            .interrupt(&session_id)
+            .await;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 fn record_prompt_error(state: &AppState, session_id: &str, error: GatewayError) {
     let message = error.to_string();
     state.agent_runs.set_error(session_id, message.clone());

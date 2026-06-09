@@ -17,6 +17,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  Zap,
   Trash2,
   Users,
 } from "lucide-react";
@@ -166,6 +167,12 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
           href: "/agents/",
           icon: Bot,
           active: (path) => path.startsWith("/agents"),
+        },
+        {
+          label: "Routines",
+          href: "/routines/",
+          icon: Zap,
+          active: (path) => path.startsWith("/routines"),
         },
         {
           label: "Inbox",
