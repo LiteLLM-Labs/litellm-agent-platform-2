@@ -26,6 +26,16 @@ pub(super) fn validate_runtime_mcp_servers(
                 "{agent_id} config.mcp_servers.{index}.url is required"
             )));
         };
+        // Reject unresolved `${VAR}` placeholders: reqwest::Url::parse tolerates
+        // them (percent-encoding), but the managed-agents runtime rejects such a
+        // URL as an invalid URI. Templated registered servers must have been
+        // rewritten to the gateway proxy by `rewrite_registered_mcp_servers`.
+        if url.contains("${") {
+            return Err(GatewayError::InvalidConfig(format!(
+                "{agent_id} config.mcp_servers.{index}.url contains unresolved variables; \
+                 it must be proxied through the gateway or fully resolved"
+            )));
+        }
         let parsed = reqwest::Url::parse(url).map_err(|_| {
             GatewayError::InvalidConfig(format!(
                 "{agent_id} config.mcp_servers.{index}.url must be an absolute http(s) URL"
