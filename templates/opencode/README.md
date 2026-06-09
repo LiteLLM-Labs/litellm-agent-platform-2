@@ -193,17 +193,40 @@ kill "$sse_pid" 2>/dev/null || true
 
 You should see `session.status_running`, one or more `agent.message` frames, and finally `session.status_idle`.
 
+## How config is loaded (important)
+
+opencode only scans custom agents and per-project config when the workspace is a
+**git project**, and it loads them **at boot — there is no hot-reload**. So this
+server:
+
+1. `git init`s the `WORKDIR` on startup.
+2. On `POST`/`PATCH /v1/agents`, writes the agent's `.opencode/agent/<id>.md` +
+   `opencode.json` mcp, then **reboots the child `opencode`** so it loads.
+3. On prompt, passes `agent:<id>` so opencode applies that agent's permissions
+   and MCP servers.
+
+Reboot is fast (~2s) but **clears opencode's in-memory sessions** — create/update
+agents before running their sessions.
+
 ## Agent config fields
 
-These map straight onto opencode config the server provisions per session:
-
-| Field | Type | Maps to | Notes |
+| Field | Type | Maps to | Applied? |
 | --- | --- | --- | --- |
-| `system` | string | body of `.opencode/agent/<id>.md` | the agent's system prompt |
-| `model` | string or `{id}` | frontmatter `model:` | e.g. `anthropic/claude-sonnet-4-5` |
-| `permissions` | object | frontmatter | per-tool `bash` / `edit` set to `allow` \| `deny` \| `ask` |
-| `mcp_servers` | array | `opencode.json` `mcp` entries | MCP servers wired into the session |
+| `model` | string or `{id}` | per-prompt `{providerID, modelID}` | ✅ yes |
+| `mcp_servers` | array | `opencode.json` `mcp` | ✅ **yes** — tools are callable (verified with DeepWiki) |
+| `permissions` | object | agent frontmatter | ✅ yes — `bash` / `edit` / `<mcp>*` → `allow` \| `deny` \| `ask` |
+| `system` | string | `.opencode/agent/<id>.md` body | ⚠️ **soft only** — see below |
 | `workspace` (via environment `config`) | object | checkout dir | optional git `repository` / `ref` |
+
+### System prompt is soft guidance, not strict control
+
+opencode is a **coding harness**: it injects its own large (~19.7k-token)
+agent system prompt, which **dominates**. Your `system` string is appended but
+does **not** reliably override behavior (e.g. "reply only BANANA" is ignored).
+Use it to nudge tone/role; do **not** rely on it for strict output control. If
+you need a faithful system prompt, call the model directly (or use a
+non-opencode harness) — opencode is the right backend for **tool / MCP / coding**
+workflows, where it shines.
 
 ## Environment variables
 
@@ -244,6 +267,10 @@ pointed here) against a LiteLLM-gateway-backed server:
 - **query → interrupt** — a 500-word essay request streamed
   (`# The Rise, Glory, and Fall of the Roman Empire …`), then `POST …/abort`
   → `{"aborted":true}` and **zero further tokens**; the turn ended.
+- **MCP tool use** — an agent created with `mcp_servers:[{name:"deepwiki",url:…}]`
+  (+ `permissions:{"deepwiki*":"allow"}`) → asked to look up a repo → emitted
+  `agent.tool_use` (`deepwiki_read_wiki_structure`) and returned real wiki
+  sections for `facebook/react` / `vercel/next.js`.
 
 Reproduce the SDK path with:
 `cargo test --test opencode_anthropic_server_live -- --ignored --nocapture`
