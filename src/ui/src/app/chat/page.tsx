@@ -679,7 +679,7 @@ function ChatInner() {
       setError(err instanceof Error ? err.message : String(err));
       setSessionStatus("idle");
     });
-  }, [model, queueRuntimePrompt, sessionRuntime, sessionStatus, sid]);
+  }, [model, queueRuntimePrompt, sessionRuntime, sessionStatus, sid, harnesses]);
 
   const cancelQueuedPrompt = useCallback((id: string) => {
     setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
@@ -726,7 +726,7 @@ function ChatInner() {
     sessionRuntime,
     sessionStatus,
     sid,
-  ]);
+  , harnesses]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
@@ -779,7 +779,7 @@ function ChatInner() {
     }
     listApprovals().then(setApprovals).catch(() => {});
     return unsub;
-  }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, runtimeStreamVersion]);
+  }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, runtimeStreamVersion, harnesses]);
 
   useEffect(() => {
     if (!sid || !sessionRuntime || sessionStatus !== "busy") return;

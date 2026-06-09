@@ -42,16 +42,12 @@ pub(crate) async fn resolve_runtime(
     // 2. Custom harness: DB lookup
     let harness = harnesses::repository::get_by_alias(pool, alias)
         .await?
-        .ok_or_else(|| {
-            GatewayError::InvalidJsonMessage(format!("unsupported runtime: {alias}"))
-        })?;
+        .ok_or_else(|| GatewayError::InvalidJsonMessage(format!("unsupported runtime: {alias}")))?;
 
     let registry = providers::runtime_registry();
-    let entry = registry
-        .entry_for_id(&harness.api_spec)
-        .ok_or_else(|| {
-            GatewayError::InvalidConfig(format!("unknown api_spec: {}", harness.api_spec))
-        })?;
+    let entry = registry.entry_for_id(&harness.api_spec).ok_or_else(|| {
+        GatewayError::InvalidConfig(format!("unknown api_spec: {}", harness.api_spec))
+    })?;
 
     // Load credential from credentials table
     let cred_name = harness_credential_name(alias);
@@ -86,11 +82,8 @@ fn decrypt_field(
     field: &str,
     key: &str,
 ) -> Result<String, GatewayError> {
-    let enc = values
-        .get(field)
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            GatewayError::InvalidConfig(format!("harness credential missing field: {field}"))
-        })?;
+    let enc = values.get(field).and_then(|v| v.as_str()).ok_or_else(|| {
+        GatewayError::InvalidConfig(format!("harness credential missing field: {field}"))
+    })?;
     credential_crypto::decrypt_value(enc, key)
 }

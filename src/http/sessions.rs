@@ -208,10 +208,15 @@ pub async fn interrupt(
     let Some(runtime) = row.runtime.as_deref() else {
         return Ok(StatusCode::NO_CONTENT);
     };
-    let Ok(client) = runtime_sdk_client(&state, runtime).await else {
+    let Ok(resolved) =
+        crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await
+    else {
         return Ok(StatusCode::NO_CONTENT);
     };
-    if register_runtime_session(&client, &row).is_ok() {
+    let Ok(client) = runtime_sdk_client(&resolved) else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    if register_runtime_session(&client, &row, &resolved).is_ok() {
         let _ = client
             .beta()
             .sessions()
