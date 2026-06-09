@@ -166,13 +166,18 @@ const wrap = (fn) => (req, res) =>
   });
 
 // ---- health ---------------------------------------------------------------
+// Non-blocking: report opencode readiness WITHOUT awaiting a (possibly slow)
+// boot. The web server is healthy as soon as the port is up; opencode comes
+// online in the background. Blocking here would hang the platform health check.
 app.get("/health", wrap(async (_req, res) => {
   let opencode = false;
-  try {
-    const r = await ocFetch(await ocBase(), "/global/health", {});
-    opencode = !!r?.ok;
-  } catch {
-    opencode = false;
+  if (oc) {
+    try {
+      const r = await ocFetch(oc.baseUrl, "/global/health", {});
+      opencode = !!r?.ok;
+    } catch {
+      opencode = false;
+    }
   }
   res.json({ ok: true, opencode });
 }));
