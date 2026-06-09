@@ -1,58 +1,90 @@
-# Design: Multiple Runtime Harnesses with Aliases
+# Design: Multiple Runtime Harnesses with Aliases (v2)
 
 ## Problem
 
-Gateway has 3 hardcoded runtimes (`claude_managed_agents`, `cursor`, `opencode`). Users need to add additional harness endpoints — e.g. a staging Anthropic endpoint, a team-specific Cursor instance — each addressable by a distinct alias.
+Gateway has 3 hardcoded runtimes (`claude_managed_agents`, `cursor`, `opencode`). Users need additional harness endpoints (e.g. staging Anthropic, team-specific Cursor) addressable by alias.
 
 ## Goals
 
-- Let gateway admins register multiple harnesses (any API spec) with custom aliases
-- Platform users reference harnesses by alias when building agents
-- Zero breaking changes — existing runtime names continue to work
+- Admin registers custom harnesses with aliases; platform users reference by alias
+- Zero breaking changes — existing runtime names work unchanged
+- Alias survives full session lifecycle: creation, follow-up prompts, event streaming
 
 ## Non-Goals
 
-- Per-user harness scoping (global only for now)
-- Harness config file export/import
+- Per-user harness scoping (global/admin-only for now)
+
+---
+
+## Core: `ResolvedRuntime`
+
+Single resolver used by every session code path — eliminates per-call registry lookups:
+
+```rust
+pub(crate) struct ResolvedRuntime {
+    pub alias: String,           // stored in DB as session.runtime
+    pub agent_runtime: AgentRuntime,  // enum from api_spec or direct static match
+    pub credential: RuntimeCredential,
+    pub adapter: Arc<dyn RuntimeAdapter>,
+}
+
+pub(crate) async fn resolve_runtime(
+    pool: &PgPool, state: &AppState, alias: &str,
+) -> Result<ResolvedRuntime, GatewayError> {
+    // 1. Static registry (claude_managed_agents, cursor, opencode) → unchanged path
+    // 2. DB lookup by alias → api_spec maps to existing adapter
+}
+```
+
+All `sdk_runtime(runtime)` and `runtime_registry().entry_for_id(runtime)` call sites replaced with `resolved.agent_runtime` / `resolved.adapter`.
+
+---
 
 ## Data Model
-
-New table `LiteLLM_RuntimeHarnessTable`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS "LiteLLM_RuntimeHarnessTable" (
   id          TEXT PRIMARY KEY,
-  alias       TEXT UNIQUE NOT NULL,   -- user-facing; reserved names rejected
-  api_spec    TEXT NOT NULL,          -- "claude_managed_agents" | "cursor" | "opencode"
+  alias       TEXT UNIQUE NOT NULL,
+  api_spec    TEXT NOT NULL CHECK (api_spec IN ('claude_managed_agents', 'cursor', 'opencode')),
   api_base    TEXT NOT NULL,
   created_at  BIGINT NOT NULL,
   updated_at  BIGINT NOT NULL
 );
 ```
 
-API keys in existing `LiteLLM_CredentialsTable` under `credential_name = 'runtime-harness:{alias}'`.
+API key: `LiteLLM_CredentialsTable`, `credential_name = 'runtime-harness:{alias}'`, `scope = 'global'`, encrypted via `credential_crypto`.
+
+---
 
 ## API
 
 Keep `/api/agent-runtimes` intact. Add:
 
-| Method | Path |
-|--------|------|
-| GET | `/api/runtime-harnesses` |
-| POST | `/api/runtime-harnesses` |
-| PUT | `/api/runtime-harnesses/{alias}` |
-| DELETE | `/api/runtime-harnesses/{alias}` |
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/api/runtime-harnesses` | defaults (`is_default: true`) + custom DB rows |
+| POST | `/api/runtime-harnesses` | `{ alias, api_spec, api_base, api_key }` |
+| PUT | `/api/runtime-harnesses/{alias}` | update credentials |
+| DELETE | `/api/runtime-harnesses/{alias}` | custom only |
 
-GET returns defaults (hardcoded, `is_default: true`) merged with custom DB entries.
+All write operations: master key required, atomic (harness row + credential in sync), reserved/non-slug alias rejected.
 
-## Session Provisioning
+Reserved aliases: `claude_managed_agents`, `cursor`, `opencode`, `claude_agents`.  
+Valid slug: `[a-zA-Z0-9_-]+`.
 
-`runtime_provision.rs` resolution order:
-1. Static match (`claude_managed_agents`, `cursor`, `opencode`) → existing unchanged
-2. DB lookup by alias → dispatch on `api_spec`
-3. Unknown → 400
+---
 
-## UI Changes
+## Frontend
 
-- `/runtimes` page: unified list with "+ New Runtime" modal (alias, api_spec, api_base, api_key)
-- Agent creation: runtime selector dropdown (all connected harnesses, default = `claude_managed_agents`)
+- `AgentRuntimeId` type widened from 3-value union → `string`
+- `isAgentRuntimeId()` in `sessions/page.tsx` accepts any non-empty string
+- `createSession`, `sendMessageWithRuntimeModel` in `api.ts` accept `runtime?: string`
+- `/runtimes` page: unified list (defaults + custom) with "+ New Runtime" modal
+- Agent creation: runtime selector dropdown from `/api/runtime-harnesses`
+
+---
+
+## Tests
+
+Backend integration tests: create harness, session via alias, follow-up prompt, list/stream events, delete, reject reserved/invalid aliases.
