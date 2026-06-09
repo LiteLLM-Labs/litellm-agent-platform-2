@@ -10,14 +10,18 @@ import {
   Clipboard,
   Code2,
   Database,
+  ExternalLink,
   FileSearch,
   FileText,
+  KeyRound,
   LifeBuoy,
   Loader2,
   Mail,
+  Plug,
   Search,
   ShieldCheck,
   Sparkles,
+  Wrench,
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -40,8 +44,24 @@ import {
   withRuntimeDefaultTools,
 } from "@/lib/agent-builder";
 import type { AgentDraft, AgentTemplate } from "@/lib/agent-builder";
-import { INTEGRATIONS } from "@/lib/integrations";
-import { apiErrorMessage, createAgent, draftAgentConfigWithModel, listAgentRuntimes, listAgents, listModels, listRules, listSkills } from "@/lib/api";
+import {
+  integrationFromMcpServer,
+  sortIntegrations,
+} from "@/lib/integrations";
+import type { Integration } from "@/lib/integrations";
+import {
+  apiErrorMessage,
+  createAgent,
+  draftAgentConfigWithModel,
+  listAgentRuntimes,
+  listAgents,
+  listMcpServerTools,
+  listMcpUserCredentials,
+  listModels,
+  listPublicMcpServers,
+  listRules,
+  listSkills,
+} from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
 import type { Agent, AgentRuntime, Rule, Skill } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -73,6 +93,9 @@ export default function NewAgentPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
+  const [mcpIntegrations, setMcpIntegrations] = useState<Integration[]>([]);
+  const [mcpLoading, setMcpLoading] = useState(true);
+  const [mcpError, setMcpError] = useState<string | null>(null);
   const [view, setView] = useState<BuilderView>("edit");
   const [drafting, setDrafting] = useState(false);
   const [lastRequest, setLastRequest] = useState("");
@@ -86,8 +109,11 @@ export default function NewAgentPage() {
   const canCreate = !saving && !parsed.error && draft.name.trim().length > 0;
 
   useEffect(() => {
+    let cancelled = false;
+
     Promise.all([listAgentRuntimes(), listModels(), listAgents(), listSkills(), listRules()])
       .then(([runtimeValues, modelValues, agentValues, skillValues, ruleValues]) => {
+        if (cancelled) return;
         setRuntimes(runtimeValues);
         setModels(modelValues);
         setAgents(agentValues);
@@ -100,12 +126,56 @@ export default function NewAgentPage() {
         );
       })
       .catch(() => {
+        if (cancelled) return;
         setRuntimes([]);
         setModels([]);
         setAgents([]);
         setSkills([]);
         setRules([]);
       });
+
+    const loadMcpIntegrations = async () => {
+      setMcpLoading(true);
+      setMcpError(null);
+      try {
+        const [servers, credentials] = await Promise.all([
+          listPublicMcpServers(),
+          listMcpUserCredentials().catch(() => [] as { server_id: string }[]),
+        ]);
+        const connectedIds = new Set(credentials.map((credential) => credential.server_id));
+        const toolEntries = await Promise.all(
+          servers.map(async (server) => {
+            try {
+              const tools = await listMcpServerTools(server.server_id);
+              return [server.server_id, tools.map((tool) => tool.name).filter(Boolean)] as const;
+            } catch {
+              return [server.server_id, [] as string[]] as const;
+            }
+          }),
+        );
+        if (cancelled) return;
+        const toolsByServer = new Map(toolEntries);
+        const registryIntegrations = servers.map((server) =>
+          integrationFromMcpServer(server, {
+            connected: connectedIds.has(server.server_id),
+            tools: toolsByServer.get(server.server_id),
+          }),
+        );
+        setMcpIntegrations(sortIntegrations(registryIntegrations));
+      } catch (err) {
+        if (cancelled) return;
+        setMcpIntegrations([]);
+        setMcpError(apiErrorMessage(err, "MCP integrations unavailable"));
+      } finally {
+        if (!cancelled) setMcpLoading(false);
+      }
+    };
+
+    void loadMcpIntegrations();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const openConfig = (
@@ -166,7 +236,7 @@ export default function NewAgentPage() {
     setSaving(true);
     setError(null);
     try {
-      const agent = await createAgent(createInputFromDraft(current.draft));
+      const agent = await createAgent(createInputFromDraft(current.draft, mcpIntegrations));
       router.push(`/agents/detail/?id=${encodeURIComponent(agent.id)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create agent");
@@ -247,6 +317,9 @@ export default function NewAgentPage() {
               error={error}
               lastRequest={lastRequest}
               agents={agents}
+              mcpError={mcpError}
+              mcpIntegrations={mcpIntegrations}
+              mcpLoading={mcpLoading}
               models={models}
               parsedError={parsed.error}
               prompt={prompt}
@@ -423,6 +496,9 @@ function ConfigStep({
   error,
   lastRequest,
   agents,
+  mcpError,
+  mcpIntegrations,
+  mcpLoading,
   models,
   parsedError,
   prompt,
@@ -448,6 +524,9 @@ function ConfigStep({
   error: string | null;
   lastRequest: string;
   agents: Agent[];
+  mcpError: string | null;
+  mcpIntegrations: Integration[];
+  mcpLoading: boolean;
   models: string[];
   parsedError: string | null;
   prompt: string;
@@ -601,6 +680,9 @@ function ConfigStep({
             <AgentDraftControls
               agents={agents}
               draft={draft}
+              mcpError={mcpError}
+              mcpIntegrations={mcpIntegrations}
+              mcpLoading={mcpLoading}
               models={models}
               rules={rules}
               skills={skills}
@@ -616,7 +698,7 @@ function ConfigStep({
               aria-label="Agent YAML config"
             />
           ) : (
-            <ConfigPreview draft={draft} />
+            <ConfigPreview draft={draft} mcpIntegrations={mcpIntegrations} />
           )}
 
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-white/10 px-4 py-3 text-xs text-[#c9c0b1]">
@@ -716,6 +798,9 @@ function TemplateBrowser({
 function AgentDraftControls({
   agents,
   draft,
+  mcpError,
+  mcpIntegrations,
+  mcpLoading,
   models,
   rules,
   skills,
@@ -724,6 +809,9 @@ function AgentDraftControls({
 }: {
   agents: Agent[];
   draft: AgentDraft;
+  mcpError: string | null;
+  mcpIntegrations: Integration[];
+  mcpLoading: boolean;
   models: string[];
   rules: Rule[];
   skills: Skill[];
@@ -756,6 +844,13 @@ function AgentDraftControls({
       skill_ids: enabled
         ? Array.from(new Set([...draft.skill_ids, skillId]))
         : draft.skill_ids.filter((id) => id !== skillId),
+    });
+  };
+  const toggleMcpIntegration = (integrationId: string, enabled: boolean) => {
+    update({
+      mcp_server_ids: enabled
+        ? Array.from(new Set([...draft.mcp_server_ids, integrationId]))
+        : draft.mcp_server_ids.filter((id) => id !== integrationId),
     });
   };
 
@@ -887,54 +982,139 @@ function AgentDraftControls({
 
         <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
           <div className="flex items-center justify-between gap-3">
-            <Label className="text-sm font-medium">MCP integrations</Label>
+            <div className="grid gap-1">
+              <Label className="text-sm font-medium">MCP integrations</Label>
+              <p className="max-w-xl text-xs leading-5 text-muted-foreground">
+                Attach managed MCP servers from the registry. Toolsets are rebuilt from these IDs when the agent is created.
+              </p>
+            </div>
             <span className="font-mono text-xs text-[#9d9384]">
-              {draft.mcp_server_ids.length} connected
+              {draft.mcp_server_ids.length} attached
             </span>
           </div>
-          <div className="grid max-h-[284px] gap-2 overflow-y-auto pr-1">
-            {INTEGRATIONS.map((integration) => {
-              const enabled = draft.mcp_server_ids.includes(integration.id);
-              const toggle = (on: boolean) => {
-                const next = on
-                  ? [...draft.mcp_server_ids, integration.id]
-                  : draft.mcp_server_ids.filter((id) => id !== integration.id);
-                update({ mcp_server_ids: next });
-              };
-              return (
-                <label
-                  key={integration.id}
-                  className="flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-2 text-xs hover:bg-white/10"
+          {mcpError && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+              {mcpError}
+            </div>
+          )}
+          {mcpLoading ? (
+            <div className="grid gap-2">
+              {[0, 1, 2].map((item) => (
+                <div
+                  key={item}
+                  className="rounded-md border border-white/10 bg-white/5 px-2.5 py-3"
                 >
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    onChange={(e) => toggle(e.target.checked)}
-                    className="mt-0.5 size-3.5 shrink-0"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{integration.name}</span>
-                      <span className="truncate font-mono text-[#9d9384]">{integration.envKey}</span>
-                    </div>
-                    <div className="mt-0.5 text-[#9d9384]">{integration.description}</div>
-                    {enabled && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {integration.tools.map((tool) => (
-                          <span
-                            key={tool}
-                            className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#c9c0b1]"
-                          >
-                            {tool}
-                          </span>
-                        ))}
-                      </div>
+                  <div className="h-3 w-1/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+                  <div className="mt-2 h-3 w-2/3 animate-pulse rounded bg-muted motion-reduce:animate-none" />
+                </div>
+              ))}
+            </div>
+          ) : mcpIntegrations.length === 0 ? (
+            <div className="rounded-md border border-white/10 bg-white/5 px-3 py-4 text-center">
+              <Plug className="mx-auto size-6 text-muted-foreground" />
+              <p className="mt-2 text-xs font-medium">No MCP servers available</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Add a server in the MCP registry, then return here to attach it.
+              </p>
+            </div>
+          ) : (
+            <div className="grid max-h-[360px] gap-2 overflow-y-auto pr-1">
+              {mcpIntegrations.map((integration) => {
+                const enabled = draft.mcp_server_ids.includes(integration.id);
+                const availableTools = integration.tools.filter(Boolean);
+                const previewTools = availableTools.slice(0, 8);
+                const remainingTools = Math.max(availableTools.length - previewTools.length, 0);
+                const canAttach = integration.mcpUrl.trim().length > 0;
+                return (
+                  <label
+                    key={integration.id}
+                    className={cn(
+                      "flex min-w-0 cursor-pointer items-start gap-2.5 rounded-md border border-white/10 bg-white/5 px-2.5 py-2.5 text-xs hover:bg-white/10",
+                      enabled && "border-white/30 bg-white/10",
+                      !canAttach && "cursor-not-allowed opacity-70",
                     )}
-                  </div>
-                </label>
-              );
-            })}
-          </div>
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      disabled={!canAttach}
+                      onChange={(event) => toggleMcpIntegration(integration.id, event.target.checked)}
+                      className="mt-0.5 size-3.5 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{integration.name}</span>
+                        <span className="truncate font-mono text-muted-foreground">{integration.id}</span>
+                        <Badge variant="outline" className="h-5 rounded-md border-white/10 bg-white/5 text-[10px] text-[#c9c0b1]">
+                          {integration.source === "registry" ? "Registry" : "Catalog"}
+                        </Badge>
+                        {integration.connected ? (
+                          <Badge variant="secondary" className="h-5 rounded-md text-[10px]">
+                            <KeyRound className="size-3" />
+                            Connected
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="h-5 rounded-md border-white/10 bg-white/5 text-[10px] text-[#c9c0b1]">
+                            <KeyRound className="size-3" />
+                            Needs Credentials
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="mt-1 line-clamp-2 text-muted-foreground">
+                        {integration.description}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <KeyRound className="size-3" />
+                          {integration.envKey}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <Wrench className="size-3" />
+                          {availableTools.length > 0
+                            ? `${availableTools.length} tools available`
+                            : "Tools not discovered yet"}
+                        </span>
+                      </div>
+                      {(enabled || availableTools.length > 0) && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {previewTools.map((tool) => (
+                            <span
+                              key={tool}
+                              className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#c9c0b1]"
+                            >
+                              {tool}
+                            </span>
+                          ))}
+                          {remainingTools > 0 && (
+                            <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#c9c0b1]">
+                              +{remainingTools} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {!canAttach && (
+                        <p className="mt-2 text-xs text-destructive">
+                          This server is missing a URL, so it cannot be attached to a managed agent yet.
+                        </p>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              window.location.href = "/mcp-servers/";
+            }}
+            className="justify-self-start border-white/10 bg-white/5 text-[#f7f2e8] hover:bg-white/10 hover:text-white"
+          >
+            <ExternalLink className="size-3.5" />
+            Manage MCP Servers
+          </Button>
         </div>
 
         <div className="grid gap-2 rounded-md border border-white/10 bg-black/10 p-3 text-[#f7f2e8]">
@@ -1034,7 +1214,29 @@ function AgentDraftControls({
   );
 }
 
-function ConfigPreview({ draft }: { draft: AgentDraft }) {
+function ConfigPreview({
+  draft,
+  mcpIntegrations,
+}: {
+  draft: AgentDraft;
+  mcpIntegrations: Integration[];
+}) {
+  const selectedMcpIntegrations = draft.mcp_server_ids.map((id) => {
+    const integration = mcpIntegrations.find((item) => item.id === id);
+    return integration ?? {
+      id,
+      name: id,
+      description: "Unknown MCP server.",
+      category: "Other",
+      envKey: "Unknown",
+      mcpUrl: "",
+      tools: [],
+      source: "catalog" as const,
+      connected: false,
+      status: null,
+    };
+  });
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <div className="grid gap-5">
@@ -1062,8 +1264,35 @@ function ConfigPreview({ draft }: { draft: AgentDraft }) {
           <TokenList label="Vault keys" values={draft.vault_keys} />
           <TokenList label="Skill IDs" values={draft.skill_ids} />
           <TokenList label="Rule IDs" values={draft.rule_ids} />
-          <TokenList label="MCP integrations" values={draft.mcp_server_ids} />
           <TokenList label="Sub-agents" values={draft.sub_agents.map((agent) => agent.agent_id)} />
+        </div>
+
+        <div className="rounded-lg border border-white/10 bg-black/10 p-3">
+          <div className="text-xs uppercase text-[#9d9384]">MCP integrations</div>
+          {selectedMcpIntegrations.length === 0 ? (
+            <div className="mt-2 text-xs text-[#c9c0b1]">None</div>
+          ) : (
+            <div className="mt-3 grid gap-2">
+              {selectedMcpIntegrations.map((integration) => {
+                const toolCount = integration.tools.filter(Boolean).length;
+                return (
+                  <div
+                    key={integration.id}
+                    className="rounded-md border border-white/10 bg-white/5 px-2.5 py-2"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-[#f7f2e8]">{integration.name}</span>
+                      <span className="font-mono text-[11px] text-[#9d9384]">{integration.id}</span>
+                      <Badge variant="outline" className="h-5 rounded-md border-white/10 bg-white/5 text-[10px] text-[#c9c0b1]">
+                        {toolCount > 0 ? `${toolCount} tools` : "Toolset attached"}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-[#c9c0b1]">{integration.description}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
