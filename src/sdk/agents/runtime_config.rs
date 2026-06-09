@@ -95,6 +95,15 @@ pub(super) fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, Runtim
             },
         );
     }
+    if let Some(base_url) = config.hermes_base_url {
+        runtimes.insert(
+            AgentRuntime::Hermes,
+            RuntimeConfig {
+                base_url: base_url.trim_end_matches('/').to_owned(),
+                auth: RuntimeAuth::Bearer(config.hermes_api_key.unwrap_or_default()),
+            },
+        );
+    }
     runtimes
 }
 

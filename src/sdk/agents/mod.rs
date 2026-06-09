@@ -22,5 +22,6 @@ pub use types::{
     AgentWorkspace, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams, Environment,
     LapConfig, ManagedAgent, ManagedSessionRef, SendEventsParams, SendEventsResponse, Session,
     ANTHROPIC_VERSION, CLAUDE_MANAGED_AGENTS, CURSOR, DEFAULT_ANTHROPIC_BASE_URL,
-    DEFAULT_CURSOR_BASE_URL, DEFAULT_OPENCODE_BASE_URL, MANAGED_AGENTS_BETA, OPENCODE,
+    DEFAULT_CURSOR_BASE_URL, DEFAULT_HERMES_BASE_URL, DEFAULT_OPENCODE_BASE_URL, HERMES,
+    MANAGED_AGENTS_BETA, OPENCODE,
 };

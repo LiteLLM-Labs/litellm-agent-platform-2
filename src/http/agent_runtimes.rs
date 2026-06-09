@@ -15,11 +15,11 @@ use crate::{
         credential_crypto,
         provider_credentials::{
             self, ProviderCredentialInput, ANTHROPIC_PROVIDER_ID, CURSOR_PROVIDER_ID,
-            OPENCODE_PROVIDER_ID,
+            HERMES_PROVIDER_ID, OPENCODE_PROVIDER_ID,
         },
         state::AppState,
     },
-    sdk::agents::{AgentRuntime, CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
+    sdk::agents::{AgentRuntime, CLAUDE_MANAGED_AGENTS, CURSOR, HERMES, OPENCODE},
 };
 
 use super::agent_runtime_tools::{runtime_tools, RuntimeTool};
@@ -250,6 +250,7 @@ fn credential_provider_id(runtime: &str) -> Result<&'static str, GatewayError> {
         CLAUDE_MANAGED_AGENTS | CLAUDE_AGENTS_RUNTIME_LEGACY => Ok(ANTHROPIC_PROVIDER_ID),
         CURSOR => Ok(CURSOR_PROVIDER_ID),
         OPENCODE => Ok(OPENCODE_PROVIDER_ID),
+        HERMES => Ok(HERMES_PROVIDER_ID),
         _ => Err(GatewayError::InvalidConfig(format!(
             "no credential provider for runtime: {runtime}"
         ))),

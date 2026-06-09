@@ -10,9 +10,11 @@ pub use errors::AgentSdkError;
 pub const CLAUDE_MANAGED_AGENTS: &str = "claude_managed_agents";
 pub const CURSOR: &str = "cursor";
 pub const OPENCODE: &str = "opencode";
+pub const HERMES: &str = "hermes";
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_CURSOR_BASE_URL: &str = "https://api.cursor.com";
 pub const DEFAULT_OPENCODE_BASE_URL: &str = "http://127.0.0.1:4096";
+pub const DEFAULT_HERMES_BASE_URL: &str = "http://127.0.0.1:8080";
 pub const MANAGED_AGENTS_BETA: &str = "managed-agents-2026-04-01";
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
@@ -21,6 +23,7 @@ pub enum AgentRuntime {
     ClaudeManagedAgents,
     Cursor,
     OpenCode,
+    Hermes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +35,7 @@ pub struct AgentRuntimeCatalogEntry {
 }
 
 impl AgentRuntime {
-    pub const CATALOG: [AgentRuntimeCatalogEntry; 3] = [
+    pub const CATALOG: [AgentRuntimeCatalogEntry; 4] = [
         AgentRuntimeCatalogEntry {
             runtime: Self::ClaudeManagedAgents,
             id: CLAUDE_MANAGED_AGENTS,
@@ -51,6 +54,12 @@ impl AgentRuntime {
             name: "OpenCode",
             default_api_base: DEFAULT_OPENCODE_BASE_URL,
         },
+        AgentRuntimeCatalogEntry {
+            runtime: Self::Hermes,
+            id: HERMES,
+            name: "Hermes",
+            default_api_base: DEFAULT_HERMES_BASE_URL,
+        },
     ];
 
     pub fn catalog() -> &'static [AgentRuntimeCatalogEntry] {
@@ -62,6 +71,7 @@ impl AgentRuntime {
             Self::ClaudeManagedAgents => CLAUDE_MANAGED_AGENTS,
             Self::Cursor => CURSOR,
             Self::OpenCode => OPENCODE,
+            Self::Hermes => HERMES,
         }
     }
 
@@ -90,6 +100,7 @@ impl TryFrom<&str> for AgentRuntime {
             CLAUDE_MANAGED_AGENTS => Ok(Self::ClaudeManagedAgents),
             CURSOR => Ok(Self::Cursor),
             OPENCODE => Ok(Self::OpenCode),
+            HERMES => Ok(Self::Hermes),
             runtime => Err(AgentSdkError::UnsupportedRuntime(runtime.to_owned())),
         }
     }
@@ -111,6 +122,8 @@ pub struct LapConfig {
     pub opencode_base_url: Option<String>,
     pub opencode_username: String,
     pub opencode_password: Option<String>,
+    pub hermes_api_key: Option<String>,
+    pub hermes_base_url: Option<String>,
 }
 
 impl LapConfig {
@@ -147,6 +160,8 @@ impl Default for LapConfig {
             opencode_base_url: None,
             opencode_username: "opencode".to_owned(),
             opencode_password: None,
+            hermes_api_key: None,
+            hermes_base_url: None,
         }
     }
 }

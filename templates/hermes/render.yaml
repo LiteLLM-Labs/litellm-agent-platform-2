@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: hermes-agent-server
+    runtime: docker
+    rootDir: templates/hermes
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: LITELLM_API_BASE
+        sync: false
+      - key: LITELLM_API_KEY
+        sync: false
+      - key: LITELLM_DEFAULT_MODEL
+        value: claude-sonnet-4-6

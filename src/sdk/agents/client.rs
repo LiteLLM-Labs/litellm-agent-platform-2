@@ -120,8 +120,8 @@ impl Lap {
             }
         }
         let stream = stream_events(ensure_success(response).await?);
-        // OpenCode stream normalization is handled in session_events.rs; skip adapter for it.
-        if runtime == AgentRuntime::OpenCode {
+        // OpenCode and Hermes stream normalization is handled in session_events.rs; skip adapter.
+        if runtime == AgentRuntime::OpenCode || runtime == AgentRuntime::Hermes {
             return Ok(stream);
         }
         Ok(self.adapter(runtime)?.normalize_stream(stream))

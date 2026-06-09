@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::sdk::agents::{CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE};
+use crate::sdk::agents::{CLAUDE_MANAGED_AGENTS, CURSOR, HERMES, OPENCODE};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct RuntimeTool {
@@ -13,7 +13,7 @@ pub struct RuntimeTool {
 pub fn runtime_tools(runtime: &str) -> &'static [RuntimeTool] {
     match runtime {
         CLAUDE_MANAGED_AGENTS | "claude_agents" => &CLAUDE_MANAGED_TOOLS,
-        CURSOR | OPENCODE => &[],
+        CURSOR | OPENCODE | HERMES => &[],
         _ => &[],
     }
 }

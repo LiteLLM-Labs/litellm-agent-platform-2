@@ -93,6 +93,10 @@ fn runtime_client(state: &AppState, runtime: AgentRuntime, created: &CreatedRunt
             config.opencode_api_key = Some(created.credential.api_key.clone());
             config.opencode_password = Some(created.credential.api_key.clone());
         }
+        AgentRuntime::Hermes => {
+            config.hermes_base_url = Some(created.credential.api_base.clone());
+            config.hermes_api_key = Some(created.credential.api_key.clone());
+        }
     }
     Lap::with_http_client(config, state.http.clone())
 }

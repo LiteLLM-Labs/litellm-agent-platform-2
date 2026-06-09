@@ -28,7 +28,7 @@ impl SessionEvents<'_> {
         match runtime {
             AgentRuntime::ClaudeManagedAgents => self.send_claude_events(session_id, params).await,
             AgentRuntime::Cursor => self.send_cursor_events(session_id, params).await,
-            AgentRuntime::OpenCode => self.send_opencode_events(session_id, params).await,
+            AgentRuntime::OpenCode | AgentRuntime::Hermes => self.send_opencode_events(session_id, params).await,
         }
     }
 
@@ -37,7 +37,7 @@ impl SessionEvents<'_> {
         match runtime {
             AgentRuntime::ClaudeManagedAgents => self.stream_claude_events(session_id).await,
             AgentRuntime::Cursor => self.stream_cursor_events(session_id).await,
-            AgentRuntime::OpenCode => self.stream_opencode_events(session_id).await,
+            AgentRuntime::OpenCode | AgentRuntime::Hermes => self.stream_opencode_events(session_id).await,
         }
     }
 
@@ -45,7 +45,7 @@ impl SessionEvents<'_> {
         let runtime = self.client.runtime_for_session(session_id)?;
         match runtime {
             AgentRuntime::ClaudeManagedAgents => self.list_claude_events(session_id).await,
-            AgentRuntime::Cursor | AgentRuntime::OpenCode => Ok(json!({ "data": [] })),
+            AgentRuntime::Cursor | AgentRuntime::OpenCode | AgentRuntime::Hermes => Ok(json!({ "data": [] })),
         }
     }
 

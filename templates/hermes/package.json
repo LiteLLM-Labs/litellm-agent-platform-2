@@ -1,0 +1,17 @@
+{
+  "name": "hermes-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hermes Agent harness — exposes the Anthropic Managed Agents API spec backed by the hermes-agent CLI.",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

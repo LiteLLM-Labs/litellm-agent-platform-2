@@ -68,6 +68,7 @@ function shortPrompt(prompt: string): string {
 function runtimeLabel(runtime?: string): string {
   if (runtime === "claude_managed_agents" || runtime === "claude_agents") return "Claude Managed Agents";
   if (runtime === "cursor") return "Cursor";
+  if (runtime === "hermes") return "Hermes";
   return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
 }
 
@@ -75,6 +76,7 @@ function runtimeModelId(runtime?: AgentRuntimeId): string | null {
   if (runtime === "claude_managed_agents") return "anthropic/*";
   if (runtime === "cursor") return "cursor/*";
   if (runtime === "opencode") return "opencode/*";
+  if (runtime === "hermes") return "hermes/*";
   return null;
 }
 
