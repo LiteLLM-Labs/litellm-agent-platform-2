@@ -8,7 +8,6 @@ use crate::{
         credentials,
         managed_agents::{
             registry::{self, schema::ManagedAgentRow},
-            runtime_events,
             sessions::{self, schema::SessionRow},
         },
     },
@@ -17,6 +16,10 @@ use crate::{
 };
 
 use super::{
+    runtime_lifecycle::{
+        drain_provider_stream, mark_session_error, mark_session_idle, persist_send_response_events,
+        provider_run_status, update_agent_run_status,
+    },
     runtime_provision::provision_runtime_session,
     runtime_sdk::{agent_sdk_error, register_runtime_session, send_events_params},
     storage::persist_message,
@@ -42,7 +45,7 @@ pub(super) async fn create_runtime_session(
     if let Some(prompt) = created.initial_user_prompt.as_deref() {
         persist_message(pool, &created.row.id, "user", prompt, None).await?;
     }
-    let row = match provision_runtime_session(&state, pool, &created).await {
+    let mut row = match provision_runtime_session(&state, pool, &created).await {
         Ok(row) => row,
         Err(error) => {
             let _ = sessions::repository::delete(pool, &created.row.id).await;
@@ -53,6 +56,9 @@ pub(super) async fn create_runtime_session(
     if row.provider_run_id.is_none() {
         if let Some(prompt) = created.initial_user_prompt.as_deref() {
             execute_runtime_prompt(state.clone(), pool, row.clone(), prompt.to_owned()).await?;
+        } else {
+            mark_session_idle(&state, pool, &row.id).await?;
+            row.status = "idle".to_owned();
         }
     }
     Ok(SessionResponse::from(row))
@@ -159,69 +165,47 @@ pub(super) async fn execute_runtime_prompt(
     })?;
     let resolved = crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await?;
     let client = super::runtime_sdk::lap_from_credential(&resolved)?;
-    register_runtime_session(&client, pool, &row, &resolved).await?;
+    if let Err(error) = register_runtime_session(&client, pool, &row, &resolved).await {
+        mark_session_error(&state, pool, &row.id, error.to_string()).await?;
+        return Err(error);
+    }
     state
         .agent_runs
         .update_status(&row.id, crate::agents::runs::AgentRunStatus::Running);
-    let sent = client
+    let sent = match client
         .beta()
         .sessions()
         .events()
         .send(&row.id, send_events_params(prompt))
         .await
-        .map_err(agent_sdk_error)?;
+    {
+        Ok(sent) => sent,
+        Err(error) => {
+            let error = agent_sdk_error(error);
+            mark_session_error(&state, pool, &row.id, error.to_string()).await?;
+            return Err(error);
+        }
+    };
+    let status = provider_run_status(&sent.raw);
+    let mut has_provider_run = false;
     if let Some(run_id) = resolved.adapter.provider_run_id_from_agent_raw(&sent.raw) {
-        let status = provider_run_status(&sent.raw);
+        has_provider_run = true;
         sessions::repository::set_provider_run(pool, &row.id, &run_id, status).await?;
         update_agent_run_status(&state, &row.id, status, &sent.raw);
     }
     persist_send_response_events(pool, &resolved, &row.id, &sent.raw).await?;
-    Ok(())
-}
-
-async fn persist_send_response_events(
-    pool: &PgPool,
-    resolved: &crate::http::runtime_resolution::ResolvedRuntime,
-    session_id: &str,
-    raw: &Value,
-) -> Result<(), GatewayError> {
-    let events = resolved.adapter.events_from_send_response_raw(raw);
-    for event in events {
-        runtime_events::repository::append(pool, session_id, event).await?;
+    if status == "running" && has_provider_run {
+        let stream = match client.beta().sessions().events().stream(&row.id).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                let error = agent_sdk_error(error);
+                mark_session_error(&state, pool, &row.id, error.to_string()).await?;
+                return Err(error);
+            }
+        };
+        drain_provider_stream(&state, pool, &row.id, stream).await?;
     }
     Ok(())
-}
-
-fn update_agent_run_status(state: &AppState, session_id: &str, status: &str, raw: &Value) {
-    match status {
-        "idle" => state
-            .agent_runs
-            .update_status(session_id, crate::agents::runs::AgentRunStatus::Completed),
-        "error" => state
-            .agent_runs
-            .set_error(session_id, provider_error_message(raw)),
-        _ => {}
-    }
-}
-
-fn provider_error_message(raw: &Value) -> String {
-    raw.get("error")
-        .and_then(|error| {
-            error
-                .get("message")
-                .and_then(Value::as_str)
-                .or_else(|| error.as_str())
-        })
-        .unwrap_or("managed agent interaction failed")
-        .to_owned()
-}
-
-fn provider_run_status(raw: &Value) -> &'static str {
-    match raw.get("status").and_then(Value::as_str) {
-        Some("completed") => "idle",
-        Some("failed" | "cancelled" | "incomplete" | "budget_exceeded") => "error",
-        _ => "running",
-    }
 }
 
 async fn load_agent(

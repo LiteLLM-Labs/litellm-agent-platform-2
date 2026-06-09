@@ -12,15 +12,17 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
-    agents::runs::AgentRunStatus,
     callbacks::events::CallbackEventPayload,
-    db::managed_agents::{runtime_events, sessions},
+    db::managed_agents::runtime_events,
     errors::GatewayError,
     proxy::{auth::master_key::require_master_key, state::AppState},
     sdk::agents::{AgentEvent, AgentEventStream},
 };
 
 use super::{
+    runtime_lifecycle::{
+        event_error_message, mark_session_status, persist_runtime_event, terminal_event_status,
+    },
     runtime_sdk::{
         agent_sdk_error, provider_event_line, register_runtime_session, runtime_sdk_client,
     },
@@ -53,6 +55,8 @@ pub async fn runtime_events(
         .stream(&row.id)
         .await
         .map_err(agent_sdk_error)?;
+    let empty_stream_status =
+        (row.provider_run_id.is_none() && row.status == "idle").then_some("idle");
     let stream_pool = pool.clone();
     let stream_session_id = row.id.clone();
     let body_stream = provider_body_stream(
@@ -60,6 +64,7 @@ pub async fn runtime_events(
         stream_pool,
         stream_session_id,
         state.clone(),
+        empty_stream_status,
     );
     Response::builder()
         .header("content-type", "text/event-stream")
@@ -73,21 +78,25 @@ fn provider_body_stream(
     stream_pool: PgPool,
     stream_session_id: String,
     stream_state: Arc<AppState>,
+    empty_stream_status: Option<&'static str>,
 ) -> impl futures_util::Stream<Item = Result<Bytes, Infallible>> {
     let callbacks = stream_state.callbacks.clone();
     async_stream::stream! {
         futures_util::pin_mut!(provider_stream);
+        let mut saw_event = false;
         let mut terminal_status = None;
         let mut terminal_error = None;
         while let Some(event) = provider_stream.next().await {
             match event {
                 Ok(event) => {
+                    saw_event = true;
                     if let Some(status) = terminal_event_status(&event) {
                         terminal_status = Some(status);
                         if status == "error" {
-                            terminal_error = Some(provider_error_message(&event));
+                            terminal_error = Some(event_error_message(&event));
                         }
                     }
+                    let _ = persist_runtime_event(&stream_pool, &stream_session_id, &event).await;
                     emit_runtime_event(&callbacks, &stream_session_id, &event).await;
                     yield provider_event_line(Ok(event));
                 }
@@ -98,16 +107,17 @@ fn provider_body_stream(
                 }
             }
         }
+        if !saw_event && terminal_status.is_none() {
+            terminal_status = empty_stream_status;
+        }
         if let Some(status) = terminal_status {
-            let _ = sessions::repository::set_status(&stream_pool, &stream_session_id, status).await;
-            match status {
-                "idle" => stream_state.agent_runs.update_status(&stream_session_id, AgentRunStatus::Completed),
-                "error" => stream_state.agent_runs.set_error(
-                    &stream_session_id,
-                    terminal_error.unwrap_or_else(|| "managed agent interaction failed".to_owned()),
-                ),
-                _ => {}
-            }
+            let _ = mark_session_status(
+                &stream_state,
+                &stream_pool,
+                &stream_session_id,
+                status,
+                terminal_error,
+            ).await;
         }
     }
 }
@@ -176,28 +186,6 @@ fn require_events_master_key(
         return Ok(());
     }
     require_master_key(headers, configured)
-}
-
-fn terminal_event_status(event: &AgentEvent) -> Option<&'static str> {
-    match event.event_type.as_str() {
-        "session.status_idle" => Some("idle"),
-        "session.error" => Some("error"),
-        _ => None,
-    }
-}
-
-fn provider_error_message(event: &AgentEvent) -> String {
-    event
-        .data
-        .get("error")
-        .and_then(|error| {
-            error
-                .get("message")
-                .and_then(Value::as_str)
-                .or_else(|| error.as_str())
-        })
-        .unwrap_or("managed agent interaction failed")
-        .to_owned()
 }
 
 async fn emit_runtime_event<T: serde::Serialize>(

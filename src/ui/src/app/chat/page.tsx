@@ -411,7 +411,7 @@ function runtimeStatusFromEvents(events: RuntimeAgentEvent[]): "idle" | "busy" |
       next = "busy";
       continue;
     }
-    if (type === "session.status_idle" || type === "session.thread_status_idle") {
+    if (type === "session.status_idle" || type === "session.thread_status_idle" || type === "session.error") {
       next = "idle";
       continue;
     }
@@ -424,7 +424,7 @@ function runtimeStatusFromEvents(events: RuntimeAgentEvent[]): "idle" | "busy" |
             ? (status as { type?: unknown }).type
             : undefined;
       if (statusType === "busy" || statusType === "running") next = "busy";
-      if (statusType === "idle") next = "idle";
+      if (statusType === "idle" || statusType === "error" || statusType === "failed") next = "idle";
     }
   }
   return next;

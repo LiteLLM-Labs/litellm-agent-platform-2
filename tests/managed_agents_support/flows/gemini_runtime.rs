@@ -64,7 +64,17 @@ async fn mount_interaction(gemini: &MockServer) {
             "environment": "remote",
             "store": true
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(interaction()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(running_interaction()))
+        .mount(gemini)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/v1beta/interactions/{GEMINI_INTERACTION_ID}"
+        )))
+        .and(header("x-goog-api-key", "gemini-test"))
+        .and(header("api-revision", "2026-05-20"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(completed_interaction()))
         .mount(gemini)
         .await;
 }
@@ -141,6 +151,7 @@ async fn create_gemini_session(fixture: &AppFixture, agent_id: &str) -> String {
     )
     .await;
     assert_eq!(refreshed["provider_run_id"], GEMINI_INTERACTION_ID);
+    assert_eq!(refreshed["status"], "idle");
     session_id
 }
 
@@ -152,12 +163,21 @@ async fn assert_gemini_events(fixture: &AppFixture, session_id: &str) {
         None,
     )
     .await;
-    assert_eq!(events["data"][0]["type"], "agent.message");
-    assert_eq!(events["data"][0]["content"][0]["text"], "Hi from Gemini.");
-    assert_eq!(events["data"][1]["type"], "session.status_idle");
+    assert_eq!(events["data"][0]["type"], "session.status_running");
+    assert_eq!(events["data"][1]["type"], "agent.message");
+    assert_eq!(events["data"][1]["content"][0]["text"], "Hi from Gemini.");
+    assert_eq!(events["data"][2]["type"], "session.status_idle");
 }
 
-fn interaction() -> Value {
+fn running_interaction() -> Value {
+    json!({
+        "object": "interaction",
+        "id": GEMINI_INTERACTION_ID,
+        "status": "in_progress"
+    })
+}
+
+fn completed_interaction() -> Value {
     json!({
         "object": "interaction",
         "id": GEMINI_INTERACTION_ID,
