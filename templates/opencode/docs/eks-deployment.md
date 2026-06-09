@@ -299,7 +299,8 @@ curl -s http://$LB/health
 # {"ok":true,"opencode":true}
 ```
 
-Point the LAP SDK at `http://$LB` with model `claude-sonnet-4-6`.
+Point the LAP SDK at `http://$LB` with model `claude-sonnet-4-6`, or register
+the runtime in the LAP UI with the [README walkthrough](../README.md#connect-from-lap).
 
 For a full end-to-end smoke test (agent → session → message → stream), use the included script:
 
@@ -308,8 +309,6 @@ BASE=http://$LB MODEL=claude-sonnet-4-6 ../scripts/smoke.sh
 ```
 
 See [`scripts/smoke.sh`](../scripts/smoke.sh) for what it covers.
-
----
 
 ## Troubleshooting
 
