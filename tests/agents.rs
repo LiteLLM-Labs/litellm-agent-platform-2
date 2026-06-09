@@ -158,7 +158,7 @@ async fn read_events_until_completed(app: axum::Router, event_url: String) -> St
 fn test_config(e2b_api_base: String) -> GatewayConfig {
     GatewayConfig {
         model_list: Vec::new(),
-        mcp_servers: HashMap::new(),
+        mcp_servers: Default::default(),
         general_settings: GeneralSettings {
             master_key: Some("sk-local".to_owned()),
             database_url: None,

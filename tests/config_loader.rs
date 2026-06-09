@@ -73,6 +73,26 @@ general_settings:
 }
 
 #[test]
+fn loads_proxy_base_url_from_mcp_servers_section() {
+    let file = write_config(
+        r#"
+mcp_servers:
+  proxy_base_url: https://gateway.example.com
+  linear:
+    url: https://mcp.linear.app/mcp
+"#,
+    );
+
+    let config = load_config(file.path()).unwrap();
+    assert_eq!(
+        config.mcp_servers.proxy_base_url(),
+        Some("https://gateway.example.com")
+    );
+    assert_eq!(config.mcp_servers.len(), 1);
+    assert!(config.mcp_servers.contains_key("linear"));
+}
+
+#[test]
 fn defaults_transport_http_and_auth_none() {
     let file = write_config(
         r#"
@@ -105,6 +125,47 @@ mcp_servers:
     let s = &config.mcp_servers["s"];
     assert_eq!(s.url, "https://env.example.com/mcp");
     assert_eq!(s.auth_value.as_deref(), Some("sk-from-env"));
+}
+
+#[test]
+fn expands_proxy_base_url_from_mcp_servers_section() {
+    std::env::set_var(
+        "TEST_LITELLM_PROXY_BASE_URL",
+        "https://proxy-env.example.com",
+    );
+    let file = write_config(
+        r#"
+mcp_servers:
+  proxy_base_url: os.environ/TEST_LITELLM_PROXY_BASE_URL
+  s:
+    url: https://mcp.example.com/mcp
+"#,
+    );
+
+    let config = load_config(file.path()).unwrap();
+    assert_eq!(
+        config.mcp_servers.proxy_base_url(),
+        Some("https://proxy-env.example.com")
+    );
+    std::env::remove_var("TEST_LITELLM_PROXY_BASE_URL");
+}
+
+#[test]
+fn uses_litellm_proxy_base_url_env_fallback() {
+    std::env::set_var("LITELLM_PROXY_BASE_URL", "https://fallback.example.com");
+    let file = write_config(
+        r#"
+general_settings:
+  database_url: postgres://test
+"#,
+    );
+
+    let config = load_config(file.path()).unwrap();
+    assert_eq!(
+        config.mcp_servers.proxy_base_url(),
+        Some("https://fallback.example.com")
+    );
+    std::env::remove_var("LITELLM_PROXY_BASE_URL");
 }
 
 #[test]
@@ -239,6 +300,41 @@ general_settings:
     assert_eq!(
         config.general_settings.database_url.as_deref(),
         Some("postgres:///litellm_rust_managed_agents_test")
+    );
+}
+
+#[test]
+fn rejects_public_base_url_without_http_scheme() {
+    let file = write_config(
+        r#"
+general_settings:
+  database_url: postgres://test
+  public_base_url: localhost:4000
+"#,
+    );
+
+    let err = load_config(file.path()).unwrap_err().to_string();
+    assert!(
+        err.contains("general_settings.public_base_url must be an absolute http(s) URL"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn rejects_proxy_base_url_without_http_scheme() {
+    let file = write_config(
+        r#"
+general_settings:
+  database_url: postgres://test
+mcp_servers:
+  proxy_base_url: localhost:4000
+"#,
+    );
+
+    let err = load_config(file.path()).unwrap_err().to_string();
+    assert!(
+        err.contains("mcp_servers.proxy_base_url must be an absolute http(s) URL"),
+        "got: {err}"
     );
 }
 

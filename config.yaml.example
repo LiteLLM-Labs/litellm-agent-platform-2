@@ -16,7 +16,6 @@ model_list:
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
-  public_base_url: os.environ/LITELLM_PUBLIC_BASE_URL
   store_prompts_in_spend_logs: true
   sandbox_choice: e2b
   e2b_sandbox_params:
@@ -30,6 +29,7 @@ slack:
 
 # MCP servers use the same dict-keyed shape as LiteLLM (key = server name).
 mcp_servers:
+  proxy_base_url: os.environ/LITELLM_PROXY_BASE_URL
   linear:
     url: os.environ/LINEAR_MCP_URL
     auth_type: bearer_token            # none | api_key | bearer_token | basic | authorization | token

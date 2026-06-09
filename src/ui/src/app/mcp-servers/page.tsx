@@ -11,6 +11,8 @@ import {
   Info,
   X,
   Zap,
+  Save,
+  RotateCcw,
 } from "lucide-react";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -41,8 +43,10 @@ import {
   listMcpServerTools,
   testMcpServerTools,
   discoverMcpToolsFromUrl,
+  getMcpProxyBaseUrl,
+  saveMcpProxyBaseUrl,
 } from "@/lib/api";
-import type { McpToolDef } from "@/lib/api";
+import type { McpProxyBaseUrlSetting, McpToolDef } from "@/lib/api";
 import type { McpServer } from "@/lib/types";
 
 // ── Variable / header types ────────────────────────────────────────────────────
@@ -198,11 +202,29 @@ function formToPayload(f: FormState, discoveredTools: McpToolDef[] | null): Part
   } as Partial<McpServer>;
 }
 
+function normalizeProxyBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    url.hash = "";
+    url.search = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function McpServersPage() {
   const [servers, setServers] = useState<McpServer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [proxySetting, setProxySetting] = useState<McpProxyBaseUrlSetting | null>(null);
+  const [proxyDraft, setProxyDraft] = useState("");
+  const [proxySaving, setProxySaving] = useState(false);
+  const [proxyError, setProxyError] = useState<string | null>(null);
   const [editorServer, setEditorServer] = useState<McpServer | null | "new">(null);
   const [confirmDelete, setConfirmDelete] = useState<McpServer | null>(null);
 
@@ -215,9 +237,56 @@ export default function McpServersPage() {
     }
   };
 
+  const refreshProxySetting = async () => {
+    try {
+      const setting = await getMcpProxyBaseUrl();
+      setProxySetting(setting);
+      setProxyDraft(setting.proxy_base_url ?? "");
+      setProxyError(null);
+    } catch (e) {
+      setProxyError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   useEffect(() => {
     refresh();
+    refreshProxySetting();
   }, []);
+
+  const onSaveProxyBaseUrl = async () => {
+    const trimmed = proxyDraft.trim();
+    const normalized = trimmed ? normalizeProxyBaseUrl(trimmed) : null;
+    if (trimmed && !normalized) {
+      setProxyError("Enter an absolute http(s) URL.");
+      return;
+    }
+
+    setProxySaving(true);
+    setProxyError(null);
+    try {
+      const setting = await saveMcpProxyBaseUrl(normalized);
+      setProxySetting(setting);
+      setProxyDraft(setting.proxy_base_url ?? "");
+    } catch (e) {
+      setProxyError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProxySaving(false);
+    }
+  };
+
+  const onUseConfigProxyBaseUrl = async () => {
+    setProxySaving(true);
+    setProxyError(null);
+    try {
+      const setting = await saveMcpProxyBaseUrl(null);
+      setProxySetting(setting);
+      setProxyDraft(setting.proxy_base_url ?? "");
+    } catch (e) {
+      setProxyError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProxySaving(false);
+    }
+  };
 
   const onDelete = async (s: McpServer) => {
     setConfirmDelete(s);
@@ -255,35 +324,48 @@ export default function McpServersPage() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
-          {error && (
-            <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          )}
+          <div className="max-w-5xl space-y-4">
+            {error && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                {error}
+              </div>
+            )}
 
-          {servers === null && !error && (
-            <div className="max-w-5xl space-y-2">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-12 rounded-lg border border-border bg-muted/30 animate-pulse" />
-              ))}
-            </div>
-          )}
+            <ProxyBaseUrlPanel
+              setting={proxySetting}
+              draft={proxyDraft}
+              error={proxyError}
+              saving={proxySaving}
+              onDraftChange={setProxyDraft}
+              onSave={() => void onSaveProxyBaseUrl()}
+              onUseConfig={() => void onUseConfigProxyBaseUrl()}
+            />
 
-          {servers !== null && servers.length === 0 && (
-            <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-              <Server className="size-10 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">No MCP servers registered yet.</p>
-              <Button size="sm" onClick={() => setEditorServer("new")}>
-                <Plus className="size-4" />
-                Add your first server
-              </Button>
-            </div>
-          )}
+            {servers === null && !error && (
+              <div className="space-y-2">
+                {[...Array(4)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-12 rounded-lg border border-border bg-muted/30 animate-pulse motion-reduce:animate-none"
+                  />
+                ))}
+              </div>
+            )}
 
-          {servers !== null && servers.length > 0 && (
-            <div className="max-w-5xl">
-              <div className="rounded-lg border border-border overflow-hidden">
-                <table className="w-full text-sm">
+            {servers !== null && servers.length === 0 && (
+              <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+                <Server className="size-10 text-muted-foreground/40" />
+                <p className="text-sm text-muted-foreground">No MCP servers registered yet.</p>
+                <Button size="sm" onClick={() => setEditorServer("new")}>
+                  <Plus className="size-4" />
+                  Add your first server
+                </Button>
+              </div>
+            )}
+
+            {servers !== null && servers.length > 0 && (
+              <div className="rounded-lg border border-border overflow-x-auto">
+                <table className="min-w-[640px] w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/40">
                       <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
@@ -318,8 +400,8 @@ export default function McpServersPage() {
                   </tbody>
                 </table>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </main>
       </div>
 
@@ -439,6 +521,84 @@ function ServerRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+function ProxyBaseUrlPanel({
+  setting,
+  draft,
+  error,
+  saving,
+  onDraftChange,
+  onSave,
+  onUseConfig,
+}: {
+  setting: McpProxyBaseUrlSetting | null;
+  draft: string;
+  error: string | null;
+  saving: boolean;
+  onDraftChange: (value: string) => void;
+  onSave: () => void;
+  onUseConfig: () => void;
+}) {
+  const sourceLabel =
+    setting === null
+      ? "Loading"
+      : setting.source === "database"
+        ? "Saved"
+        : setting.source === "config"
+          ? "Config"
+          : "Unset";
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label htmlFor="mcp-proxy-base-url">Gateway public URL</Label>
+            <Badge variant="outline" className="text-[10px] uppercase">
+              {sourceLabel}
+            </Badge>
+          </div>
+          <Input
+            id="mcp-proxy-base-url"
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            placeholder="https://gateway.example.com"
+            className="font-mono text-sm"
+            autoComplete="off"
+          />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+        <div className="flex flex-wrap gap-2 md:justify-end">
+          {setting?.source === "database" && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onUseConfig}
+              disabled={saving}
+              className="gap-2"
+            >
+              <RotateCcw className="size-4" />
+              Use Config
+            </Button>
+          )}
+          <Button
+            type="button"
+            onClick={onSave}
+            disabled={saving || setting === null}
+            className="gap-2"
+          >
+            {saving ? (
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+            ) : (
+              <Save className="size-4" />
+            )}
+            Save URL
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }
 

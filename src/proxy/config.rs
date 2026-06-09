@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    ops::{Deref, DerefMut},
+    path::Path,
+};
 
 use serde::Deserialize;
 
@@ -16,7 +21,7 @@ pub struct GatewayConfig {
     pub model_list: Vec<ModelEntry>,
 
     #[serde(default)]
-    pub mcp_servers: HashMap<String, McpServerEntry>,
+    pub mcp_servers: McpServersConfig,
 
     #[serde(default)]
     pub general_settings: GeneralSettings,
@@ -62,6 +67,38 @@ impl Default for GeneralSettings {
             sandbox_choice: None,
             e2b_sandbox_params: E2bSandboxParams::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct McpServersConfig {
+    #[serde(default)]
+    pub proxy_base_url: Option<String>,
+
+    #[serde(flatten)]
+    servers: HashMap<String, McpServerEntry>,
+}
+
+impl McpServersConfig {
+    pub fn proxy_base_url(&self) -> Option<&str> {
+        self.proxy_base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+}
+
+impl Deref for McpServersConfig {
+    type Target = HashMap<String, McpServerEntry>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.servers
+    }
+}
+
+impl DerefMut for McpServersConfig {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.servers
     }
 }
 
@@ -151,14 +188,15 @@ fn expand_env(config: &mut GatewayConfig) -> Result<(), GatewayError> {
     }
     if let Some(public_base_url) = config.general_settings.public_base_url.as_deref() {
         config.general_settings.public_base_url = Some(expand_env_value(public_base_url)?);
-    } else if let Ok(public_base_url) = std::env::var("LITELLM_PUBLIC_BASE_URL") {
-        if !public_base_url.trim().is_empty() {
-            config.general_settings.public_base_url = Some(public_base_url);
-        }
-    } else if let Ok(public_base_url) = std::env::var("RENDER_EXTERNAL_URL") {
-        if !public_base_url.trim().is_empty() {
-            config.general_settings.public_base_url = Some(public_base_url);
-        }
+    }
+    if let Some(proxy_base_url) = config.mcp_servers.proxy_base_url.as_deref() {
+        config.mcp_servers.proxy_base_url = Some(expand_env_value(proxy_base_url)?);
+    } else if config.general_settings.public_base_url.is_none() {
+        config.mcp_servers.proxy_base_url = first_non_empty_env([
+            "LITELLM_PROXY_BASE_URL",
+            "LITELLM_PUBLIC_BASE_URL",
+            "RENDER_EXTERNAL_URL",
+        ]);
     }
     config.slack.api_base_url = expand_env_value(&config.slack.api_base_url)?;
 
@@ -196,8 +234,24 @@ fn expand_env(config: &mut GatewayConfig) -> Result<(), GatewayError> {
     Ok(())
 }
 
+fn first_non_empty_env(names: [&str; 3]) -> Option<String> {
+    names.into_iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    })
+}
+
 fn validate(config: &GatewayConfig) -> Result<(), GatewayError> {
     validate_required_surface(config)?;
+    validate_base_url(
+        "mcp_servers.proxy_base_url",
+        config.mcp_servers.proxy_base_url(),
+    )?;
+    validate_base_url(
+        "general_settings.public_base_url",
+        config.general_settings.public_base_url.as_deref(),
+    )?;
     validate_model_entries(
         &config.model_list,
         config.general_settings.database_url.is_some(),
@@ -208,6 +262,22 @@ fn validate(config: &GatewayConfig) -> Result<(), GatewayError> {
         config.general_settings.sandbox_choice.as_deref(),
         &config.general_settings.e2b_sandbox_params,
     )?;
+    Ok(())
+}
+
+fn validate_base_url(field: &str, value: Option<&str>) -> Result<(), GatewayError> {
+    validate_http_base_url(field, value).map_err(GatewayError::InvalidConfig)
+}
+
+pub fn validate_http_base_url(field: &str, value: Option<&str>) -> Result<(), String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    let url = reqwest::Url::parse(value)
+        .map_err(|_| format!("{field} must be an absolute http(s) URL"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(format!("{field} must be an absolute http(s) URL"));
+    }
     Ok(())
 }
 

@@ -118,7 +118,7 @@ fn test_config(api_base: String) -> GatewayConfig {
                 extra: Default::default(),
             },
         }],
-        mcp_servers: HashMap::new(),
+        mcp_servers: Default::default(),
         general_settings: GeneralSettings {
             master_key: Some("sk-local".to_owned()),
             database_url: Some("postgres://test".to_owned()),
