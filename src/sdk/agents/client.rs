@@ -12,6 +12,7 @@ use super::{
     resources::Beta,
     responses::{ensure_success, response_json},
     runtime_config::{configured_http_client, runtime_configs, RuntimeConfig},
+    session_context::SessionContext,
     types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
 use crate::sdk::{providers, providers::base::runtime::RuntimeAdapter};
@@ -26,14 +27,6 @@ struct Inner {
     runtimes: HashMap<AgentRuntime, RuntimeConfig>,
     session_contexts: Mutex<HashMap<String, SessionContext>>,
     cursor_run_ids: Mutex<HashMap<String, String>>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct SessionContext {
-    pub(crate) runtime: AgentRuntime,
-    pub(crate) provider_session_id: Option<String>,
-    pub(crate) agent_id: Option<String>,
-    pub(crate) run_id: Option<String>,
 }
 
 impl Lap {
@@ -95,6 +88,20 @@ impl Lap {
         let mut response = self.request(runtime, Method::GET, path)?.send().await?;
         if response.status() == StatusCode::UNAUTHORIZED {
             if let Some(fallback) = self.fallback_request(runtime, Method::GET, path)? {
+                response = fallback.send().await?;
+            }
+        }
+        response_json(response).await
+    }
+
+    pub(crate) async fn delete(
+        &self,
+        runtime: AgentRuntime,
+        path: &str,
+    ) -> Result<Value, AgentSdkError> {
+        let mut response = self.request(runtime, Method::DELETE, path)?.send().await?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            if let Some(fallback) = self.fallback_request(runtime, Method::DELETE, path)? {
                 response = fallback.send().await?;
             }
         }
@@ -264,16 +271,5 @@ impl Lap {
                 run_id: None,
             },
         )
-    }
-}
-
-impl SessionContext {
-    pub(crate) fn cursor(agent_id: String, run_id: Option<String>) -> Self {
-        Self {
-            runtime: AgentRuntime::Cursor,
-            provider_session_id: Some(agent_id.clone()),
-            agent_id: Some(agent_id),
-            run_id,
-        }
     }
 }

@@ -9,7 +9,8 @@ use serde_json::Value;
 
 use crate::sdk::agents::{
     AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams, CreateEnvironmentParams,
-    CreateSessionParams, Environment, Lap, ManagedAgent, ManagedSessionRef, SendEventsParams,
+    CreateSessionParams, DeleteAgentParams, DeleteAgentResponse, Environment, GetAgentParams, Lap,
+    ListAgentsParams, ManagedAgent, ManagedAgentList, ManagedSessionRef, SendEventsParams,
     SendEventsResponse, Session, SessionContext,
 };
 
@@ -95,6 +96,14 @@ pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
         None
     }
 
+    fn provider_session_id_from_session_raw(&self, _raw: &Value) -> Option<String> {
+        None
+    }
+
+    fn events_from_send_response_raw(&self, _raw: &Value) -> Vec<Value> {
+        Vec::new()
+    }
+
     fn create_agent<'a>(
         &'a self,
         _client: &'a Lap,
@@ -104,6 +113,45 @@ pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
         Box::pin(async move {
             Err(AgentSdkError::InvalidRequest(format!(
                 "agents.create is not supported for {runtime}"
+            )))
+        })
+    }
+
+    fn list_agents<'a>(
+        &'a self,
+        _client: &'a Lap,
+        params: ListAgentsParams,
+    ) -> AdapterFuture<'a, ManagedAgentList> {
+        let runtime = params.lap_agent_runtime;
+        Box::pin(async move {
+            Err(AgentSdkError::InvalidRequest(format!(
+                "agents.list is not supported for {runtime}"
+            )))
+        })
+    }
+
+    fn get_agent<'a>(
+        &'a self,
+        _client: &'a Lap,
+        params: GetAgentParams,
+    ) -> AdapterFuture<'a, ManagedAgent> {
+        let runtime = params.lap_agent_runtime;
+        Box::pin(async move {
+            Err(AgentSdkError::InvalidRequest(format!(
+                "agents.get is not supported for {runtime}"
+            )))
+        })
+    }
+
+    fn delete_agent<'a>(
+        &'a self,
+        _client: &'a Lap,
+        params: DeleteAgentParams,
+    ) -> AdapterFuture<'a, DeleteAgentResponse> {
+        let runtime = params.lap_agent_runtime;
+        Box::pin(async move {
+            Err(AgentSdkError::InvalidRequest(format!(
+                "agents.delete is not supported for {runtime}"
             )))
         })
     }

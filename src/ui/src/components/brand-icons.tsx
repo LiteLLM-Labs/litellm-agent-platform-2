@@ -168,6 +168,22 @@ function CursorIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function GeminiIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <rect width="48" height="48" rx="10" fill="#0B57D0" />
+      <path
+        fill="#fff"
+        d="M24 7.5c1.7 7.9 6.6 12.8 16.5 16.5C30.6 27.7 25.7 32.6 24 40.5 22.3 32.6 17.4 27.7 7.5 24 17.4 20.3 22.3 15.4 24 7.5Z"
+      />
+      <path
+        fill="#AECBFA"
+        d="M33.8 6.8c.7 3.2 2.7 5.2 6.7 6.7-4 1.5-6 3.5-6.7 6.7-.7-3.2-2.7-5.2-6.7-6.7 4-1.5 6-3.5 6.7-6.7Z"
+      />
+    </svg>
+  );
+}
+
 function OpenCodeIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -194,6 +210,8 @@ const ICONS: Record<string, (p: SVGProps<SVGSVGElement>) => ReactNode> = {
   claude: ClaudeIcon,
   codex: CodexIcon,
   cursor: CursorIcon,
+  gemini: GeminiIcon,
+  gemini_antigravity: GeminiIcon,
   gmail: GmailIcon,
   linear: LinearIcon,
   opencode: OpenCodeIcon,

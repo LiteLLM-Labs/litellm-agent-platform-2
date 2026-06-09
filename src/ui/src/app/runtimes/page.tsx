@@ -36,18 +36,21 @@ import type { RuntimeHarness } from "@/lib/types";
 const SPEC_DEFAULTS: Record<string, string> = {
   claude_managed_agents: "https://api.anthropic.com",
   cursor: "https://api.cursor.com",
+  gemini_antigravity: "https://generativelanguage.googleapis.com",
   opencode: "http://127.0.0.1:4096",
 };
 
 const SPEC_LABELS: Record<string, string> = {
   claude_managed_agents: "Claude Managed Agents",
   cursor: "Cursor",
+  gemini_antigravity: "Gemini Antigravity",
   opencode: "OpenCode",
 };
 
 function harnessIconId(alias: string): string {
   if (alias === "claude_managed_agents") return "claude";
   if (alias === "cursor") return "cursor";
+  if (alias === "gemini_antigravity") return "gemini";
   if (alias === "opencode") return "opencode";
   return alias;
 }
@@ -83,7 +86,7 @@ function AddHarnessModal({
       setError("Alias must only contain letters, numbers, hyphens, and underscores");
       return;
     }
-    if (["claude_managed_agents","cursor","opencode","claude_agents"].includes(trimmedAlias)) {
+    if (["claude_managed_agents","cursor","gemini_antigravity","opencode","claude_agents"].includes(trimmedAlias)) {
       setError(`"${trimmedAlias}" is a reserved alias`);
       return;
     }
@@ -138,6 +141,7 @@ function AddHarnessModal({
               <SelectContent>
                 <SelectItem value="claude_managed_agents">Claude Managed Agents</SelectItem>
                 <SelectItem value="cursor">Cursor</SelectItem>
+                <SelectItem value="gemini_antigravity">Gemini Antigravity</SelectItem>
                 <SelectItem value="opencode">OpenCode</SelectItem>
               </SelectContent>
             </Select>

@@ -14,11 +14,14 @@ use crate::{
     },
 };
 
+mod gemini;
+mod platform_mcp;
+
 use super::{
     runtime::CreatedRuntimeSession,
     runtime_inputs::{
-        agent_metadata, agent_model, integration_mcp_toolsets, mcp_servers,
-        opencode_session_resources, provider_system, session_metadata, workspace_from_env,
+        agent_metadata, agent_model, mcp_servers, opencode_session_resources, provider_system,
+        session_metadata, workspace_from_env,
     },
     runtime_sdk::agent_sdk_error,
 };
@@ -38,9 +41,12 @@ pub(super) async fn provision_runtime_session(
 ) -> Result<SessionRow, GatewayError> {
     let sdk_rt = created.resolved.agent_runtime;
     let client = runtime_client(state, created);
-    let provider_agent = create_provider_agent(state, &client, sdk_rt, created).await?;
+    let provider_agent = match gemini::reusable_provider_agent(pool, sdk_rt, created).await? {
+        Some(agent) => agent,
+        None => create_provider_agent(state, &client, sdk_rt, created).await?,
+    };
     let provider_env = create_provider_environment(&client, sdk_rt, created).await?;
-    let vault_ids = platform_mcp_vault_ids(state, created).await?;
+    let vault_ids = platform_mcp::vault_ids(state, created).await?;
     let provider_session = client
         .beta()
         .sessions()
@@ -62,16 +68,28 @@ pub(super) async fn provision_runtime_session(
     let provision = runtime_provision(
         created,
         &provider_agent.id,
-        Some(provider_session.id.clone()),
+        provider_session_id(created, &provider_session),
         &provider_agent.raw,
         serde_json::json!({
             "runtime": created.runtime,
             "agent": provider_agent.raw,
+            "agent_signature": gemini::provider_agent_signature(created.resolved.agent_runtime, created),
             "environment": provider_env.raw,
             "session": provider_session.raw,
         }),
     );
     persist_runtime_refs(pool, created, provision).await
+}
+
+fn provider_session_id(
+    created: &CreatedRuntimeSession,
+    session: &crate::sdk::agents::Session,
+) -> Option<String> {
+    created
+        .resolved
+        .adapter
+        .provider_session_id_from_session_raw(&session.raw)
+        .or_else(|| Some(session.id.clone()))
 }
 
 fn runtime_client(state: &AppState, created: &CreatedRuntimeSession) -> Lap {
@@ -84,6 +102,10 @@ fn runtime_client(state: &AppState, created: &CreatedRuntimeSession) -> Lap {
         AgentRuntime::Cursor => {
             config.cursor_api_key = Some(created.resolved.credential.api_key.clone());
             config.cursor_base_url = created.resolved.credential.api_base.clone();
+        }
+        AgentRuntime::GeminiAntigravity => {
+            config.gemini_api_key = Some(created.resolved.credential.api_key.clone());
+            config.gemini_base_url = created.resolved.credential.api_base.clone();
         }
         AgentRuntime::OpenCode => {
             config.opencode_base_url = Some(created.resolved.credential.api_base.clone());
@@ -106,21 +128,14 @@ async fn create_provider_agent(
         .create(CreateAgentParams {
             lap_agent_runtime: runtime,
             lap_provider_options: None,
-            name: created.agent.name.clone(),
+            name: gemini::provider_agent_name(runtime, created),
             model: AgentModel::Config(AgentModelConfig {
                 id: agent_model(&created.agent, &created.environment),
                 speed: None,
             }),
             system: provider_system(runtime, created),
             description: created.agent.description.clone(),
-            tools: {
-                let mut tools = vec![serde_json::json!({ "type": "agent_toolset_20260401" })];
-                tools.extend(crate::http::platform_mcps::platform_mcp_toolsets(
-                    &created.agent.config,
-                ));
-                tools.extend(integration_mcp_toolsets(&created.agent.config));
-                tools
-            },
+            tools: gemini::provider_tools(runtime, created),
             mcp_servers: mcp_servers(state, &created.agent, Some(&created.row.id))?,
             workspace: workspace_from_env(&created.environment)?,
             env_vars: None,
@@ -128,87 +143,6 @@ async fn create_provider_agent(
         })
         .await
         .map_err(agent_sdk_error)
-}
-
-async fn platform_mcp_vault_ids(
-    state: &AppState,
-    created: &CreatedRuntimeSession,
-) -> Result<Option<Vec<String>>, GatewayError> {
-    if created.resolved.agent_runtime != AgentRuntime::ClaudeManagedAgents {
-        return Ok(None);
-    }
-    if crate::http::platform_mcps::selected_platform_mcp_ids(&created.agent.config).is_empty() {
-        return Ok(None);
-    }
-    let token = state
-        .config
-        .general_settings
-        .master_key
-        .as_deref()
-        .ok_or_else(|| {
-            GatewayError::InvalidConfig(
-                "master_key is required for platform MCP vault auth".to_owned(),
-            )
-        })?;
-    let url = crate::http::platform_mcps::platform_mcp_url(
-        state,
-        &created.agent.id,
-        Some(&created.row.id),
-    )?;
-    let vault_id =
-        create_platform_mcp_vault(state, &created.resolved.credential.api_key, &url, token).await?;
-    Ok(Some(vec![vault_id]))
-}
-
-async fn create_platform_mcp_vault(
-    state: &AppState,
-    api_key: &str,
-    mcp_server_url: &str,
-    token: &str,
-) -> Result<String, GatewayError> {
-    let base = "https://api.anthropic.com/v1";
-    let vault: Value = state
-        .http
-        .post(format!("{base}/vaults?beta=true"))
-        .header("x-api-key", api_key)
-        .header("anthropic-version", crate::sdk::agents::ANTHROPIC_VERSION)
-        .header("anthropic-beta", crate::sdk::agents::MANAGED_AGENTS_BETA)
-        .json(&serde_json::json!({ "display_name": "LiteLLM platform MCP" }))
-        .send()
-        .await
-        .map_err(GatewayError::Upstream)?
-        .error_for_status()
-        .map_err(GatewayError::Upstream)?
-        .json()
-        .await
-        .map_err(GatewayError::Upstream)?;
-    let vault_id = vault.get("id").and_then(Value::as_str).ok_or_else(|| {
-        GatewayError::SandboxError("Anthropic vault response missing id".to_owned())
-    })?;
-    let credential = state
-        .http
-        .post(format!("{base}/vaults/{vault_id}/credentials?beta=true"))
-        .header("x-api-key", api_key)
-        .header("anthropic-version", crate::sdk::agents::ANTHROPIC_VERSION)
-        .header("anthropic-beta", crate::sdk::agents::MANAGED_AGENTS_BETA)
-        .json(&serde_json::json!({
-            "auth": {
-                "type": "static_bearer",
-                "mcp_server_url": mcp_server_url,
-                "token": token
-            }
-        }))
-        .send()
-        .await
-        .map_err(GatewayError::Upstream)?;
-    if !credential.status().is_success() {
-        let status = credential.status();
-        let body = credential.text().await.unwrap_or_default();
-        return Err(GatewayError::SandboxError(format!(
-            "Anthropic vault credential create failed with status {status}: {body}"
-        )));
-    }
-    Ok(vault_id.to_owned())
 }
 
 async fn create_provider_environment(

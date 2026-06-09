@@ -6,6 +6,7 @@ use super::{read_events_until_completed, request_json, request_raw, AppFixture};
 
 mod claude_runtime;
 mod cursor_runtime;
+mod gemini_runtime;
 mod platform_approvals;
 mod platform_factory;
 mod platform_factory_oauth;
@@ -13,6 +14,7 @@ mod platform_factory_payloads;
 mod platform_mcps;
 mod routines;
 mod rules;
+mod runtime_catalog;
 mod sessions;
 mod slack;
 mod slack_helpers;
@@ -21,46 +23,13 @@ mod slack_url_verification;
 
 pub use claude_runtime::exercise_claude_runtime_session_storage;
 pub use cursor_runtime::exercise_cursor_runtime_stream;
+pub use gemini_runtime::exercise_gemini_runtime_session;
 pub use platform_mcps::exercise_platform_mcps;
 pub use routines::exercise_routines;
 pub use rules::exercise_rules;
+pub use runtime_catalog::assert_agent_runtime_catalog;
 pub use sessions::exercise_sessions;
 pub use slack::exercise_slack;
-
-pub async fn assert_agent_runtime_catalog(fixture: &AppFixture) {
-    let response = request_json(fixture.app.clone(), "GET", "/api/agent-runtimes", None).await;
-    let runtimes = response["runtimes"].as_array().unwrap();
-    let ids: Vec<_> = runtimes
-        .iter()
-        .map(|runtime| runtime["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(ids, vec!["claude_managed_agents", "cursor", "opencode"]);
-    assert!(!ids.contains(&"claude_agents"));
-    assert_eq!(runtimes[2]["default_api_base"], "http://127.0.0.1:4096");
-    assert_eq!(runtimes[0]["credential_provider_id"], "anthropic");
-    assert_eq!(runtimes[1]["credential_provider_id"], "cursor");
-    assert_eq!(runtimes[2]["credential_provider_id"], "opencode");
-    let claude_tools: Vec<_> = runtimes[0]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(
-        claude_tools,
-        vec![
-            "bash",
-            "read",
-            "write",
-            "edit",
-            "glob",
-            "grep",
-            "web_fetch",
-            "web_search"
-        ]
-    );
-    assert!(runtimes[2]["tools"].as_array().unwrap().is_empty());
-}
 
 pub async fn create_agent(fixture: &AppFixture) -> String {
     let created = request_json(

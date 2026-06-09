@@ -69,6 +69,7 @@ function shortPrompt(prompt: string): string {
 function runtimeLabel(runtime?: string): string {
   if (runtime === "claude_managed_agents" || runtime === "claude_agents") return "Claude Managed Agents";
   if (runtime === "cursor") return "Cursor";
+  if (runtime === "gemini_antigravity") return "Gemini Antigravity";
   return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
 }
 
@@ -77,6 +78,7 @@ function runtimeModelId(alias?: string, harnesses: RuntimeHarness[] = []): strin
   const spec = resolveApiSpec(alias, harnesses);
   if (spec === "claude_managed_agents") return "anthropic/*";
   if (spec === "cursor") return "cursor/*";
+  if (spec === "gemini_antigravity") return "gemini/*";
   if (spec === "opencode") return "opencode/*";
   return null;
 }
@@ -409,7 +411,7 @@ function runtimeStatusFromEvents(events: RuntimeAgentEvent[]): "idle" | "busy" |
       next = "busy";
       continue;
     }
-    if (type === "session.status_idle" || type === "session.thread_status_idle") {
+    if (type === "session.status_idle" || type === "session.thread_status_idle" || type === "session.error") {
       next = "idle";
       continue;
     }
@@ -422,14 +424,15 @@ function runtimeStatusFromEvents(events: RuntimeAgentEvent[]): "idle" | "busy" |
             ? (status as { type?: unknown }).type
             : undefined;
       if (statusType === "busy" || statusType === "running") next = "busy";
-      if (statusType === "idle") next = "idle";
+      if (statusType === "idle" || statusType === "error" || statusType === "failed") next = "idle";
     }
   }
   return next;
 }
 
 function runtimeSessionStatusFromMetadata(status?: string, providerRunId?: unknown): "idle" | "busy" {
-  if (status === "starting") return "busy";
+  if (status === "starting" || status === "running" || status === "busy") return "busy";
+  if (status === "idle" || status === "error" || status === "completed" || status === "failed") return "idle";
   if (typeof providerRunId === "string" && providerRunId.trim()) return "busy";
   return "idle";
 }
@@ -720,40 +723,42 @@ function ChatInner() {
     }
   }, [
     beginRuntimeTurn,
+    harnesses,
     interruptingQueuedPromptId,
     model,
     queuedPrompts,
     sessionRuntime,
     sessionStatus,
     sid,
-    harnesses,
   ]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
     let unsub: (() => void) | undefined;
+    let cancelled = false;
     if (sessionRuntime) {
       listRuntimeEvents(sid)
         .then((events) => {
           if (activeSessionRef.current !== sid) return;
           eventBufferRef.current = events.slice(-500).map((ev) => ({ ts: Date.now(), ev: ev as Frame["ev"] }));
           mergeRuntimeEventsAndStatus(events);
+          if (cancelled || runtimeStatusFromEvents(events) === "idle") return;
+          unsub = subscribeRuntimeEvents({
+            sessionId: sid,
+            onEvent: (ev) => {
+              if (activeSessionRef.current === sid) appendRuntimeEvent(ev);
+            },
+            onError: (err) => {
+              if (activeSessionRef.current === sid) {
+                setError(err instanceof Error ? err.message : String(err));
+              }
+            },
+          });
         })
         .catch((err) => {
           if (activeSessionRef.current !== sid) return;
           setError(err instanceof Error ? err.message : String(err));
         });
-      unsub = subscribeRuntimeEvents({
-        sessionId: sid,
-        onEvent: (ev) => {
-          if (activeSessionRef.current === sid) appendRuntimeEvent(ev);
-        },
-        onError: (err) => {
-          if (activeSessionRef.current === sid) {
-            setError(err instanceof Error ? err.message : String(err));
-          }
-        },
-      });
     } else {
       void refetch();
     }
@@ -779,7 +784,10 @@ function ChatInner() {
         });
     }
     listApprovals().then(setApprovals).catch(() => {});
-    return unsub;
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, runtimeStreamVersion, harnesses]);
 
   useEffect(() => {

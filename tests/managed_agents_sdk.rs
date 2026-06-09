@@ -1,6 +1,10 @@
 #[path = "managed_agents_support/sdk.rs"]
 mod sdk_support;
 
+mod managed_agents_sdk {
+    pub mod gemini;
+}
+
 use futures_util::StreamExt;
 use litellm_rust::sdk::agents::{
     parse_sse, AgentEventKind, AgentEventPayload, AgentModel, AgentRuntime, CreateAgentParams,
@@ -255,13 +259,22 @@ fn parses_sse_and_resolves_supported_runtimes() {
         AgentRuntime::try_from("opencode").unwrap(),
         AgentRuntime::OpenCode
     );
+    assert_eq!(
+        AgentRuntime::try_from("gemini_antigravity").unwrap(),
+        AgentRuntime::GeminiAntigravity
+    );
     let catalog_ids: Vec<_> = AgentRuntime::catalog()
         .iter()
         .map(|entry| entry.id)
         .collect();
     assert_eq!(
         catalog_ids,
-        vec!["claude_managed_agents", "cursor", "opencode"]
+        vec![
+            "claude_managed_agents",
+            "cursor",
+            "gemini_antigravity",
+            "opencode"
+        ]
     );
     assert!(AgentRuntime::try_from("not-a-runtime").is_err());
 }

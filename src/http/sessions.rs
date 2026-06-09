@@ -18,6 +18,7 @@ mod execution;
 mod runtime;
 mod runtime_events_api;
 mod runtime_inputs;
+mod runtime_lifecycle;
 mod runtime_mcp_validation;
 mod runtime_provision;
 mod runtime_sdk;
@@ -171,7 +172,10 @@ pub async fn abort(
                 crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await
             {
                 if let Ok(client) = runtime_sdk_client(&resolved) {
-                    if register_runtime_session(&client, &row, &resolved).is_ok() {
+                    if register_runtime_session(&client, pool, &row, &resolved)
+                        .await
+                        .is_ok()
+                    {
                         let _ = client
                             .beta()
                             .sessions()
@@ -217,7 +221,10 @@ pub async fn interrupt(
     let Ok(client) = runtime_sdk_client(&resolved) else {
         return Ok(StatusCode::NO_CONTENT);
     };
-    if register_runtime_session(&client, &row, &resolved).is_ok() {
+    if register_runtime_session(&client, pool, &row, &resolved)
+        .await
+        .is_ok()
+    {
         let _ = client
             .beta()
             .sessions()

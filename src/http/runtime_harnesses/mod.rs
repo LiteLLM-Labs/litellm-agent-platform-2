@@ -16,12 +16,18 @@ use crate::{
     errors::GatewayError,
     http::{agent_runtime_tools::RuntimeTool, runtime_resolution::harness_credential_name},
     proxy::{auth::master_key::require_master_key, credential_crypto, state::AppState},
-    sdk::agents::{CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
+    sdk::agents::{CLAUDE_MANAGED_AGENTS, CURSOR, GEMINI_ANTIGRAVITY, OPENCODE},
 };
 
 /// IDs that are reserved for static (built-in) runtimes and cannot be used as
 /// custom harness aliases.
-const RESERVED_ALIASES: &[&str] = &[CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE, "claude_agents"];
+const RESERVED_ALIASES: &[&str] = &[
+    CLAUDE_MANAGED_AGENTS,
+    CURSOR,
+    GEMINI_ANTIGRAVITY,
+    OPENCODE,
+    "claude_agents",
+];
 
 #[derive(Debug, Serialize)]
 pub struct HarnessResponse {

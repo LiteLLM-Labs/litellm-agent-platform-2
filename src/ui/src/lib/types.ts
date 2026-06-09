@@ -17,9 +17,9 @@ export interface OpencodeSession {
 }
 
 export type AgentRuntimeId = string;
-export type BuiltinRuntimeId = "claude_managed_agents" | "cursor" | "opencode";
+export type BuiltinRuntimeId = "claude_managed_agents" | "cursor" | "gemini_antigravity" | "opencode";
 export function isBuiltinRuntime(id: string): id is BuiltinRuntimeId {
-  return id === "claude_managed_agents" || id === "cursor" || id === "opencode";
+  return id === "claude_managed_agents" || id === "cursor" || id === "gemini_antigravity" || id === "opencode";
 }
 
 export interface AgentRuntimeTool {
@@ -56,7 +56,7 @@ export function resolveApiSpec(
   alias: string,
   harnesses: RuntimeHarness[],
 ): BuiltinRuntimeId | null {
-  if (alias === "claude_managed_agents" || alias === "cursor" || alias === "opencode") {
+  if (alias === "claude_managed_agents" || alias === "cursor" || alias === "gemini_antigravity" || alias === "opencode") {
     return alias as BuiltinRuntimeId;
   }
   // Return null when harnesses haven't loaded yet or alias is unknown — callers

@@ -554,9 +554,11 @@ export async function sendMessageWithRuntimeModel(opts: {
       ? "anthropic/*"
       : spec === "cursor"
         ? "cursor/*"
-        : spec === "opencode"
-          ? "opencode/*"
-          : opts.model;
+        : spec === "gemini_antigravity"
+          ? "gemini/*"
+          : spec === "opencode"
+            ? "opencode/*"
+            : opts.model;
   return sendMessage({ sessionId: opts.sessionId, text: opts.text, model });
 }
 
@@ -632,6 +634,7 @@ function runtimeToolCatalogPrompt(runtimes: AgentRuntime[]): string {
     return [
       "Available runtime tools:",
       "- claude_managed_agents: bash, read, write, edit, glob, grep, web_fetch, web_search",
+      "- gemini_antigravity: code_execution, google_search, url_context",
     ].join("\n");
   }
   return [

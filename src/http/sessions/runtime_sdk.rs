@@ -5,12 +5,13 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::{
-    db::managed_agents::sessions::schema::SessionRow,
+    db::managed_agents::{runtime_refs, sessions::schema::SessionRow},
     errors::GatewayError,
     sdk::agents::{
         AgentRuntime, AgentSdkError, Lap, LapConfig, ManagedSessionRef, SendEventsParams,
     },
 };
+use sqlx::PgPool;
 
 pub(super) fn runtime_sdk_client(
     resolved: &crate::http::runtime_resolution::ResolvedRuntime,
@@ -31,6 +32,10 @@ pub(super) fn lap_from_credential(
             config.cursor_api_key = Some(resolved.credential.api_key.clone());
             config.cursor_base_url = resolved.credential.api_base.clone();
         }
+        AgentRuntime::GeminiAntigravity => {
+            config.gemini_api_key = Some(resolved.credential.api_key.clone());
+            config.gemini_base_url = resolved.credential.api_base.clone();
+        }
         AgentRuntime::OpenCode => {
             config.opencode_base_url = Some(resolved.credential.api_base.clone());
             config.opencode_api_key = Some(resolved.credential.api_key.clone());
@@ -40,8 +45,9 @@ pub(super) fn lap_from_credential(
     Ok(Lap::new(config))
 }
 
-pub(super) fn register_runtime_session(
+pub(super) async fn register_runtime_session(
     client: &Lap,
+    pool: &PgPool,
     row: &SessionRow,
     resolved: &crate::http::runtime_resolution::ResolvedRuntime,
 ) -> Result<(), GatewayError> {
@@ -54,6 +60,10 @@ pub(super) fn register_runtime_session(
     let provider_agent_id = resolved
         .adapter
         .provider_agent_id_from_session_id(&provider_session_id);
+    let provider_agent_id = match provider_agent_id {
+        Some(provider_agent_id) => Some(provider_agent_id),
+        None => runtime_agent_id_from_ref(pool, row).await?,
+    };
     client
         .register_session(ManagedSessionRef {
             session_id: row.id.clone(),
@@ -63,6 +73,20 @@ pub(super) fn register_runtime_session(
             provider_run_id: row.provider_run_id.clone(),
         })
         .map_err(agent_sdk_error)
+}
+
+async fn runtime_agent_id_from_ref(
+    pool: &PgPool,
+    row: &SessionRow,
+) -> Result<Option<String>, GatewayError> {
+    let Some(runtime_agent_ref_id) = row.runtime_agent_ref_id.as_deref() else {
+        return Ok(None);
+    };
+    Ok(
+        runtime_refs::repository::get_by_id(pool, runtime_agent_ref_id)
+            .await?
+            .map(|runtime_ref| runtime_ref.runtime_agent_id),
+    )
 }
 
 pub(super) fn send_events_params(prompt: String) -> SendEventsParams {

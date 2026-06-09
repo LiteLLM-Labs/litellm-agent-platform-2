@@ -1,6 +1,6 @@
 # Managed Agent Runtime SDK — API Contract
 
-The SDK exposes a single Anthropic-shaped surface for every runtime (Claude Managed Agents, Cursor, OpenCode, and any future runtime). Callers use the same four-step flow regardless of which runtime is active. Provider differences are fully encapsulated inside `sdk/providers/<provider>/runtime/`.
+The SDK exposes a single Anthropic-shaped surface for every runtime (Claude Managed Agents, Cursor, Gemini Antigravity, OpenCode, and any future runtime). Callers use the same four-step flow regardless of which runtime is active. Provider differences are fully encapsulated inside `sdk/providers/<provider>/runtime/`.
 
 Reference shape: [Anthropic Managed Agents API](https://platform.claude.com/docs/en/api/beta/agents/create)
 
@@ -9,9 +9,10 @@ Reference shape: [Anthropic Managed Agents API](https://platform.claude.com/docs
 ## Public flow
 
 ```rust
-let client = Lap::new(LapConfig::anthropic(api_key));  // or ::cursor / ::opencode
+let client = Lap::new(LapConfig::anthropic(api_key));  // or ::cursor / ::gemini_antigravity / ::opencode
 
 let agent   = client.beta().agents().create(params).await?;
+let agents  = client.beta().agents().list(params).await?;
 let env     = client.beta().environments().create(params).await?;
 let session = client.beta().sessions().create(params).await?;
 
@@ -35,11 +36,11 @@ The flow is identical for every runtime. No `match runtime` or `if runtime == X`
 | `lap_agent_runtime` | `AgentRuntime` | Required. Selects the runtime adapter. |
 | `name` | `String` | Agent display name. |
 | `model` | `AgentModel` | `AgentModel::Id("claude-opus-4-8")` or `AgentModel::Config { id, speed }`. |
-| `system` | `String` | System prompt. Cursor uses this as `prompt.text`. |
+| `system` | `String` | System prompt. Cursor uses this as `prompt.text`; Gemini sends it as `system_instruction`. |
 | `description` | `Option<String>` | Optional description. |
-| `tools` | `Vec<Value>` | Tool definitions. Cursor ignores this field. |
+| `tools` | `Vec<Value>` | Tool definitions. Cursor ignores this field. Gemini accepts `code_execution`, `google_search`, and `url_context`. |
 | `mcp_servers` | `Vec<Value>` | MCP server configs. Cursor maps these to `mcpServers`. |
-| `workspace` | `Option<AgentWorkspace>` | Repository + PR intent. Cursor maps to `repos`/`autoCreatePR`; Anthropic ignores. |
+| `workspace` | `Option<AgentWorkspace>` | Repository + PR intent. Cursor maps to `repos`/`autoCreatePR`; Gemini maps the repository to `base_environment.sources`. |
 | `env_vars` | `Option<HashMap<String, String>>` | Runtime environment variables. Reserved for future vault support. |
 | `metadata` | `Option<HashMap<String, String>>` | Stored in provider metadata. Anthropic includes it; Cursor ignores. |
 
@@ -83,6 +84,16 @@ The flow is identical for every runtime. No `match runtime` or `if runtime == X`
     }
   ]
 }
+```
+
+### Agent CRUD
+
+Gemini Antigravity additionally supports saved-agent management through the normalized `agents` resource:
+
+```rust
+client.beta().agents().list(ListAgentsParams { ... }).await?;
+client.beta().agents().get(GetAgentParams { ... }).await?;
+client.beta().agents().delete(DeleteAgentParams { ... }).await?;
 ```
 
 ---
@@ -157,15 +168,16 @@ Key event types:
 
 Each runtime maps its native response shape to the Anthropic-shaped outputs above. Callers never see provider-specific fields unless they inspect `.raw`.
 
-| Concern | Anthropic | Cursor | OpenCode |
-|---|---|---|---|
-| `agents.create` HTTP path | `POST /v1/agents` | `POST /v1/agents` | Not supported |
-| `environments.create` | `POST /v1/environments` | Synthetic (`{ id: name }`) | Not supported |
-| `sessions.create` | `POST /v1/sessions` | Synthetic (uses agent ID) | `POST /session` |
-| `send_events` | `POST /v1/sessions/{id}/events` | `POST /v1/agents/{id}/runs` | `POST /session/{id}/chat` |
-| `stream_events` | `GET /v1/sessions/{id}/events/stream` | `GET /v1/agents/{id}/runs/{run_id}/stream` | `GET /session/{id}/events` |
-| Event normalization | Native Anthropic SSE | Cursor events → Anthropic shape | Native |
-| Initial run on create | No — send first prompt via `send_events` | Yes — `agents.create` starts a run immediately | No |
+| Concern | Anthropic | Cursor | Gemini Antigravity | OpenCode |
+|---|---|---|---|---|
+| `agents.create` HTTP path | `POST /v1/agents` | `POST /v1/agents` | `POST /v1beta/agents` | Not supported |
+| Agent CRUD | Create only | Create only | Create, list, get, delete | Not supported |
+| `environments.create` | `POST /v1/environments` | Synthetic (`{ id: name }`) | Synthetic (`remote` or supplied ID) | Not supported |
+| `sessions.create` | `POST /v1/sessions` | Synthetic (uses agent ID) | Synthetic conversation handle | `POST /session` |
+| `send_events` | `POST /v1/sessions/{id}/events` | `POST /v1/agents/{id}/runs` | `POST /v1beta/interactions` | `POST /session/{id}/chat` |
+| `stream_events` | `GET /v1/sessions/{id}/events/stream` | `GET /v1/agents/{id}/runs/{run_id}/stream` | `GET /v1beta/interactions/{id}` | `GET /session/{id}/events` |
+| Event normalization | Native Anthropic SSE | Cursor events -> Anthropic shape | Interaction steps -> Anthropic shape | Native |
+| Initial run on create | No — send first prompt via `send_events` | Yes — `agents.create` starts a run immediately | No — send first prompt via `send_events` | No |
 
 ---
 

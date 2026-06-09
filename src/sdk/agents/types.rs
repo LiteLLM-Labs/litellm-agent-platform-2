@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::collections::HashMap;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -7,99 +7,14 @@ use serde_json::Value;
 mod errors;
 pub use errors::AgentSdkError;
 
-pub const CLAUDE_MANAGED_AGENTS: &str = "claude_managed_agents";
-pub const CURSOR: &str = "cursor";
-pub const OPENCODE: &str = "opencode";
-pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
-pub const DEFAULT_CURSOR_BASE_URL: &str = "https://api.cursor.com";
-pub const DEFAULT_OPENCODE_BASE_URL: &str = "http://127.0.0.1:4096";
-pub const MANAGED_AGENTS_BETA: &str = "managed-agents-2026-04-01";
-pub const ANTHROPIC_VERSION: &str = "2023-06-01";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AgentRuntime {
-    ClaudeManagedAgents,
-    Cursor,
-    OpenCode,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgentRuntimeCatalogEntry {
-    pub runtime: AgentRuntime,
-    pub id: &'static str,
-    pub name: &'static str,
-    pub default_api_base: &'static str,
-}
-
-impl AgentRuntime {
-    pub const CATALOG: [AgentRuntimeCatalogEntry; 3] = [
-        AgentRuntimeCatalogEntry {
-            runtime: Self::ClaudeManagedAgents,
-            id: CLAUDE_MANAGED_AGENTS,
-            name: "Claude Agents",
-            default_api_base: DEFAULT_ANTHROPIC_BASE_URL,
-        },
-        AgentRuntimeCatalogEntry {
-            runtime: Self::Cursor,
-            id: CURSOR,
-            name: "Cursor",
-            default_api_base: DEFAULT_CURSOR_BASE_URL,
-        },
-        AgentRuntimeCatalogEntry {
-            runtime: Self::OpenCode,
-            id: OPENCODE,
-            name: "OpenCode",
-            default_api_base: DEFAULT_OPENCODE_BASE_URL,
-        },
-    ];
-
-    pub fn catalog() -> &'static [AgentRuntimeCatalogEntry] {
-        &Self::CATALOG
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ClaudeManagedAgents => CLAUDE_MANAGED_AGENTS,
-            Self::Cursor => CURSOR,
-            Self::OpenCode => OPENCODE,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        Self::catalog()
-            .iter()
-            .find(|entry| entry.runtime == self)
-            .map(|entry| entry.name)
-            .unwrap_or_else(|| self.as_str())
-    }
-
-    pub fn default_api_base(self) -> &'static str {
-        Self::catalog()
-            .iter()
-            .find(|entry| entry.runtime == self)
-            .map(|entry| entry.default_api_base)
-            .unwrap_or_default()
-    }
-}
-
-impl TryFrom<&str> for AgentRuntime {
-    type Error = AgentSdkError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            CLAUDE_MANAGED_AGENTS => Ok(Self::ClaudeManagedAgents),
-            CURSOR => Ok(Self::Cursor),
-            OPENCODE => Ok(Self::OpenCode),
-            runtime => Err(AgentSdkError::UnsupportedRuntime(runtime.to_owned())),
-        }
-    }
-}
-
-impl fmt::Display for AgentRuntime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
+#[path = "types_runtime.rs"]
+mod runtime;
+pub use runtime::{
+    AgentRuntime, AgentRuntimeCatalogEntry, ANTHROPIC_VERSION, CLAUDE_MANAGED_AGENTS, CURSOR,
+    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_CURSOR_BASE_URL, DEFAULT_GEMINI_BASE_URL,
+    DEFAULT_OPENCODE_BASE_URL, GEMINI_ANTIGRAVITY, GEMINI_API_REVISION, MANAGED_AGENTS_BETA,
+    OPENCODE,
+};
 
 #[derive(Debug, Clone)]
 pub struct LapConfig {
@@ -107,6 +22,8 @@ pub struct LapConfig {
     pub anthropic_base_url: String,
     pub cursor_api_key: Option<String>,
     pub cursor_base_url: String,
+    pub gemini_api_key: Option<String>,
+    pub gemini_base_url: String,
     pub opencode_api_key: Option<String>,
     pub opencode_base_url: Option<String>,
     pub opencode_username: String,
@@ -128,6 +45,13 @@ impl LapConfig {
         }
     }
 
+    pub fn gemini_antigravity(api_key: impl Into<String>) -> Self {
+        Self {
+            gemini_api_key: Some(api_key.into()),
+            ..Self::default()
+        }
+    }
+
     pub fn opencode(base_url: impl Into<String>) -> Self {
         Self {
             opencode_base_url: Some(base_url.into()),
@@ -143,6 +67,8 @@ impl Default for LapConfig {
             anthropic_base_url: DEFAULT_ANTHROPIC_BASE_URL.to_owned(),
             cursor_api_key: None,
             cursor_base_url: DEFAULT_CURSOR_BASE_URL.to_owned(),
+            gemini_api_key: None,
+            gemini_base_url: DEFAULT_GEMINI_BASE_URL.to_owned(),
             opencode_api_key: None,
             opencode_base_url: None,
             opencode_username: "opencode".to_owned(),
@@ -179,6 +105,30 @@ pub struct CreateAgentParams {
     pub workspace: Option<AgentWorkspace>,
     #[serde(skip)]
     pub metadata: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ListAgentsParams {
+    #[serde(skip)]
+    pub lap_agent_runtime: AgentRuntime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_size: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GetAgentParams {
+    #[serde(skip)]
+    pub lap_agent_runtime: AgentRuntime,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DeleteAgentParams {
+    #[serde(skip)]
+    pub lap_agent_runtime: AgentRuntime,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -275,6 +225,18 @@ pub struct ManagedAgent {
     pub metadata: Option<Value>,
     pub created_at: Option<i64>,
     pub updated_at: Option<i64>,
+    pub raw: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ManagedAgentList {
+    pub agents: Vec<ManagedAgent>,
+    pub next_page_token: Option<String>,
+    pub raw: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeleteAgentResponse {
     pub raw: Value,
 }
 

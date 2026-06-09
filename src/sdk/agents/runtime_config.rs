@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use base64::{engine::general_purpose, Engine};
 use reqwest::{header, RequestBuilder};
 
-use super::types::{AgentRuntime, LapConfig, ANTHROPIC_VERSION, MANAGED_AGENTS_BETA};
+use super::types::{
+    AgentRuntime, LapConfig, ANTHROPIC_VERSION, GEMINI_API_REVISION, MANAGED_AGENTS_BETA,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct RuntimeConfig {
@@ -15,6 +17,7 @@ pub(super) struct RuntimeConfig {
 enum RuntimeAuth {
     AnthropicApiKey(String),
     Bearer(String),
+    GoogleApiKey(String),
     OpenCode {
         username: String,
         password: Option<String>,
@@ -30,6 +33,9 @@ impl RuntimeConfig {
                 .header("anthropic-version", ANTHROPIC_VERSION)
                 .header("anthropic-beta", MANAGED_AGENTS_BETA),
             RuntimeAuth::Bearer(api_key) => request.bearer_auth(api_key),
+            RuntimeAuth::GoogleApiKey(api_key) => request
+                .header("x-goog-api-key", api_key)
+                .header("Api-Revision", GEMINI_API_REVISION),
             RuntimeAuth::OpenCode {
                 username,
                 password,
@@ -76,6 +82,15 @@ pub(super) fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, Runtim
             RuntimeConfig {
                 base_url: config.cursor_base_url.trim_end_matches('/').to_owned(),
                 auth: RuntimeAuth::Bearer(api_key),
+            },
+        );
+    }
+    if let Some(api_key) = config.gemini_api_key {
+        runtimes.insert(
+            AgentRuntime::GeminiAntigravity,
+            RuntimeConfig {
+                base_url: config.gemini_base_url.trim_end_matches('/').to_owned(),
+                auth: RuntimeAuth::GoogleApiKey(api_key),
             },
         );
     }

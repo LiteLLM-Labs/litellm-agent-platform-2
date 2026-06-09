@@ -2,7 +2,7 @@
 
 ## Problem
 
-Gateway has 3 hardcoded runtimes (`claude_managed_agents`, `cursor`, `opencode`). Users need additional harness endpoints (e.g. staging Anthropic, team-specific Cursor) addressable by alias. Alias must survive the full session lifecycle and drive the same spec-specific UI behavior as the built-in runtime it wraps.
+Gateway has hardcoded runtimes (`claude_managed_agents`, `cursor`, `gemini_antigravity`, `opencode`). Users need additional harness endpoints (e.g. staging Anthropic, team-specific Cursor) addressable by alias. Alias must survive the full session lifecycle and drive the same spec-specific UI behavior as the built-in runtime it wraps.
 
 ## Goals
 
@@ -44,7 +44,7 @@ pub(crate) async fn resolve_runtime(pool, state, alias) -> Result<ResolvedRuntim
 CREATE TABLE IF NOT EXISTS "LiteLLM_RuntimeHarnessTable" (
   id          TEXT PRIMARY KEY,
   alias       TEXT UNIQUE NOT NULL,
-  api_spec    TEXT NOT NULL CHECK (api_spec IN ('claude_managed_agents', 'cursor', 'opencode')),
+  api_spec    TEXT NOT NULL CHECK (api_spec IN ('claude_managed_agents', 'cursor', 'gemini_antigravity', 'opencode')),
   api_base    TEXT NOT NULL,
   created_at  BIGINT NOT NULL,
   updated_at  BIGINT NOT NULL
@@ -68,7 +68,7 @@ Keep `/api/agent-runtimes` intact. Add:
 
 All write operations: master key required, atomic (harness row + credential in sync), reserved/non-slug alias rejected.
 
-Reserved aliases: `claude_managed_agents`, `cursor`, `opencode`, `claude_agents`.  
+Reserved aliases: `claude_managed_agents`, `cursor`, `gemini_antigravity`, `opencode`, `claude_agents`.
 Valid slug: `[a-zA-Z0-9_-]+`.
 
 ### GET /api/runtime-harnesses — exact response shape
@@ -130,7 +130,7 @@ All spec-specific UI branches switch from alias string comparison to `api_spec` 
 
 ```typescript
 function resolveApiSpec(alias: string, harnesses: RuntimeHarness[]): BuiltinRuntimeId {
-  if (alias === "claude_managed_agents" || alias === "cursor" || alias === "opencode") {
+  if (alias === "claude_managed_agents" || alias === "cursor" || alias === "gemini_antigravity" || alias === "opencode") {
     return alias as BuiltinRuntimeId;
   }
   return harnesses.find(h => h.alias === alias)?.api_spec ?? "claude_managed_agents";
