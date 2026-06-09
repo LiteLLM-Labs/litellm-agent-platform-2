@@ -1,10 +1,10 @@
 use serde::Serialize;
 
 use super::{
-    AGENT_MEMORY_MCP_ID, CONNECT_AGENT_TO_SLACK_MCP_ID, CREATE_MANAGED_AGENT_MCP_ID,
-    LIST_SLACK_AGENT_BINDINGS_MCP_ID, LIST_SUB_AGENTS_MCP_ID, PLATFORM_SESSION_MCP_ID,
-    REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID, SEND_PLATFORM_SESSION_MESSAGE_MCP_ID,
-    SEND_SLACK_MESSAGE_MCP_ID,
+    AGENT_MEMORY_MCP_ID, CHECK_HUMAN_APPROVAL_MCP_ID, CONNECT_AGENT_TO_SLACK_MCP_ID,
+    CREATE_MANAGED_AGENT_MCP_ID, LIST_SLACK_AGENT_BINDINGS_MCP_ID, LIST_SUB_AGENTS_MCP_ID,
+    PLATFORM_SESSION_MCP_ID, REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID,
+    SEND_PLATFORM_SESSION_MESSAGE_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID,
 };
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -68,6 +68,11 @@ const CATALOG: &[PlatformMcp] = &[
     PlatformMcp {
         id: REQUEST_HUMAN_APPROVAL_MCP_ID,
         name: "Request human approval",
-        description: "Pause for an operator decision through the managed agent inbox.",
+        description: "File an async operator approval request in the managed agent inbox.",
+    },
+    PlatformMcp {
+        id: CHECK_HUMAN_APPROVAL_MCP_ID,
+        name: "Check human approval",
+        description: "Check the current decision state for a filed approval request.",
     },
 ];

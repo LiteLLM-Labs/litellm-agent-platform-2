@@ -1,6 +1,9 @@
 use serde_json::Value;
 
-use super::{platform_mcps, LIST_SUB_AGENTS_MCP_ID, RUN_SUB_AGENT_MCP_ID};
+use super::{
+    platform_mcps, CHECK_HUMAN_APPROVAL_MCP_ID, LIST_SUB_AGENTS_MCP_ID,
+    REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID,
+};
 
 pub fn selected_platform_mcp_ids(config: &Value) -> Vec<String> {
     let mut ids: Vec<String> = config
@@ -22,6 +25,11 @@ pub fn selected_platform_mcp_ids(config: &Value) -> Vec<String> {
         if !ids.iter().any(|id| id == RUN_SUB_AGENT_MCP_ID) {
             ids.push(RUN_SUB_AGENT_MCP_ID.to_owned());
         }
+    }
+    if ids.iter().any(|id| id == REQUEST_HUMAN_APPROVAL_MCP_ID)
+        && !ids.iter().any(|id| id == CHECK_HUMAN_APPROVAL_MCP_ID)
+    {
+        ids.push(CHECK_HUMAN_APPROVAL_MCP_ID.to_owned());
     }
     ids
 }

@@ -2,7 +2,10 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
-    db::managed_agents::{inbox, registry},
+    db::managed_agents::{
+        inbox::{self, schema::InboxItemRow},
+        registry,
+    },
     errors::GatewayError,
 };
 
@@ -29,35 +32,33 @@ pub async fn request_human_approval(
         arguments.get("arguments").cloned(),
     )
     .await?;
-    wait_for_decision(pool, item.id).await
+    Ok(approval_payload(item))
 }
 
-async fn wait_for_decision(pool: &PgPool, item_id: String) -> Result<Value, GatewayError> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
-    loop {
-        let Some(item) = inbox::repository::get(pool, &item_id).await? else {
-            return Ok(json!({
-                "approval_id": item_id,
-                "status": "missing"
-            }));
-        };
-        if item.status != "pending" {
-            return Ok(json!({
-                "approval_id": item.id,
-                "status": item.status,
-                "feedback": item.feedback,
-                "arguments": parse_args(item.args_json)
-            }));
+pub async fn check_human_approval(pool: &PgPool, arguments: Value) -> Result<Value, GatewayError> {
+    let approval_id = required_str(&arguments, "approval_id")?;
+    let Some(item) = inbox::repository::get(pool, approval_id).await? else {
+        return Ok(json!({
+            "approval_id": approval_id,
+            "status": "missing"
+        }));
+    };
+    Ok(approval_payload(item))
+}
+
+fn approval_payload(item: InboxItemRow) -> Value {
+    json!({
+        "approval_id": item.id,
+        "status": item.status,
+        "session_id": item.session_id,
+        "feedback": item.feedback,
+        "arguments": parse_args(item.args_json),
+        "message": if item.status == "pending" {
+            Some("approval is pending in the inbox")
+        } else {
+            None
         }
-        if std::time::Instant::now() >= deadline {
-            return Ok(json!({
-                "approval_id": item.id,
-                "status": "pending",
-                "message": "approval is still pending in the inbox"
-            }));
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    }
+    })
 }
 
 fn optional_str(arguments: &Value, field: &str) -> Option<String> {
