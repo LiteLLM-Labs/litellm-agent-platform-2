@@ -14,16 +14,9 @@ use serde_json::json;
 use crate::{
     db::{credentials, managed_agents::harnesses},
     errors::GatewayError,
-    http::{
-        agent_runtime_tools::{runtime_tools, RuntimeTool},
-        agent_runtimes::load_credential,
-        runtime_resolution::harness_credential_name,
-    },
-    proxy::{
-        auth::master_key::require_master_key, credential_crypto,
-        provider_credentials::mask_api_key, state::AppState,
-    },
-    sdk::agents::{AgentRuntime, CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
+    http::{agent_runtime_tools::RuntimeTool, runtime_resolution::harness_credential_name},
+    proxy::{auth::master_key::require_master_key, credential_crypto, state::AppState},
+    sdk::agents::{CLAUDE_MANAGED_AGENTS, CURSOR, OPENCODE},
 };
 
 /// IDs that are reserved for static (built-in) runtimes and cannot be used as

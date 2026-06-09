@@ -1,5 +1,3 @@
-use sqlx::PgPool;
-
 use crate::{
     db::{credentials, managed_agents::harnesses},
     errors::GatewayError,

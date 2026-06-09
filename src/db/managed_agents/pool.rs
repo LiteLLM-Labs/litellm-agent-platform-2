@@ -1,6 +1,6 @@
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
-    ConnectOptions, Executor, PgPool,
+    Executor, PgPool,
 };
 
 use crate::errors::GatewayError;
