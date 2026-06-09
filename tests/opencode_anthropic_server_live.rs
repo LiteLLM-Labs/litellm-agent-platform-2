@@ -26,7 +26,6 @@ use litellm_rust::sdk::agents::{
 };
 use serde_json::json;
 
-
 fn live_lap(base: String) -> Lap {
     // No opencode-specific config — just the Anthropic base URL + key. The
     // server speaks the Anthropic managed-agents spec.
