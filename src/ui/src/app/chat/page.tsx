@@ -266,7 +266,7 @@ function runtimeEventsToMessages(
   let turnIndex = 0;
 
   const ensureAssistant = (seed?: string): HarnessMessage => {
-    if (assistant) return assistant;
+    if (assistant && !assistant.info.finish) return assistant;
     turnIndex += 1;
     const messageId = `${sessionId}_runtime_turn_${seed ?? turnIndex}`;
     assistant = {
@@ -341,6 +341,7 @@ function runtimeEventsToMessages(
 
     if (type === "session.status_idle") {
       if (assistant) assistant.info.finish = "stop";
+      assistant = null;
       return;
     }
 
@@ -352,15 +353,18 @@ function runtimeEventsToMessages(
           : eventStatus && typeof eventStatus === "object"
             ? (eventStatus as { type?: unknown }).type
             : undefined;
-      if ((statusType === "busy" || statusType === "running") && messages.at(-1)?.info.role === "user") {
+      if (statusType === "busy" || statusType === "running") {
         ensureAssistant(seed);
       }
-      if (statusType === "idle" && assistant) assistant.info.finish = "stop";
+      if (statusType === "idle" && assistant) {
+        assistant.info.finish = "stop";
+        assistant = null;
+      }
       return;
     }
 
     if (isRuntimeTurnStartEvent(type)) {
-      if (messages.at(-1)?.info.role === "user") ensureAssistant(seed);
+      ensureAssistant(seed);
       return;
     }
 
@@ -386,7 +390,7 @@ function runtimeEventsToMessages(
     );
   });
 
-  if (status === "busy" && messages.at(-1)?.info.role === "user") {
+  if (status === "busy" && (messages.length === 0 || messages.at(-1)?.info.role === "user" || assistant === null)) {
     ensureAssistant("pending");
   }
 
