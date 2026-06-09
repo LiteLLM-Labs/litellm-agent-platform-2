@@ -12,25 +12,20 @@ use crate::{
         },
     },
     errors::GatewayError,
-    http::agent_runtimes::RuntimeCredential,
     proxy::{credential_crypto, state::AppState},
-    sdk::providers,
 };
 
 use super::{
     runtime_provision::provision_runtime_session,
-    runtime_sdk::{
-        agent_sdk_error, provider_run_id, register_runtime_session, runtime_sdk_client,
-        send_events_params,
-    },
+    runtime_sdk::{agent_sdk_error, register_runtime_session, send_events_params},
     storage::persist_message,
     types::{CreateSessionRequest, SessionResponse},
 };
 
 pub(super) struct CreatedRuntimeSession {
     pub(super) runtime: String,
+    pub(super) resolved: crate::http::runtime_resolution::ResolvedRuntime,
     pub(super) agent: ManagedAgentRow,
-    pub(super) credential: RuntimeCredential,
     pub(super) environment: Value,
     pub(super) initial_user_prompt: Option<String>,
     pub(super) prompt: String,
@@ -109,12 +104,13 @@ async fn create_runtime_session_row(
     pool: &PgPool,
     input: CreateSessionRequest,
 ) -> Result<CreatedRuntimeSession, GatewayError> {
-    let runtime = validated_runtime(&input)?;
+    let alias = input.runtime.as_deref().unwrap_or_default();
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, state, alias).await?;
+    let runtime = resolved.alias.clone();
     let mut agent = load_agent(pool, &input).await?;
     agent.system =
         crate::db::managed_agents::skills::compose::compose_agent_system_prompt(pool, &agent)
             .await?;
-    let credential = crate::http::agent_runtimes::load_credential(state, &runtime).await?;
     let stored_environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
     let initial_user_prompt = input
@@ -142,8 +138,8 @@ async fn create_runtime_session_row(
     let prompt = runtime_prompt(input.prompt, &agent);
     Ok(CreatedRuntimeSession {
         runtime,
+        resolved,
         agent,
-        credential,
         environment: provision_environment,
         initial_user_prompt,
         prompt,
@@ -160,8 +156,9 @@ pub(super) async fn execute_runtime_prompt(
     let runtime = row.runtime.as_deref().ok_or_else(|| {
         GatewayError::InvalidConfig("runtime session is missing runtime".to_owned())
     })?;
-    let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, &row)?;
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await?;
+    let client = super::runtime_sdk::lap_from_credential(&resolved)?;
+    register_runtime_session(&client, &row, &resolved)?;
     state
         .agent_runs
         .update_status(&row.id, crate::agents::runs::AgentRunStatus::Running);
@@ -172,21 +169,10 @@ pub(super) async fn execute_runtime_prompt(
         .send(&row.id, send_events_params(prompt))
         .await
         .map_err(agent_sdk_error)?;
-    if let Some(run_id) = provider_run_id(runtime, &sent.raw) {
+    if let Some(run_id) = resolved.adapter.provider_run_id_from_agent_raw(&sent.raw) {
         sessions::repository::set_provider_run(pool, &row.id, &run_id, "running").await?;
     }
     Ok(())
-}
-
-fn validated_runtime(input: &CreateSessionRequest) -> Result<String, GatewayError> {
-    let runtime = input.runtime.clone().unwrap_or_default();
-    if providers::runtime_registry().validate_id(&runtime) {
-        Ok(runtime)
-    } else {
-        Err(GatewayError::InvalidJsonMessage(format!(
-            "unsupported runtime: {runtime}"
-        )))
-    }
 }
 
 async fn load_agent(

@@ -70,6 +70,15 @@ fn api_routes() -> Router<Arc<AppState>> {
             put(crate::http::agent_runtimes::save).delete(crate::http::agent_runtimes::delete),
         )
         .route(
+            "/api/runtime-harnesses",
+            get(crate::http::runtime_harnesses::list).post(crate::http::runtime_harnesses::create),
+        )
+        .route(
+            "/api/runtime-harnesses/{alias}",
+            put(crate::http::runtime_harnesses::update)
+                .delete(crate::http::runtime_harnesses::delete_harness),
+        )
+        .route(
             "/api/providers",
             get(crate::http::provider_credentials::list),
         )
