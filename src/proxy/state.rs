@@ -78,7 +78,7 @@ impl AppState {
         self.config
             .mcp_servers
             .proxy_base_url()
-            .or_else(|| self.config.general_settings.public_base_url.as_deref())
+            .or(self.config.general_settings.public_base_url.as_deref())
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
