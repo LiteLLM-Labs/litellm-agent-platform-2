@@ -10,6 +10,7 @@ import {
   startOpencode,
   restartOpencode,
   provisionAgent,
+  writeMcpConfig,
   ocFetch,
   writeProviderConfig,
   gitInit,
@@ -117,10 +118,15 @@ app.get("/health", wrap(async (_req, res) => {
 }));
 
 // ---- agents ---------------------------------------------------------------
-// Creating/updating an agent writes its config to disk (.opencode/agent/<id>.md
-// + opencode.json mcp) and reboots opencode so it loads — opencode has no
-// hot-reload. After this returns, a session can use the agent's system prompt,
-// tool permissions, and MCP servers.
+// Write an agent's config to disk and reboot opencode so it loads (opencode has
+// no hot-reload). The mcp section is rebuilt from ALL agents so one agent's
+// servers never leak into another's sessions.
+async function applyAgentsAndReboot(provisionRow) {
+  if (provisionRow) await provisionAgent(WORKDIR, provisionRow);
+  await writeMcpConfig(WORKDIR, store.listAgents());
+  await rebootOpencode();
+}
+
 app.post("/v1/agents", wrap(async (req, res) => {
   const { name, model, system } = req.body || {};
   const row = store.createAgent({
@@ -131,8 +137,7 @@ app.post("/v1/agents", wrap(async (req, res) => {
     mcp_servers: req.body.mcp_servers || [],
     workspace: null,
   });
-  await provisionAgent(WORKDIR, row);
-  await rebootOpencode();
+  await applyAgentsAndReboot(row);
   res.json(agentResponse(row));
 }));
 
@@ -157,8 +162,7 @@ app.patch("/v1/agents/:id", wrap(async (req, res) => {
   if (req.body?.mcp_servers !== undefined) patch.mcp_servers = req.body.mcp_servers;
   const row = store.updateAgent(req.params.id, patch);
   if (!row) return res.status(404).json({ error: "agent not found" });
-  await provisionAgent(WORKDIR, row);
-  await rebootOpencode();
+  await applyAgentsAndReboot(row);
   res.json(agentResponse(row));
 }));
 
@@ -175,15 +179,22 @@ app.post("/v1/sessions", wrap(async (req, res) => {
   const row = store.getAgent(req.body?.agent);
   if (!row) return res.status(400).json({ error: "unknown agent" });
 
-  await provisionAgent(WORKDIR, row);
-
   const r = await ocFetch(oc.baseUrl, "/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: req.body.title || row.name + " session" }),
   });
-  const ses = await r.json();
+  if (!r.ok) {
+    const detail = await r.text().catch(() => "");
+    return res
+      .status(502)
+      .json({ error: `opencode session create failed (${r.status})`, detail: detail.slice(0, 500) });
+  }
+  const ses = await r.json().catch(() => ({}));
   const sid = ses.id;
+  if (!sid) {
+    return res.status(502).json({ error: "opencode session response missing id" });
+  }
 
   store.bindSession(sid, row.id);
 
@@ -204,7 +215,7 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
   const parts = partsFromEvents(req.body?.events || []);
   if (!parts.length) return res.status(400).json({ error: "no user.message parts" });
 
-  await ocFetch(oc.baseUrl, `/session/${req.params.id}/prompt_async`, {
+  const r = await ocFetch(oc.baseUrl, `/session/${req.params.id}/prompt_async`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -215,6 +226,12 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
       parts,
     }),
   });
+  if (!r.ok) {
+    const detail = await r.text().catch(() => "");
+    return res
+      .status(502)
+      .json({ error: `opencode prompt failed (${r.status})`, detail: detail.slice(0, 500) });
+  }
 
   res.status(202).json({ ok: true });
 }));
@@ -250,6 +267,14 @@ app.get("/v1/sessions/:id/events/stream", wrap(async (req, res) => {
 
   try {
     const upstream = await ocFetch(oc.baseUrl, "/event", { signal: controller.signal });
+    if (!upstream.ok || !upstream.body) {
+      res.write(
+        `event: session.error\ndata: ${JSON.stringify({
+          error: { message: `opencode /event unavailable (${upstream.status})` },
+        })}\n\n`
+      );
+      return;
+    }
 
     const decoder = new TextDecoder();
     let buffer = "";

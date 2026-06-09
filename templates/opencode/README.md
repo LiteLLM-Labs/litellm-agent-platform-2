@@ -216,7 +216,7 @@ agents before running their sessions.
 | `mcp_servers` | array | `opencode.json` `mcp` | ✅ **yes** — tools are callable (verified with DeepWiki) |
 | `permissions` | object | agent frontmatter | ✅ yes — `bash` / `edit` / `<mcp>*` → `allow` \| `deny` \| `ask` |
 | `system` | string | `.opencode/agent/<id>.md` body | ⚠️ **soft only** — see below |
-| `workspace` (via environment `config`) | object | checkout dir | optional git `repository` / `ref` |
+| `workspace` (via environment `config`) | object | — | 🚧 **reserved — not yet wired**; accepted and stored but no repo clone/checkout happens yet |
 
 ### System prompt is soft guidance, not strict control
 

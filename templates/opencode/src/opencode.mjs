@@ -117,8 +117,10 @@ export async function startOpencode({ port = 4096, cwd, env } = {}) {
   });
 }
 
-// Writes <cwd>/.opencode/agent/<agent.id>.md and merges agent.mcp_servers
-// into <cwd>/opencode.json
+// Writes <cwd>/.opencode/agent/<agent.id>.md (system prompt + model +
+// permissions). MCP servers are written separately by writeMcpConfig so the
+// shared opencode.json reflects exactly the union of all agents (no stale
+// accumulation across agents).
 export async function provisionAgent(cwd, agent) {
   const agentDir = path.join(cwd, ".opencode", "agent");
   await mkdir(agentDir, { recursive: true });
@@ -141,37 +143,37 @@ export async function provisionAgent(cwd, agent) {
   const md = `---\n${lines.join("\n")}\n---\n${body}`;
   const agentFile = path.join(agentDir, `${agent.id}.md`);
   await writeFile(agentFile, md, "utf8");
+}
 
-  // Merge MCP servers into opencode.json.
-  if (agent?.mcp_servers?.length) {
-    const configPath = path.join(cwd, "opencode.json");
-    let obj = {};
-    try {
-      obj = JSON.parse(await readFile(configPath, "utf8"));
-    } catch {
-      obj = {};
-    }
-    obj.mcp = obj.mcp || {};
-
-    for (const server of agent.mcp_servers) {
+// Rebuild the `mcp` section of <cwd>/opencode.json from the union of all agents'
+// mcp_servers. Replacing (not merging) avoids servers from one agent leaking
+// into later sessions. Preserves other config (provider, etc.).
+export async function writeMcpConfig(cwd, agents) {
+  const configPath = path.join(cwd, "opencode.json");
+  let obj = {};
+  try {
+    obj = JSON.parse(await readFile(configPath, "utf8"));
+  } catch {
+    obj = {};
+  }
+  const mcp = {};
+  for (const agent of agents || []) {
+    for (const server of agent?.mcp_servers || []) {
       if (!server || !server.name) continue;
       if (server.command) {
-        obj.mcp[server.name] = {
+        mcp[server.name] = {
           type: "local",
           command: [server.command, ...(server.args || [])],
           enabled: true,
         };
       } else if (server.url) {
-        obj.mcp[server.name] = {
-          type: "remote",
-          url: server.url,
-          enabled: true,
-        };
+        mcp[server.name] = { type: "remote", url: server.url, enabled: true };
       }
     }
-
-    await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
   }
+  obj.mcp = mcp;
+  await mkdir(cwd, { recursive: true });
+  await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
 }
 
 // Thin proxy helper to the opencode child. Returns the raw fetch Response.
