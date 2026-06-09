@@ -11,11 +11,13 @@ use crate::{
 pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
 pub const CURSOR_PROVIDER_ID: &str = "cursor";
 pub const GEMINI_PROVIDER_ID: &str = "gemini";
+pub const HERMES_PROVIDER_ID: &str = "hermes";
 pub const OPENCODE_PROVIDER_ID: &str = "opencode";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
 const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 const DEFAULT_CURSOR_BASE_URL: &str = "https://api.cursor.com";
 const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
+const DEFAULT_HERMES_BASE_URL: &str = "http://127.0.0.1:8080";
 const DEFAULT_OPENCODE_BASE_URL: &str = "http://127.0.0.1:4096";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
 
@@ -62,6 +64,13 @@ pub const PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
         name: "Gemini",
         description: "Gemini Antigravity managed agents through the Gemini API",
         default_base_url: DEFAULT_GEMINI_BASE_URL,
+        category: ProviderCategory::Runtime,
+    },
+    ProviderCatalogEntry {
+        id: HERMES_PROVIDER_ID,
+        name: "Hermes",
+        description: "Hermes Agent (NousResearch) sessions through the local runtime API",
+        default_base_url: DEFAULT_HERMES_BASE_URL,
         category: ProviderCategory::Runtime,
     },
     ProviderCatalogEntry {

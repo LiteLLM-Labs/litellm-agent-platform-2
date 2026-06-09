@@ -17,7 +17,7 @@ export interface OpencodeSession {
 }
 
 export type AgentRuntimeId = string;
-export type BuiltinRuntimeId = "claude_managed_agents" | "cursor" | "gemini_antigravity" | "opencode";
+export type BuiltinRuntimeId = "claude_managed_agents" | "cursor" | "gemini_antigravity" | "hermes" | "opencode";
 export function isBuiltinRuntime(id: string): id is BuiltinRuntimeId {
   return id === "claude_managed_agents" || id === "cursor" || id === "gemini_antigravity" || id === "opencode";
 }

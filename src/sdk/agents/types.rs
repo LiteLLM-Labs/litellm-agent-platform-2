@@ -12,8 +12,8 @@ mod runtime;
 pub use runtime::{
     AgentRuntime, AgentRuntimeCatalogEntry, ANTHROPIC_VERSION, CLAUDE_MANAGED_AGENTS, CURSOR,
     DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_CURSOR_BASE_URL, DEFAULT_GEMINI_BASE_URL,
-    DEFAULT_OPENCODE_BASE_URL, GEMINI_ANTIGRAVITY, GEMINI_API_REVISION, MANAGED_AGENTS_BETA,
-    OPENCODE,
+    DEFAULT_HERMES_BASE_URL, DEFAULT_OPENCODE_BASE_URL, GEMINI_ANTIGRAVITY, GEMINI_API_REVISION,
+    HERMES, MANAGED_AGENTS_BETA, OPENCODE,
 };
 
 #[derive(Debug, Clone)]
@@ -24,6 +24,8 @@ pub struct LapConfig {
     pub cursor_base_url: String,
     pub gemini_api_key: Option<String>,
     pub gemini_base_url: String,
+    pub hermes_api_key: Option<String>,
+    pub hermes_base_url: String,
     pub opencode_api_key: Option<String>,
     pub opencode_base_url: Option<String>,
     pub opencode_username: String,
@@ -52,6 +54,13 @@ impl LapConfig {
         }
     }
 
+    pub fn hermes(api_key: impl Into<String>) -> Self {
+        Self {
+            hermes_api_key: Some(api_key.into()),
+            ..Self::default()
+        }
+    }
+
     pub fn opencode(base_url: impl Into<String>) -> Self {
         Self {
             opencode_base_url: Some(base_url.into()),
@@ -69,6 +78,8 @@ impl Default for LapConfig {
             cursor_base_url: DEFAULT_CURSOR_BASE_URL.to_owned(),
             gemini_api_key: None,
             gemini_base_url: DEFAULT_GEMINI_BASE_URL.to_owned(),
+            hermes_api_key: None,
+            hermes_base_url: DEFAULT_HERMES_BASE_URL.to_owned(),
             opencode_api_key: None,
             opencode_base_url: None,
             opencode_username: "opencode".to_owned(),

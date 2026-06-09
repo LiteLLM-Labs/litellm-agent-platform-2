@@ -70,6 +70,7 @@ function runtimeLabel(runtime?: string): string {
   if (runtime === "claude_managed_agents" || runtime === "claude_agents") return "Claude Managed Agents";
   if (runtime === "cursor") return "Cursor";
   if (runtime === "gemini_antigravity") return "Gemini Antigravity";
+  if (runtime === "hermes") return "Hermes";
   return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
 }
 
@@ -79,6 +80,7 @@ function runtimeModelId(alias?: string, harnesses: RuntimeHarness[] = []): strin
   if (spec === "claude_managed_agents") return "anthropic/*";
   if (spec === "cursor") return "cursor/*";
   if (spec === "gemini_antigravity") return "gemini/*";
+  if (spec === "hermes") return "hermes/*";
   if (spec === "opencode") return "opencode/*";
   return null;
 }
