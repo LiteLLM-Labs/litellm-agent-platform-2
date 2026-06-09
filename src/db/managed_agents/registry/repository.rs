@@ -13,7 +13,7 @@ pub async fn create(
     pool: &PgPool,
     input: CreateManagedAgent,
 ) -> Result<ManagedAgentRow, GatewayError> {
-    validate_create_input(&input)?;
+    super::input::validate_create(&input)?;
     let defaults = CreateDefaults::from_input(&input);
 
     let mut tx = pool.begin().await.map_err(GatewayError::Database)?;
@@ -21,15 +21,6 @@ pub async fn create(
     let row = insert_agent(tx.as_mut(), input, &defaults).await?;
     tx.commit().await.map_err(GatewayError::Database)?;
     Ok(row)
-}
-
-fn validate_create_input(input: &CreateManagedAgent) -> Result<(), GatewayError> {
-    if input.name.trim().is_empty() || input.owner_id.trim().is_empty() {
-        return Err(GatewayError::InvalidJsonMessage(
-            "name and owner_id required".to_owned(),
-        ));
-    }
-    Ok(())
 }
 
 struct CreateDefaults {
@@ -107,7 +98,7 @@ async fn insert_agent(
     defaults: &CreateDefaults,
 ) -> Result<ManagedAgentRow, GatewayError> {
     let tools = input.tools.unwrap_or(serde_json::Value::Null);
-    let config = create_config(input.config, input.runtime.as_deref(), &tools);
+    let config = super::input::create_config(input.config, input.runtime.as_deref(), &tools);
     sqlx::query_as::<_, ManagedAgentRow>(
         r#"
         INSERT INTO "LiteLLM_ManagedAgentsTable" (
@@ -155,26 +146,6 @@ async fn insert_agent(
     .map_err(GatewayError::Database)
 }
 
-fn create_config(
-    config: Option<serde_json::Value>,
-    runtime: Option<&str>,
-    tools: &serde_json::Value,
-) -> serde_json::Value {
-    let mut config = config
-        .filter(|value| value.is_object())
-        .unwrap_or_else(|| json!({}));
-    let Some(object) = config.as_object_mut() else {
-        return json!({});
-    };
-    if let Some(runtime) = runtime.filter(|runtime| !runtime.trim().is_empty()) {
-        object.insert("runtime".to_owned(), runtime.to_owned().into());
-    }
-    if !tools.is_null() {
-        object.insert("tools".to_owned(), tools.clone());
-    }
-    config
-}
-
 pub async fn list(
     pool: &PgPool,
     owner_id: Option<&str>,
@@ -220,6 +191,7 @@ pub async fn update(
     agent_id: &str,
     input: UpdateManagedAgent,
 ) -> Result<Option<ManagedAgentRow>, GatewayError> {
+    super::input::validate_update(&input)?;
     sqlx::query_as::<_, ManagedAgentRow>(
         r#"
         UPDATE "LiteLLM_ManagedAgentsTable"
@@ -234,7 +206,10 @@ pub async fn update(
           setup_commands = COALESCE($9, setup_commands),
           max_runtime_minutes = COALESCE($10, max_runtime_minutes),
           on_failure = COALESCE($11, on_failure),
-          config = COALESCE($12, config),
+          config = CASE
+            WHEN $19::TEXT IS NULL THEN COALESCE($12, config)
+            ELSE jsonb_set(COALESCE($12, config), '{runtime}', to_jsonb($19::TEXT), true)
+          END,
           owner_id = COALESCE($13, owner_id),
           status = COALESCE($14, status),
           description = COALESCE($15, description),
@@ -263,6 +238,7 @@ pub async fn update(
     .bind(input.harness)
     .bind(input.skill_ids)
     .bind(input.rule_ids)
+    .bind(input.runtime)
     .fetch_optional(pool)
     .await
     .map_err(GatewayError::Database)

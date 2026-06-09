@@ -10,6 +10,7 @@ import type {
   OpencodeSession,
   PlatformMcp,
   Rule,
+  Routine,
   Skill,
   SpendLog,
   VaultKeyEntry,
@@ -238,6 +239,29 @@ export async function createSession(
   },
 ): Promise<OpencodeSession> {
   const res = await reqHarness("/session", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      title,
+      ...(agent ? { agent, agent_id: agent, harness: agent } : {}),
+      ...(options?.runtime ? { runtime: options.runtime } : {}),
+      ...(options?.prompt ? { prompt: options.prompt } : {}),
+      ...(options?.environment ? { environment: options.environment } : {}),
+    }),
+  });
+  return jsonOrThrow<OpencodeSession>(res);
+}
+
+export async function createGatewaySession(
+  title?: string,
+  agent?: string,
+  options?: {
+    runtime?: AgentRuntimeId;
+    prompt?: string;
+    environment?: Record<string, unknown>;
+  },
+): Promise<OpencodeSession> {
+  const res = await req("/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -1283,6 +1307,48 @@ export async function updateAgent(id: string, fields: Partial<Agent>): Promise<A
     body: JSON.stringify(fields),
   });
   return jsonOrThrow<Agent>(res);
+}
+
+export async function listRoutines(agentId?: string): Promise<Routine[]> {
+  const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+  const res = await req(`/api/routines${query}`);
+  const data = await jsonOrThrow<{ routines: Routine[] }>(res);
+  return data.routines ?? [];
+}
+
+export async function createRoutine(
+  input: Pick<Routine, "agent_id" | "name" | "cron"> &
+    Partial<Pick<Routine, "prompt" | "timezone" | "status">>,
+): Promise<Routine> {
+  const res = await req("/api/routines", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrThrow<Routine>(res);
+}
+
+export async function updateRoutine(
+  id: string,
+  fields: Partial<Pick<Routine, "agent_id" | "name" | "prompt" | "cron" | "timezone" | "status">>,
+): Promise<Routine> {
+  const res = await req(`/api/routines/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(fields),
+  });
+  return jsonOrThrow<Routine>(res);
+}
+
+export async function deleteRoutine(id: string): Promise<void> {
+  await req(`/api/routines/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function triggerRoutine(id: string): Promise<AgentRunStart> {
+  const res = await req(`/api/routines/${encodeURIComponent(id)}/trigger`, {
+    method: "POST",
+  });
+  return jsonOrThrow<AgentRunStart>(res);
 }
 
 export async function createSlackOAuthState(agentId: string): Promise<string> {

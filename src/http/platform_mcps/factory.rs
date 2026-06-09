@@ -107,6 +107,7 @@ async fn activate_factory_agent(
         UpdateManagedAgent {
             name: None,
             model: None,
+            runtime: None,
             system: None,
             prompt: None,
             cron: None,

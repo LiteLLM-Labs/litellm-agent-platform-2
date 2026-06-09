@@ -61,6 +61,7 @@ pub struct Schedule {
 pub struct UpdateManagedAgent {
     pub name: Option<String>,
     pub model: Option<String>,
+    pub runtime: Option<String>,
     pub system: Option<String>,
     pub prompt: Option<String>,
     pub cron: Option<String>,

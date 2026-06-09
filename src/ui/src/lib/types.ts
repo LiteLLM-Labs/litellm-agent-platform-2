@@ -108,6 +108,20 @@ export interface PlatformMcp {
   description: string;
 }
 
+export interface Routine {
+  id: string;
+  agent_id: string;
+  name: string;
+  prompt: string;
+  cron: string;
+  timezone: string;
+  status: "active" | "paused" | string;
+  last_run_id?: string | null;
+  last_run_at?: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface AgentFile {
   agent_id: string;
   path: string;
