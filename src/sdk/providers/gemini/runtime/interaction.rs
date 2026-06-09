@@ -92,7 +92,7 @@ pub(super) fn gemini_context(
 pub(super) fn interaction_is_terminal(raw: &Value) -> bool {
     matches!(
         raw.get("status").and_then(Value::as_str),
-        Some("completed" | "failed" | "cancelled" | "incomplete" | "budget_exceeded") | None
+        Some("completed" | "failed" | "cancelled" | "incomplete" | "budget_exceeded")
     )
 }
 

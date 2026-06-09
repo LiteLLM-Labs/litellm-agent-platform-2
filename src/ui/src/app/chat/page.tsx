@@ -431,7 +431,8 @@ function runtimeStatusFromEvents(events: RuntimeAgentEvent[]): "idle" | "busy" |
 }
 
 function runtimeSessionStatusFromMetadata(status?: string, providerRunId?: unknown): "idle" | "busy" {
-  if (status === "starting") return "busy";
+  if (status === "starting" || status === "running" || status === "busy") return "busy";
+  if (status === "idle" || status === "error" || status === "completed" || status === "failed") return "idle";
   if (typeof providerRunId === "string" && providerRunId.trim()) return "busy";
   return "idle";
 }

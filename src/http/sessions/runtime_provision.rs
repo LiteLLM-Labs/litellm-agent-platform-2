@@ -73,6 +73,7 @@ pub(super) async fn provision_runtime_session(
         serde_json::json!({
             "runtime": created.runtime,
             "agent": provider_agent.raw,
+            "agent_signature": gemini::provider_agent_signature(created.resolved.agent_runtime, created),
             "environment": provider_env.raw,
             "session": provider_session.raw,
         }),
@@ -127,7 +128,7 @@ async fn create_provider_agent(
         .create(CreateAgentParams {
             lap_agent_runtime: runtime,
             lap_provider_options: None,
-            name: created.agent.name.clone(),
+            name: gemini::provider_agent_name(runtime, created),
             model: AgentModel::Config(AgentModelConfig {
                 id: agent_model(&created.agent, &created.environment),
                 speed: None,
