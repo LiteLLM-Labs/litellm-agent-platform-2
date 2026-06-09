@@ -30,7 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deleteSession, listSessions, listInbox } from "@/lib/api";
+import { apiErrorMessage, deleteSession, listSessions, listInbox } from "@/lib/api";
 import type { OpencodeSession } from "@/lib/types";
 
 type NavItem = {
@@ -99,9 +99,16 @@ export function Sidebar({ activeId }: { activeId?: string | null }) {
 
   const onDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    const previousSessions = sessions;
     setSessions((prev) => prev?.filter((s) => s.id !== id) ?? null);
-    await deleteSession(id);
-    if (id === activeId) router.push("/chat/");
+    try {
+      await deleteSession(id);
+      setError(null);
+      if (id === activeId) router.push("/chat/");
+    } catch (err) {
+      setSessions(previousSessions);
+      setError(apiErrorMessage(err, "Failed to delete session"));
+    }
   };
 
   const currentPath = pathname ?? "";
