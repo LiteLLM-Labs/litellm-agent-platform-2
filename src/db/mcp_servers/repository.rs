@@ -41,9 +41,11 @@ pub async fn get(pool: &PgPool, server_id: &str) -> Result<Option<McpServerRow>,
 }
 
 pub async fn get_by_name(pool: &PgPool, name: &str) -> Result<Option<McpServerRow>, GatewayError> {
+    // Match by server_id as well as name/alias: agents store the server id in
+    // their mcp_servers entry, and the runtime builds the proxy URL from it.
     let query = format!(
         r#"SELECT {SELECT_COLS} FROM "LiteLLM_MCPServerTable"
-           WHERE server_name = $1 OR alias = $1
+           WHERE server_name = $1 OR alias = $1 OR server_id = $1
            LIMIT 1"#
     );
     sqlx::query_as::<_, McpServerRow>(&query)
