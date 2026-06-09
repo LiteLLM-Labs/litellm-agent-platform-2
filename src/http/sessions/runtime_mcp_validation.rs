@@ -51,9 +51,22 @@ pub(super) fn rewrite_registered_mcp_servers(
             "url".to_owned(),
             Value::String(format!("{}/{}/mcp", base.trim_end_matches('/'), name)),
         );
-        if let Some(key) = state.config.general_settings.master_key.as_deref() {
-            obj.entry("authorization_token".to_owned())
-                .or_insert_with(|| Value::String(key.to_owned()));
+        // `authorization_token` authenticates the *inbound* call to the gateway
+        // proxy, so set it to the gateway key — OVERWRITING any token the entry
+        // already carried (that one targets the upstream server, which the proxy
+        // injects separately via static_headers). With no master_key the proxy's
+        // auth is a no-op, so drop any stale token rather than forward the wrong
+        // credential.
+        match state.config.general_settings.master_key.as_deref() {
+            Some(key) => {
+                obj.insert(
+                    "authorization_token".to_owned(),
+                    Value::String(key.to_owned()),
+                );
+            }
+            None => {
+                obj.remove("authorization_token");
+            }
         }
     }
     Ok(())
