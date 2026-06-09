@@ -1,262 +1,314 @@
----
-name: create-harness
-description: >
-  Scaffold a new harness integration end-to-end — interview the user about the
-  target AI agent runtime (e.g. Hermes, Aider, Goose), scaffold harnesses/<name>/
-  and templates/<name>/, wire entrypoint, Dockerfile, MCP config, and produce a
-  deployable harness + PR-ready template.
-  Use when the user says "create a harness for X", "add X as a harness",
-  "integrate X into lite-harness", or "build a Hermes/Aider/Goose harness".
----
+# Create a Runtime Template
 
-# Create Harness Integration
+Scaffold a new `templates/<name>/` — a Node.js/Express server that exposes a new AI agent runtime (e.g. Hermes, Aider, Goose) behind the **Anthropic Managed Agents API spec**, exactly like `templates/opencode/` does for opencode.
 
-Scaffold a complete harness integration for a new AI agent runtime. Produces:
-- `harnesses/<name>/` — entrypoint, MCP servers, package.json
-- `templates/<name>/` in `litellm-agent-platform-2` — Dockerfile, src/, README, docs/
+When done, any LAP SDK client can drive the new runtime by changing only `api_base`/`api_key`.
 
 ---
 
 ## Step 1: Interview
 
-Collect the following. Ask only what isn't obvious from context.
+Ask only what isn't already obvious from context.
 
-| Question | Why it matters |
-|----------|---------------|
-| **Harness name** (slug, e.g. `hermes`) | Directory names, env vars, log prefixes |
-| **What is it?** (one sentence) | README intro, template description |
-| **How does the agent run?** — CLI command, long-running server, or API? | Determines entrypoint pattern |
-| **How does it receive prompts?** — stdin, HTTP endpoint, WebSocket, file? | Determines how the harness feeds work in |
-| **How does it stream output?** — SSE, stdout, WebSocket, polling? | Determines how the harness reads results |
-| **Does it have a native config file?** (e.g. `opencode.json`, `.aider.conf`) | Determines what to write at boot |
-| **Provider/model wiring** — does it use its own model config, or can we inject a LiteLLM gateway? | Determines provider config block |
-| **MCP support?** — can it load MCP servers at boot? | Determines whether to wire sandbox + platform MCPs |
-| **Auth / env vars required** — what must be set for it to run? | Entrypoint validation + README |
-| **Repo with existing Docker setup?** (URL, optional) | Starting point for Dockerfile |
-
-Keep it short. If the user already described the harness, infer what you can.
+| Question | Why |
+|----------|-----|
+| **Runtime name** (slug, e.g. `hermes`) | Directory names, env vars, log prefixes |
+| **What is it?** (one sentence) | README intro |
+| **How does it start?** CLI command, long-running server, or Node/Python library? | Server startup code |
+| **How does it accept a prompt?** HTTP POST, stdin, WebSocket, SDK call? | `POST /v1/sessions/:id/events` implementation |
+| **How does it stream the reply?** SSE, chunked HTTP, WebSocket, polling? | Event translation layer |
+| **Does it support multiple agents?** Per-agent system prompts / tool config? | Whether agent provisioning + runtime reboot is needed |
+| **Does it persist session state?** | Whether SQLite session store is needed |
+| **Model routing** — own config, or can we inject `LITELLM_BASE_URL`? | Provider wiring |
+| **Required env vars** | README table + Dockerfile defaults |
+| **Existing Dockerfile or Docker image?** | Starting point |
 
 ---
 
 ## Step 2: Research the Runtime
 
-Before writing any code, read the runtime's docs/source to learn:
+Read the runtime's docs/source before writing anything:
 
-1. **CLI signature** — exact startup command and flags
-2. **Config format** — does it read a JSON/YAML/TOML file? What keys matter?
-3. **Session/prompt API** — what HTTP endpoint or stdin protocol accepts work?
-4. **Streaming API** — how to consume output token-by-token or chunk-by-chunk
-5. **Model config** — how does it route to a provider? What env vars does it accept?
-6. **MCP loading** — if supported, what config key enables external MCP servers?
+1. **Start command** — exact CLI / API, flags, port binding
+2. **Session API** — how to create a session; what fields it accepts
+3. **Prompt API** — endpoint + request shape that accepts `user.message` parts
+4. **Stream API** — SSE event names, chunk format, end-of-turn signal
+5. **Abort API** — how to interrupt an in-flight generation
+6. **Agent/config loading** — does it read a file at boot? Does it hot-reload or require restart?
+7. **Model config** — what env var or config key routes to a provider
+8. **Error shapes** — what a failed generation looks like
 
-Check: official docs, GitHub README, Dockerfile examples in the wild, and any `AGENTS.md` in this repo that references the runtime.
-
-Summarize findings and confirm with the user before scaffolding.
+Summarize findings. Confirm with user before writing code.
 
 ---
 
-## Step 3: Scaffold `harnesses/<name>/`
+## Step 3: Scaffold `templates/<name>/`
 
-Create the harness directory. Use the opencode harness at `harnesses/opencode/` as the reference — copy the structure, replace the runtime-specific parts.
+Follow `templates/opencode/` exactly. Copy every file, then replace only the runtime-specific parts.
 
-### `harnesses/<name>/entrypoint.sh`
-
-Every harness entrypoint follows this pattern:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-. /opt/lap/common.sh          # loads vault, clones repo, sets REPO_DIR, PORT, etc.
-
-# 1. Normalize LITELLM_API_BASE → BASE (strip trailing slash, ensure /v1)
-BASE="${LITELLM_API_BASE%/}"
-case "$BASE" in */v1) ;; *) BASE="${BASE}/v1" ;; esac
-
-cd "$REPO_DIR"
-
-# 2. Fetch available models from gateway (required: opencode rejects unknown modelIDs)
-MODELS_JSON=$(
-  curl -fsS --max-time 10 -H "Authorization: Bearer ${LITELLM_API_KEY}" "${BASE}/models" 2>/dev/null \
-    | jq -c '[ .data[].id ] | unique | map({ (.): {} }) | add // {}' 2>/dev/null \
-    || printf '%s' '{}'
-)
-[ -n "$MODELS_JSON" ] || MODELS_JSON='{}'
-BOOT_MODEL=$(printf '%s' "$MODELS_JSON" | jq -r 'keys[0] // ""')
-[ -z "$BOOT_MODEL" ] && { echo "[entrypoint] FATAL: no models from gateway" >&2; exit 1; }
-
-# 3. Generate MCP config (sandbox, memory, platform tools)
-MCP_OBJ=$(node /opt/lap/<name>-mcp/gen-mcp-config.mjs 2>/tmp/gen-mcp.err || echo '{}')
-[ -z "$MCP_OBJ" ] && MCP_OBJ='{}'
-
-# 4. Write runtime config file (replace with runtime-specific format)
-cat > <runtime-config-file> << EOF
-<runtime config with $BASE, $LITELLM_API_KEY, $MODELS_JSON, $MCP_OBJ substituted>
-EOF
-
-# 5. Write agent prompt file if AGENT_PROMPT is set
-if [ -n "${AGENT_PROMPT:-}" ]; then
-  <write to runtime's agent/system prompt location>
-fi
-
-echo "[entrypoint] base=${BASE} boot_model=${BOOT_MODEL}"
-exec <runtime-start-command> --port "$PORT"
+```
+templates/<name>/
+  Dockerfile
+  package.json
+  render.yaml
+  README.md
+  src/
+    index.mjs        ← main server (adapt from opencode)
+    runtime.mjs      ← runtime lifecycle (replaces opencode.mjs)
+    anthropic.mjs    ← event translation (adapt translateRuntimeEvent)
+    store.mjs        ← SQLite store (copy unchanged)
+    models.mjs       ← model normalization (copy unchanged)
+    sandbox.mjs      ← OpenSandbox wiring (copy unchanged)
+    sandbox-mcp.mjs  ← sandbox MCP server (copy unchanged)
+  scripts/
+    smoke.sh
+  docs/
+    eks-deployment.md
+    eks-deploy-prompt.md
 ```
 
-Key rules:
-- **Always source `/opt/lap/common.sh`** — it handles vault injection, git clone, `REPO_DIR`, `PORT`
-- **Always validate BOOT_MODEL** — harness must exit 1 if gateway returns no models
-- **Never hardcode credentials** — read from env vars injected by common.sh/vault
-- **Use `exec`** for the final command so the process is PID 1
+---
 
-### `harnesses/<name>/gen-mcp-config.mjs`
+## Step 4: Implement Every Scenario
 
-Outputs a JSON object of MCP server configs. Copy from `harnesses/opencode/gen-mcp-config.mjs` and adapt for the runtime's MCP format (stdio vs remote, field names, etc.).
+The server must handle all of the following. Each one maps to a concrete route or lifecycle function. **Do not skip any.**
 
-### `harnesses/<name>/package.json`
+### 4.1 Health check — `GET /health`
 
-```json
-{
-  "name": "<name>-sandbox-mcp",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "description": "stdio MCP server for <Name> harness (sandbox tools)",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "e2b": "^1.13.2"
+Returns `{"ok":true,"<name>":bool}`. The `<name>` boolean is `true` only when the runtime child process is running and passes a health probe.
+
+```js
+app.get("/health", wrap(async (_req, res) => {
+  let healthy = false;
+  if (rt) {
+    try { healthy = await runtimeHealthCheck(rt.baseUrl); } catch {}
   }
+  res.json({ ok: true, <name>: healthy });
+}));
+```
+
+### 4.2 Create agent — `POST /v1/agents`
+
+- Store `{name, model, system, permissions, mcp_servers}` in SQLite via `store.createAgent()`
+- Write per-agent config to disk (system prompt file, tool permissions, MCP entries)
+- Rebuild the full MCP config from ALL agents (`writeMcpConfig`)
+- Reboot the runtime child so it picks up the new config (runtimes don't hot-reload)
+- Return `agentResponse(row)`
+
+```js
+app.post("/v1/agents", wrap(async (req, res) => {
+  const row = store.createAgent({ name, model: modelId(model), system, permissions, mcp_servers });
+  await applyAgentsAndReboot(row);
+  res.json(agentResponse(row));
+}));
+```
+
+### 4.3 List agents — `GET /v1/agents`
+
+```js
+app.get("/v1/agents", wrap(async (_req, res) => {
+  res.json({ data: store.listAgents().map(agentResponse) });
+}));
+```
+
+### 4.4 Get agent — `GET /v1/agents/:id`
+
+Return 404 if not found.
+
+### 4.5 Update agent — `PATCH /v1/agents/:id`
+
+Accept partial updates to `{name, model, system, permissions, mcp_servers}`. Patch SQLite, re-provision config, reboot runtime. Return 404 if agent not found.
+
+### 4.6 Create environment — `POST /v1/environments`
+
+Lightweight: generate an `env_<hex>` ID, store `{name, config}` in memory (or SQLite), return it. Environments are workspace configs; the runtime doesn't need to act on them at creation time.
+
+### 4.7 Create session — `POST /v1/sessions`
+
+- Look up the agent by `req.body.agent` — return 400 `"unknown agent"` if missing
+- Call the runtime's session-create endpoint
+- Extract the session ID from the runtime response
+- Call `store.bindSession(runtimeSessionId, agentId)` so later event sends can resolve the agent
+- Return `sessionResponse({id, agentId, environmentId})`
+
+```js
+app.post("/v1/sessions", wrap(async (req, res) => {
+  const row = store.getAgent(req.body?.agent);
+  if (!row) return res.status(400).json({ error: "unknown agent" });
+  const ses = await createRuntimeSession(rt.baseUrl, row);
+  store.bindSession(ses.id, row.id);
+  res.json(sessionResponse({ id: ses.id, agentId: row.id, environmentId: req.body.environment_id }));
+}));
+```
+
+### 4.8 Send events (prompt) — `POST /v1/sessions/:id/events`
+
+- Extract `user.message` parts from `req.body.events` using `partsFromEvents()` (copy from `anthropic.mjs`)
+- Return 400 `"no user.message parts"` if empty
+- Look up the bound agent for this session via `store.getSessionAgent()`
+- Call the runtime's async prompt endpoint with `{agent, model, parts}`
+- Return 202 `{ok: true}`
+
+```js
+app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
+  const parts = partsFromEvents(req.body?.events || []);
+  if (!parts.length) return res.status(400).json({ error: "no user.message parts" });
+  const agentId = store.getSessionAgent(req.params.id);
+  const agent = agentId ? store.getAgent(agentId) : null;
+  await sendRuntimePrompt(rt.baseUrl, req.params.id, { agent, parts });
+  res.status(202).json({ ok: true });
+}));
+```
+
+### 4.9 Abort session — `POST /v1/sessions/:id/abort`
+
+Proxy to the runtime's abort endpoint. Return `{aborted: true/false}`.
+
+### 4.10 Historical events — `GET /v1/sessions/:id/events`
+
+Stub. Return `{data: []}`. (Full replay is out of scope for a v1 template.)
+
+### 4.11 Live event stream — `GET /v1/sessions/:id/events/stream`
+
+This is the most complex route. It must:
+
+1. Set `content-type: text/event-stream` + `cache-control: no-cache` + `connection: keep-alive`
+2. Open a long-lived connection to the runtime's event bus (SSE or equivalent)
+3. Parse the runtime's stream into complete event records
+4. For each record, call `translateRuntimeEvent(ev, {sessionId, model})` to convert to an Anthropic event shape
+5. Write `event: <type>\ndata: <json>\n\n` to the response
+6. On client disconnect, abort the upstream connection
+7. Swallow `AbortError`; log other errors
+
+```js
+app.get("/v1/sessions/:id/events/stream", wrap(async (req, res) => {
+  // ... (see templates/opencode/src/index.mjs for the full streaming loop)
+}));
+```
+
+### 4.12 `translateRuntimeEvent` — in `src/anthropic.mjs`
+
+Maps runtime-native events to Anthropic SSE shapes. Must handle **all** of:
+
+| Input (runtime event) | Output (Anthropic event) | Data shape |
+|----------------------|--------------------------|-----------|
+| Text delta / content chunk | `agent.message` | `{content:[{type:"text",text}], model}` |
+| Thinking/reasoning delta | `agent.thinking` | `{thinking}` |
+| Tool call | `agent.tool_use` | `{id, name, input}` |
+| Tool result | `agent.tool_result` | `{tool_use_id, content}` |
+| Generation started / turn running | `session.status_running` | `{}` |
+| Generation done / turn idle | `session.status_idle` | `{stop_reason:{type:"end_turn"}}` |
+| Error from runtime | `session.error` | `{error:{message}}` |
+| Unknown / drop | `null` | — |
+
+### 4.13 Model normalization — `src/models.mjs`
+
+Copy unchanged from `templates/opencode/src/models.mjs`. Handles:
+- Bare model names (`claude-sonnet-4-6`) → default to configured LiteLLM provider
+- `provider/model` strings → split into `{providerID, modelID}`
+- Ensures `ensureProviderModel()` registers new model IDs into opencode.json before first use
+
+### 4.14 LiteLLM provider wiring
+
+At boot, if `LITELLM_BASE_URL` + `LITELLM_API_KEY` are set:
+- Call `writeProviderConfig(WORKDIR, {id:"litellm", baseURL, apiKey, models:LITELLM_MODELS})`
+- This writes `opencode.json` with the provider pointing at `{baseURL}/messages` (Anthropic Messages API format)
+- Clients address models as `claude-sonnet-4-6` (bare) or `litellm/claude-sonnet-4-6`
+
+Default `LITELLM_MODELS`: `claude-sonnet-4-6`
+
+### 4.15 OpenSandbox wiring (optional)
+
+Copy `src/sandbox.mjs` and `src/sandbox-mcp.mjs` unchanged. At boot:
+- If `OPENSANDBOX_API_URL` is set, call `writeSandboxConfig()` to:
+  - Deny native `bash` and `edit` tools
+  - Wire a `sandbox` MCP entry (`sandbox_exec`, `sandbox_read_file`, `sandbox_write_file`)
+- Log `"[boot] sandbox execution enabled — bash/edit denied, routed to sandbox MCP"`
+
+### 4.16 SQLite persistence — `src/store.mjs`
+
+Copy unchanged. Persists:
+- Agents: `{id, name, model, system, permissions, mcp_servers, version}`
+- Sessions: `session_id → agent_id` binding
+
+### 4.17 Graceful shutdown
+
+Handle `SIGTERM` and `SIGINT`:
+- Close the HTTP server
+- Stop the runtime child process
+- `process.exit(0)`
+
+Use a `shuttingDown` guard so the handler is idempotent.
+
+### 4.18 Runtime reboot on agent change
+
+Runtimes that don't hot-reload (most don't) need to be restarted whenever an agent's config changes. Use a `serialize()` queue so concurrent agent creates/patches don't race.
+
+```js
+const serialize = (() => {
+  let q = Promise.resolve();
+  return (fn) => { q = q.then(fn, fn); return q; };
+})();
+
+async function rebootRuntime() {
+  rt = await serialize(() => restartRuntime(rt, { port: RT_PORT, cwd: WORKDIR }));
 }
 ```
 
 ---
 
-## Step 4: Scaffold `templates/<name>/` in litellm-agent-platform-2
-
-Clone `litellm-agent-platform-2` if not already present, then create `templates/<name>/`:
-
-```
-templates/<name>/
-  Dockerfile          # builds the harness image
-  package.json        # if Node-based
-  src/                # server source (if the harness needs a wrapper API like opencode does)
-  scripts/
-    smoke.sh          # end-to-end smoke test
-  docs/
-    eks-deployment.md # EKS + optional sandbox deployment guide
-    eks-deploy-prompt.md  # agent prompt for hands-free deployment
-  README.md
-  render.yaml         # Render.com deploy config
-```
+## Step 5: Non-code files
 
 ### `Dockerfile`
 
-Install the runtime, copy source, set env defaults:
-
 ```dockerfile
-FROM node:20   # or python:3.12, golang:1.22, etc. — match runtime language
-
-# Install runtime CLI
-RUN <install command>
-
+FROM node:20   # or python:3.12, etc — match runtime language
+RUN <install runtime CLI/package>
 WORKDIR /app
 COPY package.json ./
-RUN npm install --omit=dev   # if applicable
+RUN npm install --omit=dev
 COPY src ./src
-
 RUN mkdir -p /data /tmp/<name>-workspace
 ENV PORT=8080 WORKDIR=/tmp/<name>-workspace DB_PATH=/data/agents.db
-
 EXPOSE 8080
-CMD ["<start command>"]
+CMD ["node", "src/index.mjs"]
 ```
-
-### `README.md`
-
-Follow the opencode template README pattern:
-- Diagram (GKE/EKS box with Agent Control Plane → Agent Server → Sandbox)
-- Quickstart (Docker + local)
-- LAP SDK snippet
-- Environment variables table
-- Deploy on EKS section (collapsed `<details>`)
 
 ### `scripts/smoke.sh`
 
-End-to-end test: health → create agent → create session → send message → assert reply. Use `claude-sonnet-4-6` as the default model.
+Copy from `templates/opencode/scripts/smoke.sh`. Default model: `claude-sonnet-4-6`.
 
-### `docs/eks-deployment.md`
+### `README.md`
 
-Deployment guide with agent prompt at the top (link to `eks-deploy-prompt.md`), full manual steps in a `<details>` dropdown. Include harness-specific gotchas discovered during research.
+Copy structure from `templates/opencode/README.md`:
+1. ASCII diagram (GKE/EKS → Agent Control Plane → Agent Server → Sandbox)
+2. Docker quickstart
+3. LAP SDK snippet using `claude-sonnet-4-6`
+4. Environment variables table (PORT, WORKDIR, DB_PATH, LITELLM_*, OPENSANDBOX_*)
+5. EKS section (`<details>`) linking to `docs/eks-deployment.md`
 
----
+### `docs/eks-deployment.md` and `docs/eks-deploy-prompt.md`
 
-## Step 5: Wire into the Platform
-
-### Update `harnesses/plugin-registry.mjs`
-
-Check if it exists; if so, add the new harness to the registry:
-
-```js
-import { createPlugin as create<Name>Plugin } from "./<name>/plugin.mjs";
-// ... register in the map
-```
-
-If no registry exists, check `harnesses/harness-sdk.mjs` and `src/` for where harness names are declared, and add `<name>` to those lists.
-
-### Update `harnesses/README.md` (if present)
-
-Add a row for the new harness.
-
-### Check `ui/` for harness selector
-
-If the UI has a harness dropdown (search for `opencode` in `ui/src/`), add `<name>` there too.
+Copy from `templates/opencode/docs/`, replacing `opencode-anthropic-server` → `<name>-server` and `opencode` → `<name>` throughout.
 
 ---
 
-## Step 6: Verify Structure
+## Step 6: Verify
 
 ```bash
-# Confirm harness entrypoint is executable
-chmod +x harnesses/<name>/entrypoint.sh
+node --check templates/<name>/src/index.mjs
+node --check templates/<name>/src/runtime.mjs
+docker build --platform linux/amd64 -t <name>-server-test templates/<name>/
 
-# Lint the entrypoint (bash -n = syntax check only)
-bash -n harnesses/<name>/entrypoint.sh
-
-# Confirm template Dockerfile builds
-docker build --platform linux/amd64 -t <name>-harness-test templates/<name>/
-# (only if Docker is available and runtime image isn't huge)
-
-# Run smoke test if server is running
+# If you can run it locally:
+LITELLM_BASE_URL=... LITELLM_API_KEY=... node templates/<name>/src/index.mjs &
 BASE=http://localhost:8080 MODEL=claude-sonnet-4-6 templates/<name>/scripts/smoke.sh
 ```
 
 ---
 
-## Step 7: File PR
+## Step 7: File PR to litellm-agent-platform-2
 
-1. Commit harness files to a branch: `feat/harness-<name>`
-2. Commit template files to `litellm-agent-platform-2` on a branch: `feat/template-<name>`
-3. File both PRs with:
-   - What the harness does
-   - How it wires to the LiteLLM gateway
-   - Known limitations or TODOs (e.g. "MCP not yet supported upstream")
-   - Link to any relevant upstream docs/issues
+Branch: `feat/template-<name>`
 
----
-
-## Reference: opencode integration
-
-| File | Purpose |
-|------|---------|
-| `harnesses/opencode/entrypoint.sh` | Complete working entrypoint — the canonical example |
-| `harnesses/opencode/gen-mcp-config.mjs` | MCP config generator — copy and adapt |
-| `templates/opencode/Dockerfile` | Image build pattern |
-| `templates/opencode/src/` | Anthropic Managed Agents API wrapper server |
-| `templates/opencode/docs/eks-deployment.md` | Deployment guide format |
-| `templates/opencode/README.md` | README format with diagram |
-
-When in doubt, read the opencode files and adapt the pattern. The key invariants shared by every harness:
-1. Source `/opt/lap/common.sh`
-2. Validate BOOT_MODEL or exit 1
-3. Wire MCP via gen-mcp-config
-4. Write native config with injected gateway URL/key/models
-5. `exec` the runtime as PID 1
+PR body: what the runtime is, how it wires to LiteLLM, any limitations vs opencode, link to runtime docs.
