@@ -182,6 +182,8 @@ kubectl -n opensandbox-system get pods
 
 ### Build & push to ECR
 
+Build directly from this template directory (the `Dockerfile` is here):
+
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR=$AWS_ACCOUNT_ID.dkr.ecr.eu-west-1.amazonaws.com/opencode-anthropic-server
@@ -190,8 +192,7 @@ aws ecr create-repository --repository-name opencode-anthropic-server --region e
 aws ecr get-login-password --region eu-west-1 | \
   docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.eu-west-1.amazonaws.com
 
-git clone --depth=1 https://github.com/LiteLLM-Labs/opencode-anthropic-server.git
-cd opencode-anthropic-server
+# Run from the templates/opencode directory
 docker build --platform linux/amd64 -t $ECR:latest .
 docker push $ECR:latest
 ```

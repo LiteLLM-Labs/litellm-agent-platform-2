@@ -167,9 +167,10 @@ aws ecr create-repository --repository-name opencode-anthropic-server --region <
 aws ecr get-login-password --region <region> | \
   docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.<region>.amazonaws.com
 
-git clone --depth=1 https://github.com/LiteLLM-Labs/opencode-anthropic-server.git /tmp/opencode-server
-cd /tmp/opencode-server
-docker build --platform linux/amd64 -t $ECR_REPO:latest .
+
+# The Dockerfile is in this template directory (templates/opencode/).
+# Build from there — no separate clone needed.
+docker build --platform linux/amd64 -t $ECR_REPO:latest <path-to-templates/opencode>
 docker push $ECR_REPO:latest
 ```
 
