@@ -1144,12 +1144,12 @@ export interface RuntimeAgentEvent {
   [key: string]: unknown;
 }
 
+const RUNTIME_STREAM_RECONNECT_INITIAL_MS = 500;
+const RUNTIME_STREAM_RECONNECT_MAX_MS = 5000;
+
 export async function listRuntimeEvents(sessionId: string): Promise<RuntimeAgentEvent[]> {
-  // Best-effort history replay. The gateway currently only implements the live
-  // SSE stream (/events/stream), not a list endpoint — a GET to
-  // /v1/sessions/{id}/events falls through to the static UI handler and returns
-  // the HTML app shell. Treat any non-JSON or error response as "no history"
-  // instead of throwing a JSON-parse error the caller would surface to the user.
+  // Best-effort history replay. Older gateways only expose the live SSE stream,
+  // so keep non-JSON/error responses non-fatal for local dev and remote harnesses.
   const res = await reqHarness(`/v1/sessions/${encodeURIComponent(sessionId)}/events`);
   if (!res.ok) return [];
   if (!res.headers.get("content-type")?.includes("application/json")) return [];
@@ -1168,8 +1168,17 @@ export function subscribeRuntimeEvents(opts: {
 }): () => void {
   const abort = new AbortController();
   const base = getHarnessServerUrl();
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  void (async () => {
+  const connect = (delayMs: number) => {
+    if (abort.signal.aborted) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void readStream(delayMs);
+    }, delayMs);
+  };
+
+  const readStream = async (lastDelayMs: number) => {
     try {
       const init = base
         ? withHarnessProxyAuth({ headers: { accept: "text/event-stream" } })
@@ -1187,10 +1196,12 @@ export function subscribeRuntimeEvents(opts: {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let sawChunk = false;
 
       while (!abort.signal.aborted) {
         const { done, value } = await reader.read();
         if (done) break;
+        sawChunk = true;
         buffer += decoder.decode(value, { stream: true });
 
         let boundary = sseBoundaryIndex(buffer);
@@ -1201,12 +1212,24 @@ export function subscribeRuntimeEvents(opts: {
           boundary = sseBoundaryIndex(buffer);
         }
       }
+      if (!abort.signal.aborted) {
+        const nextDelayMs = sawChunk
+          ? RUNTIME_STREAM_RECONNECT_INITIAL_MS
+          : Math.min(lastDelayMs * 2, RUNTIME_STREAM_RECONNECT_MAX_MS);
+        connect(nextDelayMs);
+      }
     } catch (e) {
-      if (!abort.signal.aborted) opts.onError?.(e);
+      if (!abort.signal.aborted) {
+        opts.onError?.(e);
+        connect(Math.min(lastDelayMs * 2, RUNTIME_STREAM_RECONNECT_MAX_MS));
+      }
     }
-  })();
+  };
+
+  void readStream(RUNTIME_STREAM_RECONNECT_INITIAL_MS);
 
   return () => {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     abort.abort();
   };
 }
