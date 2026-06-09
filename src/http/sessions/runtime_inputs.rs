@@ -44,7 +44,12 @@ pub(super) fn mcp_servers(
         .get("mcp_servers")
         .or_else(|| agent.config.get("mcpServers"))
     else {
-        return crate::http::platform_mcps::platform_mcp_servers(state, &agent.id, &agent.config);
+        return crate::http::platform_mcps::platform_mcp_servers(
+            state,
+            &agent.id,
+            &agent.config,
+            &agent.vault_keys,
+        );
     };
     let mut servers = if let Some(servers) = value.as_array() {
         servers.clone()
@@ -69,6 +74,7 @@ pub(super) fn mcp_servers(
         state,
         &agent.id,
         &agent.config,
+        &agent.vault_keys,
     )?);
     Ok(servers)
 }

@@ -10,6 +10,7 @@ pub async fn exercise_platform_mcps(fixture: &AppFixture, agent_id: &str) {
     assert_session_read(fixture, agent_id).await;
     assert_session_send(fixture, agent_id).await;
     assert_sub_agent_allowlist(fixture, agent_id).await;
+    super::platform_mcps_vault::assert_api_call_with_vault(fixture, agent_id).await;
     super::platform_factory::assert_agent_factory(fixture, agent_id).await;
 }
 
@@ -32,7 +33,8 @@ async fn assert_catalog(fixture: &AppFixture) {
             "connect_agent_to_slack",
             "list_slack_agent_bindings",
             "list_sub_agents",
-            "run_sub_agent"
+            "run_sub_agent",
+            "api_call_with_vault"
         ]
     );
 }
