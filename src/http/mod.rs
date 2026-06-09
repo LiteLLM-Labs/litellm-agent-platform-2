@@ -1,8 +1,6 @@
 mod agent_runtime_tools;
 pub mod agent_runtimes;
 pub mod agents;
-pub mod runtime_harnesses;
-pub mod runtime_resolution;
 pub mod capabilities;
 pub mod credential_overrides;
 pub mod harness_proxy;
@@ -19,6 +17,8 @@ pub mod platform_mcps;
 pub mod provider_credentials;
 pub mod responses;
 pub mod routes;
+pub mod runtime_harnesses;
+pub mod runtime_resolution;
 pub mod sessions;
 pub mod ui;
 pub mod vault;

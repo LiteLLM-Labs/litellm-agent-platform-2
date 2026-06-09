@@ -152,8 +152,7 @@ async fn platform_mcp_vault_ids(
         })?;
     let url = crate::http::platform_mcps::platform_mcp_url(state, &created.agent.id)?;
     let vault_id =
-        create_platform_mcp_vault(state, &created.resolved.credential.api_key, &url, token)
-            .await?;
+        create_platform_mcp_vault(state, &created.resolved.credential.api_key, &url, token).await?;
     Ok(Some(vec![vault_id]))
 }
 
