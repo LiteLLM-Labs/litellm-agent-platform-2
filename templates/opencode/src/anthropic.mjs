@@ -112,8 +112,22 @@ export function translateOpencodeEvent(raw, ctx) {
         },
       };
     }
-    case "message.part.updated":
+    case "message.part.updated": {
+      // Tool calls arrive as updated parts — surface them as agent.tool_use.
+      // Text updates are skipped (deltas already streamed them).
+      const part = props.part || {};
+      if (part.type === "tool" || part.tool) {
+        return {
+          event: "agent.tool_use",
+          data: {
+            tool: part.tool ?? null,
+            input: part.state?.input ?? null,
+            status: part.state?.status ?? null,
+          },
+        };
+      }
       return null;
+    }
     case "session.status": {
       const status = props.status?.type;
       if (status === "busy") {

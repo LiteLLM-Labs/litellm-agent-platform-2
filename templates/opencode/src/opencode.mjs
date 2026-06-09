@@ -2,9 +2,37 @@
 // per-agent config (agent .md files + opencode.json MCP entries) for an
 // opencode-compatible wrapper server. Node 20 ESM, built-ins + global fetch only.
 
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
+
+// opencode only scans custom agents (`.opencode/agent/*.md`) and per-project
+// config when the workspace is a git project. Initialise one (idempotent) with
+// a single empty commit so opencode detects the project root on boot.
+export async function gitInit(cwd) {
+  await mkdir(cwd, { recursive: true });
+  const run = (args) => execFileP("git", args, { cwd }).catch(() => {});
+  await run(["init", "-q"]);
+  await run(["config", "user.email", "agent-server@local"]);
+  await run(["config", "user.name", "agent-server"]);
+  await run(["commit", "-q", "--allow-empty", "-m", "init"]);
+}
+
+// Restart the opencode child (stop, wait for the port to free, start again).
+// Needed because opencode loads agents + mcp at boot and does NOT hot-reload —
+// so after writing new/updated agent config we reboot to pick it up.
+export async function restartOpencode(handle, opts) {
+  try {
+    handle?.stop?.();
+  } catch {
+    /* ignore */
+  }
+  await new Promise((r) => setTimeout(r, 600));
+  return startOpencode(opts);
+}
 
 // Write an opencode provider into <cwd>/opencode.json so opencode routes model
 // calls through a LiteLLM gateway (via opencode's native Anthropic adapter,

@@ -6,7 +6,14 @@ import crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
 
 import { createStore } from "./store.mjs";
-import { startOpencode, provisionAgent, ocFetch, writeProviderConfig } from "./opencode.mjs";
+import {
+  startOpencode,
+  restartOpencode,
+  provisionAgent,
+  ocFetch,
+  writeProviderConfig,
+  gitInit,
+} from "./opencode.mjs";
 import {
   modelId,
   agentResponse,
@@ -24,6 +31,9 @@ const DB_PATH = process.env.DB_PATH || "/data/agents.db";
 mkdirSync(WORKDIR, { recursive: true });
 
 const store = createStore(DB_PATH);
+
+// opencode only loads custom agents in a git project — make the workspace one.
+await gitInit(WORKDIR);
 
 // Optionally route opencode's model calls through a LiteLLM gateway. When
 // LITELLM_BASE_URL + LITELLM_API_KEY are set, opencode addresses models as
@@ -44,9 +54,22 @@ if (LITELLM_BASE_URL && LITELLM_API_KEY) {
   console.log(`[boot] litellm provider configured -> ${LITELLM_BASE_URL} (models: ${LITELLM_MODELS.join(", ")})`);
 }
 
+const ocOpts = { port: OC_PORT, cwd: WORKDIR };
 console.log(`[boot] starting opencode on port ${OC_PORT} (cwd=${WORKDIR})`);
-const oc = await startOpencode({ port: OC_PORT, cwd: WORKDIR });
+let oc = await startOpencode(ocOpts);
 console.log(`[boot] opencode ready at ${oc.baseUrl}`);
+
+// opencode loads agents + mcp at boot only (no hot-reload), so after writing a
+// new/updated agent's config to disk we reboot the child to pick it up. Serialised
+// so concurrent agent writes don't race the restart.
+let rebootChain = Promise.resolve();
+function rebootOpencode() {
+  rebootChain = rebootChain.then(async () => {
+    oc = await restartOpencode(oc, ocOpts);
+    console.log(`[reboot] opencode reloaded at ${oc.baseUrl}`);
+  });
+  return rebootChain;
+}
 
 // In-memory environments registry (envId -> config).
 const environments = new Map();
@@ -94,6 +117,10 @@ app.get("/health", wrap(async (_req, res) => {
 }));
 
 // ---- agents ---------------------------------------------------------------
+// Creating/updating an agent writes its config to disk (.opencode/agent/<id>.md
+// + opencode.json mcp) and reboots opencode so it loads — opencode has no
+// hot-reload. After this returns, a session can use the agent's system prompt,
+// tool permissions, and MCP servers.
 app.post("/v1/agents", wrap(async (req, res) => {
   const { name, model, system } = req.body || {};
   const row = store.createAgent({
@@ -104,6 +131,8 @@ app.post("/v1/agents", wrap(async (req, res) => {
     mcp_servers: req.body.mcp_servers || [],
     workspace: null,
   });
+  await provisionAgent(WORKDIR, row);
+  await rebootOpencode();
   res.json(agentResponse(row));
 }));
 
@@ -114,6 +143,22 @@ app.get("/v1/agents", wrap(async (_req, res) => {
 app.get("/v1/agents/:id", wrap(async (req, res) => {
   const row = store.getAgent(req.params.id);
   if (!row) return res.status(404).json({ error: "agent not found" });
+  res.json(agentResponse(row));
+}));
+
+// Update an agent (e.g. change the system prompt or add MCP servers), rewrite
+// its config, and reboot opencode to apply.
+app.patch("/v1/agents/:id", wrap(async (req, res) => {
+  const patch = {};
+  if (req.body?.name !== undefined) patch.name = req.body.name;
+  if (req.body?.system !== undefined) patch.system = req.body.system;
+  if (req.body?.model !== undefined) patch.model = modelId(req.body.model);
+  if (req.body?.permissions !== undefined) patch.permissions = req.body.permissions;
+  if (req.body?.mcp_servers !== undefined) patch.mcp_servers = req.body.mcp_servers;
+  const row = store.updateAgent(req.params.id, patch);
+  if (!row) return res.status(404).json({ error: "agent not found" });
+  await provisionAgent(WORKDIR, row);
+  await rebootOpencode();
   res.json(agentResponse(row));
 }));
 
@@ -163,8 +208,10 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
+      // Select the agent loaded from disk so opencode applies its system
+      // prompt, tool permissions, and MCP servers.
+      agent: agentId || undefined,
       model: opencodeModel(agent?.model),
-      system: agent?.system || undefined,
       parts,
     }),
   });
