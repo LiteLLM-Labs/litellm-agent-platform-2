@@ -8,13 +8,14 @@ import { mkdirSync } from "node:fs";
 import { createStore } from "./store.mjs";
 import {
   startOpencode,
-  restartOpencode,
   provisionAgent,
   writeMcpConfig,
+  writeSandboxConfig,
   ocFetch,
   writeProviderConfig,
   gitInit,
 } from "./opencode.mjs";
+import { buildSandboxProvider } from "./sandbox.mjs";
 import {
   modelId,
   agentResponse,
@@ -55,48 +56,81 @@ if (LITELLM_BASE_URL && LITELLM_API_KEY) {
   console.log(`[boot] litellm provider configured -> ${LITELLM_BASE_URL} (models: ${LITELLM_MODELS.join(", ")})`);
 }
 
+// Optionally route the agent's command/file execution into a remote sandbox
+// (e.g. OpenSandbox) instead of running on this host. When configured, native
+// bash/edit are denied and a sandbox-exec MCP server is wired into opencode.
+const sandbox = buildSandboxProvider(process.env);
+if (sandbox.error) {
+  console.error(`[boot] sandbox config error: ${sandbox.error}`);
+} else if (sandbox.provider) {
+  const mcpPath = new URL("./sandbox-mcp.mjs", import.meta.url).pathname;
+  await writeSandboxConfig(WORKDIR, {
+    command: ["node", mcpPath],
+    env: {
+      SANDBOX_PROVIDER: process.env.SANDBOX_PROVIDER || "opensandbox",
+      OPENSANDBOX_API_URL: process.env.OPENSANDBOX_API_URL || "",
+      OPENSANDBOX_IMAGE: process.env.OPENSANDBOX_IMAGE || "",
+      OPENSANDBOX_API_KEY: process.env.OPENSANDBOX_API_KEY || "",
+    },
+  });
+  console.log(
+    `[boot] sandbox execution enabled (${sandbox.provider.providerName}) — bash/edit denied, routed to sandbox MCP`
+  );
+}
+
 const ocOpts = { port: OC_PORT, cwd: WORKDIR };
 
-// Start opencode in the BACKGROUND so the web server can bind its port
-// immediately (platforms like Render kill a service that doesn't open a port
-// during boot). Handlers call ensureOpencode() and wait for readiness on demand.
+// opencode lifecycle. It boots in the BACKGROUND so the web server can bind its
+// port immediately (platforms like Render kill a service that opens no port at
+// boot). opencode has no hot-reload, so after writing agent config we reboot it.
+//
+// All start/reboot transitions run through `serialize` so they never overlap, and
+// `oc` is set to null while a (re)start is in flight — callers therefore never
+// receive a killed or half-started handle, and a failed start leaves oc null so
+// the next request retries cleanly.
 let oc = null;
-let ocStarting = null;
+let ocLock = Promise.resolve();
+function serialize(fn) {
+  const run = ocLock.then(fn, fn);
+  ocLock = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function ensureOpencode() {
-  if (oc) return Promise.resolve(oc);
-  if (!ocStarting) {
-    ocStarting = (async () => {
-      console.log(`[boot] starting opencode on port ${OC_PORT} (cwd=${WORKDIR})`);
-      oc = await startOpencode(ocOpts);
-      console.log(`[boot] opencode ready at ${oc.baseUrl}`);
-      return oc;
-    })().catch((e) => {
-      ocStarting = null; // allow a later retry on the next request
-      throw e;
-    });
-  }
-  return ocStarting;
+  return serialize(async () => {
+    if (oc) return oc;
+    console.log(`[boot] starting opencode on port ${OC_PORT} (cwd=${WORKDIR})`);
+    oc = await startOpencode(ocOpts); // throws -> oc stays null, caller retries
+    console.log(`[boot] opencode ready at ${oc.baseUrl}`);
+    return oc;
+  });
 }
 async function ocBase() {
   return (await ensureOpencode()).baseUrl;
 }
-// kick off boot; failures are non-fatal (retried on demand) so the web port stays open.
+function rebootOpencode() {
+  return serialize(async () => {
+    const old = oc;
+    oc = null; // invalidate before killing so nothing uses the dead handle
+    try {
+      old?.stop?.();
+    } catch {
+      /* ignore */
+    }
+    await sleep(600); // let the port free
+    oc = await startOpencode(ocOpts);
+    console.log(`[reboot] opencode reloaded at ${oc.baseUrl}`);
+    return oc;
+  });
+}
+// kick off boot in the background; failures are non-fatal (retried on demand).
 ensureOpencode().catch((e) =>
   console.error("[boot] opencode start failed (will retry on demand):", e.message)
 );
-
-// opencode loads agents + mcp at boot only (no hot-reload), so after writing a
-// new/updated agent's config to disk we reboot the child to pick it up. Serialised
-// so concurrent agent writes don't race the restart.
-let rebootChain = Promise.resolve();
-function rebootOpencode() {
-  rebootChain = rebootChain.then(async () => {
-    await ensureOpencode();
-    oc = await restartOpencode(oc, ocOpts);
-    console.log(`[reboot] opencode reloaded at ${oc.baseUrl}`);
-  });
-  return rebootChain;
-}
 
 // In-memory environments registry (envId -> config).
 const environments = new Map();

@@ -159,9 +159,11 @@ export async function writeMcpConfig(cwd, agents) {
     obj = {};
   }
   const mcp = {};
+  // Preserve the server-level sandbox MCP (not an agent's own server) across rebuilds.
+  if (obj.mcp?.sandbox) mcp.sandbox = obj.mcp.sandbox;
   for (const agent of agents || []) {
     for (const server of agent?.mcp_servers || []) {
-      if (!server || !server.name) continue;
+      if (!server || !server.name || server.name === "sandbox") continue;
       if (server.command) {
         mcp[server.name] = {
           type: "local",
@@ -174,6 +176,25 @@ export async function writeMcpConfig(cwd, agents) {
     }
   }
   obj.mcp = mcp;
+  await mkdir(cwd, { recursive: true });
+  await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
+}
+
+// Wire a sandbox-exec MCP server into opencode.json and DENY native bash/edit so
+// the agent runs commands/files through the sandbox (src/sandbox-mcp.mjs) instead
+// of the host. Called at boot when a sandbox provider is configured.
+export async function writeSandboxConfig(cwd, { command, env }) {
+  const configPath = path.join(cwd, "opencode.json");
+  let obj = {};
+  try {
+    obj = JSON.parse(await readFile(configPath, "utf8"));
+  } catch {
+    obj = {};
+  }
+  obj.mcp = obj.mcp || {};
+  obj.mcp.sandbox = { type: "local", command, enabled: true, environment: env, timeout: 120_000 };
+  // Global permission: no native shell / file edits; the sandbox_* tools are allowed.
+  obj.permission = { ...(obj.permission || {}), bash: "deny", edit: "deny", "sandbox_*": "allow" };
   await mkdir(cwd, { recursive: true });
   await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
 }

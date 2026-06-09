@@ -240,6 +240,19 @@ workflows, where it shines.
 | `LITELLM_BASE_URL` | — | route models through a LiteLLM gateway instead (e.g. `https://your-gw/v1`) |
 | `LITELLM_API_KEY` | — | LiteLLM gateway key |
 | `LITELLM_MODELS` | `claude-sonnet-4-5,gpt-5.5` | gateway models to register |
+| `OPENSANDBOX_API_URL` | — | OpenSandbox controller URL → routes the agent's command/file execution into a sandbox (auto-enables sandboxed execution) |
+| `OPENSANDBOX_IMAGE` | `default` | sandbox image (execution-only, so the base image is fine) |
+| `OPENSANDBOX_API_KEY` | — | controller API key; omit for in-cluster RBAC |
+| `SANDBOX_PROVIDER` | — | explicit provider select (`opensandbox`); else auto-detect from `OPENSANDBOX_API_URL` |
+
+### Sandboxed execution (optional)
+
+Set `OPENSANDBOX_API_URL` (or `SANDBOX_PROVIDER=opensandbox`) and the server runs
+the agent's **commands/file ops in an OpenSandbox sandbox** instead of on this
+host: it denies opencode's native `bash`/`edit` and wires a sandbox-exec MCP
+(`sandbox_exec` / `sandbox_read_file` / `sandbox_write_file`) backed by **raw HTTP**
+calls to the OpenSandbox controller + execd (no SDK dependency). opencode itself
+stays here; only execution is isolated.
 
 When `LITELLM_BASE_URL` + `LITELLM_API_KEY` are set, the server configures an
 opencode provider `litellm` (via opencode's native Anthropic adapter pointed at

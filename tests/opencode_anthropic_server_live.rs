@@ -26,26 +26,18 @@ use litellm_rust::sdk::agents::{
 };
 use serde_json::json;
 
-#[tokio::test]
-#[ignore = "live test: requires the opencode-behind-Anthropic server running (see OPENCODE_ANTHROPIC_BASE)"]
-async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
-    let base =
-        std::env::var("OPENCODE_ANTHROPIC_BASE").unwrap_or_else(|_| "http://localhost:8080".into());
-    // Model the agent runs. Against a gateway-backed server use the gateway
-    // provider id, e.g. "litellm/claude-sonnet-4-5".
-    let model = std::env::var("OPENCODE_ANTHROPIC_MODEL")
-        .unwrap_or_else(|_| "litellm/claude-sonnet-4-5".into());
-    println!("[live] target server: {base} | model: {model}");
 
-    // Construct the SDK pointed at the local server. No opencode-specific config — just
-    // the Anthropic base URL + key. The server speaks the Anthropic managed-agents spec.
-    let lap = Lap::new(LapConfig {
+fn live_lap(base: String) -> Lap {
+    // No opencode-specific config — just the Anthropic base URL + key. The
+    // server speaks the Anthropic managed-agents spec.
+    Lap::new(LapConfig {
         anthropic_api_key: Some("live-test".into()),
         anthropic_base_url: base,
         ..LapConfig::default()
-    });
+    })
+}
 
-    // 1. Create an agent.
+async fn create_live_agent(lap: &Lap, model: &str) -> String {
     let agent = lap
         .beta()
         .agents()
@@ -53,7 +45,7 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
             lap_provider_options: None,
             name: "Live SDK Test".into(),
-            model: AgentModel::from(model.as_str()),
+            model: AgentModel::from(model),
             system: "You are a terse assistant.".into(),
             description: None,
             tools: Vec::new(),
@@ -63,11 +55,13 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             metadata: None,
         })
         .await
-        .expect("agents().create should succeed against the live server");
+        .expect("agents().create should succeed");
     assert!(!agent.id.is_empty(), "agent id should be non-empty");
     println!("[live] created agent id={}", agent.id);
+    agent.id
+}
 
-    // 2. Create an environment.
+async fn create_live_env(lap: &Lap) -> String {
     let env = lap
         .beta()
         .environments()
@@ -79,17 +73,19 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             scope: None,
         })
         .await
-        .expect("environments().create should succeed against the live server");
+        .expect("environments().create should succeed");
     assert!(!env.id.is_empty(), "environment id should be non-empty");
     println!("[live] created environment id={}", env.id);
+    env.id
+}
 
-    // 3. Create a session.
+async fn create_live_session(lap: &Lap, agent_id: &str, env_id: &str) -> String {
     let session = lap
         .beta()
         .sessions()
         .create(CreateSessionParams {
-            agent: agent.id.clone(),
-            environment_id: env.id.clone(),
+            agent: agent_id.to_owned(),
+            environment_id: env_id.to_owned(),
             title: "live session".into(),
             lap_agent_runtime: Some(AgentRuntime::ClaudeManagedAgents),
             metadata: None,
@@ -97,16 +93,18 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             resources: None,
         })
         .await
-        .expect("sessions().create should succeed against the live server");
+        .expect("sessions().create should succeed");
     assert!(!session.id.is_empty(), "session id should be non-empty");
     println!("[live] created session id={}", session.id);
+    session.id
+}
 
-    // 4. Send a user message.
+async fn send_live_message(lap: &Lap, session_id: &str) {
     lap.beta()
         .sessions()
         .events()
         .send(
-            &session.id,
+            session_id,
             SendEventsParams {
                 events: vec![json!({
                     "type": "user.message",
@@ -115,48 +113,45 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             },
         )
         .await
-        .expect("sessions().events().send should succeed against the live server");
-    println!("[live] sent user.message to session {}", session.id);
+        .expect("sessions().events().send should succeed");
+    println!("[live] sent user.message to session {session_id}");
+}
 
-    // 5. Open the SSE stream. The plumbing assertion is that this connects without error.
+/// Drain the SSE stream until idle; returns (event_count, assistant_text).
+async fn drain_live_stream(lap: &Lap, session_id: &str) -> (usize, String) {
     let mut stream = lap
         .beta()
         .sessions()
         .events()
-        .stream(&session.id)
+        .stream(session_id)
         .await
-        .expect("sessions().events().stream should open against the live server");
-    println!("[live] stream opened for session {}", session.id);
+        .expect("sessions().events().stream should open");
+    println!("[live] stream opened for session {session_id}");
 
-    // 6. Read any events that arrive, with a per-read timeout. We do not require a
-    //    specific assistant message — token output needs a provider key on the server.
     let mut received = 0usize;
-    let mut assistant_text = String::new();
+    let mut text = String::new();
     loop {
         match tokio::time::timeout(Duration::from_secs(30), stream.next()).await {
             Ok(Some(Ok(event))) => {
                 received += 1;
                 println!("[live] event #{received}: event_type={}", event.event_type);
-                // For agent.message events, surface the actual model text so we can see
-                // the real assistant response (requires a provider key on the server).
                 if event.event_type == "agent.message" {
                     if let Some(content) = event.data.get("content").and_then(|c| c.as_array()) {
                         for block in content {
-                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                                assistant_text.push_str(text);
-                                print!("{text}");
+                            if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                                text.push_str(t);
+                                print!("{t}");
                             }
                         }
                     }
                 }
-                // Stop once the turn is done.
                 if event.event_type == "session.status_idle" {
                     println!("[live] session idle — turn complete");
                     break;
                 }
             }
             Ok(Some(Err(err))) => {
-                println!("[live] stream yielded an error (acceptable for plumbing test): {err}");
+                println!("[live] stream error (acceptable for plumbing test): {err}");
                 break;
             }
             Ok(None) => {
@@ -169,14 +164,31 @@ async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
             }
         }
     }
+    (received, text)
+}
+
+#[tokio::test]
+#[ignore = "live test: requires the opencode-behind-Anthropic server running (see OPENCODE_ANTHROPIC_BASE)"]
+async fn drives_opencode_anthropic_server_via_claude_managed_agents() {
+    let base =
+        std::env::var("OPENCODE_ANTHROPIC_BASE").unwrap_or_else(|_| "http://localhost:8080".into());
+    let model = std::env::var("OPENCODE_ANTHROPIC_MODEL")
+        .unwrap_or_else(|_| "litellm/claude-sonnet-4-5".into());
+    println!("[live] target server: {base} | model: {model}");
+
+    let lap = live_lap(base);
+    let agent_id = create_live_agent(&lap, &model).await;
+    let env_id = create_live_env(&lap).await;
+    let session_id = create_live_session(&lap, &agent_id, &env_id).await;
+    send_live_message(&lap, &session_id).await;
+    let (received, assistant_text) = drain_live_stream(&lap, &session_id).await;
 
     if !assistant_text.trim().is_empty() {
         println!("\n[live] >>> ASSISTANT SAID: {}", assistant_text.trim());
     }
     println!(
         "[live] SUCCESS: SDK claude_managed_agents path drove the opencode-behind-Anthropic \
-         server unchanged — agent={}, environment={}, session={}, stream connected, \
-         {received} event(s) observed.",
-        agent.id, env.id, session.id
+         server unchanged — agent={agent_id}, environment={env_id}, session={session_id}, \
+         stream connected, {received} event(s) observed."
     );
 }
