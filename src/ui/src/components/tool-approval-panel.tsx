@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, RotateCcw, Send, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PendingApproval } from "@/lib/api";
@@ -44,11 +44,16 @@ export function ToolApprovalPanel({ approval, onAccept, onReject, busy }: ToolAp
   const [copied, setCopied] = useState(false);
 
   const keys = Object.keys(approval.arguments ?? {});
+  useEffect(() => {
+    setFields(initial);
+    setFeedback("");
+  }, [initial]);
+
   const dirty = keys.some((k) => fields[k] !== initial[k]);
 
   const buildArgs = (): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
-    for (const k of keys) out[k] = fromStringValue(approval.arguments[k], fields[k]);
+    for (const k of keys) out[k] = fromStringValue(approval.arguments[k], fields[k] ?? initial[k] ?? "");
     return out;
   };
 
@@ -102,21 +107,24 @@ export function ToolApprovalPanel({ approval, onAccept, onReject, busy }: ToolAp
                 This action takes no arguments.
               </div>
             ) : (
-              keys.map((k) => (
-                <div key={k} className="space-y-1.5">
-                  <label className="flex items-center justify-between gap-2 text-xs">
-                    <span className="font-medium text-muted-foreground">{toFieldLabel(k)}</span>
-                    <span className="truncate font-mono text-[10px] text-muted-foreground/70">{k}</span>
-                  </label>
-                  <textarea
-                    value={fields[k]}
-                    onChange={(e) => setFields((f) => ({ ...f, [k]: e.target.value }))}
-                    rows={fields[k].includes("\n") ? Math.min(fields[k].split("\n").length, 10) : 2}
-                    className="min-h-11 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-5 outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                    disabled={busy}
-                  />
-                </div>
-              ))
+              keys.map((k) => {
+                const value = fields[k] ?? initial[k] ?? "";
+                return (
+                  <div key={k} className="space-y-1.5">
+                    <label className="flex items-center justify-between gap-2 text-xs">
+                      <span className="font-medium text-muted-foreground">{toFieldLabel(k)}</span>
+                      <span className="truncate font-mono text-[10px] text-muted-foreground/70">{k}</span>
+                    </label>
+                    <textarea
+                      value={value}
+                      onChange={(e) => setFields((f) => ({ ...f, [k]: e.target.value }))}
+                      rows={value.includes("\n") ? Math.min(value.split("\n").length, 10) : 2}
+                      className="min-h-11 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-5 outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                      disabled={busy}
+                    />
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
