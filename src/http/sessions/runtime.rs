@@ -8,6 +8,7 @@ use crate::{
         credentials,
         managed_agents::{
             registry::{self, schema::ManagedAgentRow},
+            runtime_events,
             sessions::{self, schema::SessionRow},
         },
     },
@@ -180,6 +181,23 @@ pub(super) async fn execute_runtime_prompt(
                 .agent_runs
                 .update_status(&row.id, crate::agents::runs::AgentRunStatus::Completed);
         }
+    }
+    persist_send_response_events(pool, runtime, &row.id, &sent.raw).await?;
+    Ok(())
+}
+
+async fn persist_send_response_events(
+    pool: &PgPool,
+    runtime: &str,
+    session_id: &str,
+    raw: &Value,
+) -> Result<(), GatewayError> {
+    let events = providers::runtime_registry()
+        .entry_for_id(runtime)
+        .map(|entry| entry.adapter.events_from_send_response_raw(raw))
+        .unwrap_or_default();
+    for event in events {
+        runtime_events::repository::append(pool, session_id, event).await?;
     }
     Ok(())
 }

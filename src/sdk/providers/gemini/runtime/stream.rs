@@ -7,6 +7,7 @@ pub(super) fn events_from_interaction(raw: &Value) -> Vec<AgentEvent> {
     if raw.get("status").and_then(Value::as_str) == Some("in_progress") {
         events.push(simple_event("session.status_running", Map::new()));
     }
+    let mut has_message = false;
     for step in raw
         .get("steps")
         .and_then(Value::as_array)
@@ -14,6 +15,12 @@ pub(super) fn events_from_interaction(raw: &Value) -> Vec<AgentEvent> {
         .flatten()
     {
         if let Some(event) = event_from_step(step) {
+            has_message = has_message || event.event_type == "agent.message";
+            events.push(event);
+        }
+    }
+    if !has_message {
+        if let Some(event) = model_output_from_outputs(raw) {
             events.push(event);
         }
     }
@@ -57,6 +64,28 @@ fn model_output_event(step: &Value) -> Option<AgentEvent> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    if content.is_empty() {
+        return None;
+    }
+    let mut data = Map::new();
+    data.insert("content".to_owned(), Value::Array(content));
+    Some(simple_event("agent.message", data))
+}
+
+fn model_output_from_outputs(raw: &Value) -> Option<AgentEvent> {
+    let content = raw
+        .get("outputs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|output| output.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|output| {
+            output
+                .get("text")
+                .and_then(Value::as_str)
+                .map(|text| json!({ "type": "text", "text": text }))
+        })
+        .collect::<Vec<_>>();
     if content.is_empty() {
         return None;
     }

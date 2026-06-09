@@ -34,6 +34,10 @@ impl RuntimeAdapter for GeminiAntigravityRuntime {
             .map(str::to_owned)
     }
 
+    fn events_from_send_response_raw(&self, raw: &Value) -> Vec<Value> {
+        list_events_from_interaction(raw)
+    }
+
     fn create_agent<'a>(
         &'a self,
         client: &'a Lap,

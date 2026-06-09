@@ -13,7 +13,6 @@ pub async fn exercise_gemini_runtime_session(fixture: &AppFixture) {
     let gemini = MockServer::start().await;
     mount_create_agent(&gemini).await;
     mount_interaction(&gemini).await;
-    mount_interaction_get(&gemini).await;
 
     save_gemini_credentials(fixture, &gemini).await;
     let agent_id = create_gemini_agent(fixture).await;
@@ -56,17 +55,6 @@ async fn mount_interaction(gemini: &MockServer) {
             "environment": "remote",
             "store": true
         })))
-        .respond_with(ResponseTemplate::new(200).set_body_json(interaction()))
-        .mount(gemini)
-        .await;
-}
-
-async fn mount_interaction_get(gemini: &MockServer) {
-    Mock::given(method("GET"))
-        .and(path(format!(
-            "/v1beta/interactions/{GEMINI_INTERACTION_ID}"
-        )))
-        .and(header("x-goog-api-key", "gemini-test"))
         .respond_with(ResponseTemplate::new(200).set_body_json(interaction()))
         .mount(gemini)
         .await;

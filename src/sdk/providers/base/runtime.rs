@@ -100,6 +100,10 @@ pub(crate) trait RuntimeAdapter: Send + Sync + 'static {
         None
     }
 
+    fn events_from_send_response_raw(&self, _raw: &Value) -> Vec<Value> {
+        Vec::new()
+    }
+
     fn create_agent<'a>(
         &'a self,
         _client: &'a Lap,

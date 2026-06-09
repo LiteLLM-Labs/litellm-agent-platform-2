@@ -726,28 +726,30 @@ function ChatInner() {
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
     let unsub: (() => void) | undefined;
+    let cancelled = false;
     if (sessionRuntime) {
       listRuntimeEvents(sid)
         .then((events) => {
           if (activeSessionRef.current !== sid) return;
           eventBufferRef.current = events.slice(-500).map((ev) => ({ ts: Date.now(), ev: ev as Frame["ev"] }));
           mergeRuntimeEventsAndStatus(events);
+          if (cancelled || runtimeStatusFromEvents(events) === "idle") return;
+          unsub = subscribeRuntimeEvents({
+            sessionId: sid,
+            onEvent: (ev) => {
+              if (activeSessionRef.current === sid) appendRuntimeEvent(ev);
+            },
+            onError: (err) => {
+              if (activeSessionRef.current === sid) {
+                setError(err instanceof Error ? err.message : String(err));
+              }
+            },
+          });
         })
         .catch((err) => {
           if (activeSessionRef.current !== sid) return;
           setError(err instanceof Error ? err.message : String(err));
         });
-      unsub = subscribeRuntimeEvents({
-        sessionId: sid,
-        onEvent: (ev) => {
-          if (activeSessionRef.current === sid) appendRuntimeEvent(ev);
-        },
-        onError: (err) => {
-          if (activeSessionRef.current === sid) {
-            setError(err instanceof Error ? err.message : String(err));
-          }
-        },
-      });
     } else {
       void refetch();
     }
@@ -772,7 +774,10 @@ function ChatInner() {
         });
     }
     listApprovals().then(setApprovals).catch(() => {});
-    return unsub;
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, runtimeStreamVersion]);
 
   useEffect(() => {
