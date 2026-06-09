@@ -343,6 +343,7 @@ function scalar(value: string): string {
     !/[\r\n]/.test(value) &&
     !/:\s/.test(value) &&
     !/\s#/.test(value) &&
+    !/\s$/.test(value) &&
     !/^[\s\-\[\]\{\},&*!|>@`]/.test(value) &&
     !/^(true|false|null|undefined)$/i.test(value)
   ) {
