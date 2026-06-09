@@ -62,9 +62,12 @@ export async function writeProviderConfig(cwd, { id = "litellm", name = "LiteLLM
 // Returns { baseUrl, proc, stop() }
 export async function startOpencode({ port = 4096, cwd, env } = {}) {
   const baseUrl = `http://127.0.0.1:${port}`;
+  // Bind 0.0.0.0 so our loopback health probe connects regardless of the
+  // platform's IPv4/IPv6 loopback resolution (a 127.0.0.1-only bind made the
+  // in-process fetch hang on some hosts). The port is internal (not exposed).
   const proc = spawn(
     "opencode",
-    ["serve", "--port", String(port), "--hostname", "127.0.0.1"],
+    ["serve", "--port", String(port), "--hostname", "0.0.0.0"],
     { cwd, env: { ...process.env, ...env }, stdio: "inherit" }
   );
 
@@ -103,7 +106,11 @@ export async function startOpencode({ port = 4096, cwd, env } = {}) {
         return;
       }
       try {
-        const res = await fetch(`${baseUrl}/global/health`);
+        // Per-probe timeout so a hung/slow /global/health doesn't wedge the
+        // poll (without it the deadline below would never be reached).
+        const res = await fetch(`${baseUrl}/global/health`, {
+          signal: AbortSignal.timeout(3000),
+        });
         if (res.status === 200) {
           settled = true;
           resolve({ baseUrl, proc, stop });
