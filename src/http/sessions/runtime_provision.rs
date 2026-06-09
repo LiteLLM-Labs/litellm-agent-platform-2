@@ -120,6 +120,7 @@ async fn create_provider_agent(
                 let mut tools = vec![serde_json::json!({ "type": "agent_toolset_20260401" })];
                 tools.extend(crate::http::platform_mcps::platform_mcp_toolsets(
                     &created.agent.config,
+                    &created.agent.vault_keys,
                 ));
                 tools.extend(integration_mcp_toolsets(&created.agent.config));
                 tools
@@ -141,7 +142,9 @@ async fn platform_mcp_vault_ids(
     if runtime != AgentRuntime::ClaudeManagedAgents {
         return Ok(None);
     }
-    if crate::http::platform_mcps::selected_platform_mcp_ids(&created.agent.config).is_empty() {
+    if crate::http::platform_mcps::selected_platform_mcp_ids(&created.agent.config).is_empty()
+        && crate::http::platform_mcps::vault_key_names(&created.agent.vault_keys).is_empty()
+    {
         return Ok(None);
     }
     let token = state

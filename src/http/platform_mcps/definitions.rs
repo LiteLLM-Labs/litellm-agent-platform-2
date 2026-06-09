@@ -1,8 +1,8 @@
 use serde_json::{json, Value};
 
 use super::{
-    factory, session_management, AGENT_MEMORY_MCP_ID, LIST_SUB_AGENTS_MCP_ID, RUN_SUB_AGENT_MCP_ID,
-    SEND_SLACK_MESSAGE_MCP_ID,
+    factory, session_management, AGENT_MEMORY_MCP_ID, API_CALL_WITH_VAULT_MCP_ID,
+    LIST_SUB_AGENTS_MCP_ID, RUN_SUB_AGENT_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID,
 };
 
 pub fn tool_defs() -> Vec<Value> {
@@ -13,9 +13,61 @@ pub fn tool_defs() -> Vec<Value> {
         send_slack_message_tool(),
         list_sub_agents_tool(),
         run_sub_agent_tool(),
+        api_call_with_vault_tool(),
     ];
     tools.extend(factory::tool_defs());
     tools
+}
+
+fn api_call_with_vault_tool() -> Value {
+    json!({
+        "name": API_CALL_WITH_VAULT_MCP_ID,
+        "description": "Call a normal HTTPS API through LiteLLM's server-side vault credential proxy. The credential key must be attached to this agent. The secret is injected server-side and redacted from the returned response.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Attached vault key name to use for this request."
+                },
+                "url": {
+                    "type": "string",
+                    "description": "HTTPS URL to call. HTTP is only allowed for localhost during development."
+                },
+                "method": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+                    "description": "HTTP method. Defaults to GET."
+                },
+                "auth": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["bearer", "api_key_header", "header", "query"]
+                        },
+                        "header": {
+                            "type": "string",
+                            "description": "Header name for header or api_key_header auth. Defaults to x-api-key for api_key_header."
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Query parameter name for query auth."
+                        }
+                    },
+                    "required": ["type"]
+                },
+                "headers": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                },
+                "body": {
+                    "description": "Optional JSON body for POST, PUT, or PATCH."
+                }
+            },
+            "required": ["key", "url"]
+        }
+    })
 }
 
 fn list_sub_agents_tool() -> Value {

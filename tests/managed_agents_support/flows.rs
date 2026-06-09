@@ -10,6 +10,7 @@ mod platform_factory;
 mod platform_factory_oauth;
 mod platform_factory_payloads;
 mod platform_mcps;
+mod platform_mcps_vault;
 mod routines;
 mod rules;
 mod sessions;
