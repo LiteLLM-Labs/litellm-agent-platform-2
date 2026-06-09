@@ -10,7 +10,9 @@ import type {
   OpencodeSession,
   PlatformMcp,
   Rule,
+
   Routine,
+  RuntimeHarness,
   Skill,
   SpendLog,
   VaultKeyEntry,
@@ -309,6 +311,48 @@ export async function deleteAgentRuntimeCredential(runtime: AgentRuntimeId): Pro
   );
 }
 
+export async function listRuntimeHarnesses(): Promise<RuntimeHarness[]> {
+  const res = await req("/api/runtime-harnesses");
+  const data = await jsonOrThrow<{ harnesses: RuntimeHarness[] }>(res);
+  return data.harnesses;
+}
+
+export async function createRuntimeHarness(input: {
+  alias: string;
+  api_spec: string;
+  api_base: string;
+  api_key: string;
+}): Promise<RuntimeHarness[]> {
+  const res = await req("/api/runtime-harnesses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await jsonOrThrow<{ harnesses: RuntimeHarness[] }>(res);
+  return data.harnesses;
+}
+
+export async function updateRuntimeHarness(
+  alias: string,
+  input: { api_key?: string; api_base?: string },
+): Promise<RuntimeHarness[]> {
+  const res = await req(`/api/runtime-harnesses/${encodeURIComponent(alias)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await jsonOrThrow<{ harnesses: RuntimeHarness[] }>(res);
+  return data.harnesses;
+}
+
+export async function deleteRuntimeHarness(alias: string): Promise<void> {
+  await jsonOrThrow(
+    await req(`/api/runtime-harnesses/${encodeURIComponent(alias)}`, {
+      method: "DELETE",
+    }),
+  );
+}
+
 export async function listAgents(): Promise<Agent[]> {
   const res = await req("/api/agents");
   const data = await jsonOrThrow<{ agents: Agent[] }>(res);
@@ -500,14 +544,19 @@ export async function sendMessageWithRuntimeModel(opts: {
   sessionId: string;
   text: string;
   model: string;
-  runtime?: AgentRuntimeId | "claude_agents";
+  runtime?: string;
+  apiSpec?: string;  // resolved api_spec for custom aliases
 }): Promise<void> {
+  // Branch on api_spec (not the raw alias) so custom Cursor/OpenCode harnesses get the right route prefix
+  const spec = opts.apiSpec ?? opts.runtime;
   const model =
-    opts.runtime === "claude_managed_agents" || opts.runtime === "claude_agents"
+    spec === "claude_managed_agents" || spec === "claude_agents"
       ? "anthropic/*"
-      : opts.runtime === "cursor"
+      : spec === "cursor"
         ? "cursor/*"
-        : opts.model;
+        : spec === "opencode"
+          ? "opencode/*"
+          : opts.model;
   return sendMessage({ sessionId: opts.sessionId, text: opts.text, model });
 }
 

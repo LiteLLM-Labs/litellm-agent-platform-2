@@ -33,6 +33,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ModelSelect } from "@/components/model-select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ScheduleEditor } from "@/components/schedule-editor";
 import {
   AGENT_TEMPLATES,
@@ -54,6 +61,7 @@ import {
   createAgent,
   draftAgentConfigWithModel,
   listAgentRuntimes,
+  listRuntimeHarnesses,
   listAgents,
   listMcpServerTools,
   listMcpUserCredentials,
@@ -63,7 +71,7 @@ import {
   listSkills,
 } from "@/lib/api";
 import { scheduleLabel } from "@/lib/schedule";
-import type { Agent, AgentRuntime, Rule, Skill } from "@/lib/types";
+import type { Agent, AgentRuntime, Rule, Skill, RuntimeHarness } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type BuilderStep = "create" | "config";
@@ -89,6 +97,7 @@ export default function NewAgentPage() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("blank");
   const [configText, setConfigText] = useState(INITIAL_CONFIG);
   const [runtimes, setRuntimes] = useState<AgentRuntime[]>([]);
+  const [harnesses, setHarnesses] = useState<RuntimeHarness[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -176,6 +185,12 @@ export default function NewAgentPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    listRuntimeHarnesses()
+      .then((h) => setHarnesses((h ?? []).filter((x) => x.connected)))
+      .catch(() => {});
   }, []);
 
   const openConfig = (
@@ -317,6 +332,7 @@ export default function NewAgentPage() {
               error={error}
               lastRequest={lastRequest}
               agents={agents}
+              harnesses={harnesses}
               mcpError={mcpError}
               mcpIntegrations={mcpIntegrations}
               mcpLoading={mcpLoading}
@@ -496,6 +512,7 @@ function ConfigStep({
   error,
   lastRequest,
   agents,
+  harnesses,
   mcpError,
   mcpIntegrations,
   mcpLoading,
@@ -524,6 +541,7 @@ function ConfigStep({
   error: string | null;
   lastRequest: string;
   agents: Agent[];
+  harnesses: RuntimeHarness[];
   mcpError: string | null;
   mcpIntegrations: Integration[];
   mcpLoading: boolean;
@@ -679,6 +697,7 @@ function ConfigStep({
           {view === "edit" ? (
             <AgentDraftControls
               agents={agents}
+              harnesses={harnesses}
               draft={draft}
               mcpError={mcpError}
               mcpIntegrations={mcpIntegrations}
@@ -797,6 +816,7 @@ function TemplateBrowser({
 
 function AgentDraftControls({
   agents,
+  harnesses,
   draft,
   mcpError,
   mcpIntegrations,
@@ -808,6 +828,7 @@ function AgentDraftControls({
   onChange,
 }: {
   agents: Agent[];
+  harnesses: RuntimeHarness[];
   draft: AgentDraft;
   mcpError: string | null;
   mcpIntegrations: Integration[];
@@ -893,6 +914,30 @@ function AgentDraftControls({
             />
           </div>
         </div>
+
+        {harnesses.length > 1 && (
+          <div className="grid gap-1.5">
+            <Label className="text-[#c9c0b1]">Runtime</Label>
+            <Select
+              value={draft.runtime || "claude_managed_agents"}
+              onValueChange={(v) => update({ runtime: v ?? "claude_managed_agents" })}
+            >
+              <SelectTrigger className="border-white/10 bg-[#242321] text-[#f7f2e8]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {harnesses.map((h) => (
+                  <SelectItem key={h.alias} value={h.alias}>
+                    {h.display_name}
+                    {!h.is_default && (
+                      <span className="ml-2 text-xs text-muted-foreground">({h.api_spec})</span>
+                    )}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <div className="grid gap-1.5">
           <Label htmlFor="draft-system" className="text-[#c9c0b1]">

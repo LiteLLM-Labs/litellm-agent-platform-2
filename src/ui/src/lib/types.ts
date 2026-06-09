@@ -16,7 +16,11 @@ export interface OpencodeSession {
   [k: string]: unknown;
 }
 
-export type AgentRuntimeId = "claude_managed_agents" | "cursor" | "opencode";
+export type AgentRuntimeId = string;
+export type BuiltinRuntimeId = "claude_managed_agents" | "cursor" | "opencode";
+export function isBuiltinRuntime(id: string): id is BuiltinRuntimeId {
+  return id === "claude_managed_agents" || id === "cursor" || id === "opencode";
+}
 
 export interface AgentRuntimeTool {
   id: string;
@@ -35,6 +39,24 @@ export interface AgentRuntime {
   connected: boolean;
   api_base?: string | null;
   masked_api_key?: string | null;
+}
+
+export interface RuntimeHarness {
+  alias: string;
+  api_spec: BuiltinRuntimeId;
+  display_name: string;
+  api_base: string;
+  is_default: boolean;
+  connected: boolean;
+  masked_api_key?: string | null;
+  tools: AgentRuntimeTool[];
+}
+
+export function resolveApiSpec(alias: string, harnesses: RuntimeHarness[]): BuiltinRuntimeId {
+  if (alias === "claude_managed_agents" || alias === "cursor" || alias === "opencode") {
+    return alias as BuiltinRuntimeId;
+  }
+  return harnesses.find((h) => h.alias === alias)?.api_spec ?? "claude_managed_agents";
 }
 
 export interface MessageInfo {

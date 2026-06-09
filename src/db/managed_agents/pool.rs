@@ -1,13 +1,27 @@
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    ConnectOptions, Executor, PgPool,
+};
 
 use crate::errors::GatewayError;
 
 const MIGRATION_LOCK_KEY: i64 = 7_420_250_601;
 
 pub async fn connect(database_url: &str) -> Result<PgPool, GatewayError> {
+    let opts = database_url
+        .parse::<PgConnectOptions>()
+        .map_err(GatewayError::Database)?
+        .statement_cache_capacity(0);
     PgPoolOptions::new()
         .max_connections(10)
-        .connect(database_url)
+        // Flush any pgbouncer server-side plan cache on every new connection.
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                conn.execute("DISCARD ALL").await?;
+                Ok(())
+            })
+        })
+        .connect_with(opts)
         .await
         .map_err(GatewayError::Database)
 }

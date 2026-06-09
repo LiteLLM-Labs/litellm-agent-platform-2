@@ -8,12 +8,9 @@ use crate::{
     },
     errors::GatewayError,
     proxy::state::AppState,
-    sdk::{
-        agents::{
-            AgentModel, AgentModelConfig, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
-            CreateSessionParams, Lap, LapConfig,
-        },
-        providers,
+    sdk::agents::{
+        AgentModel, AgentModelConfig, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
+        CreateSessionParams, Lap, LapConfig,
     },
 };
 
@@ -39,11 +36,11 @@ pub(super) async fn provision_runtime_session(
     pool: &PgPool,
     created: &CreatedRuntimeSession,
 ) -> Result<SessionRow, GatewayError> {
-    let sdk_rt = super::runtime_sdk::sdk_runtime(&created.runtime)?;
-    let client = runtime_client(state, sdk_rt, created);
+    let sdk_rt = created.resolved.agent_runtime;
+    let client = runtime_client(state, created);
     let provider_agent = create_provider_agent(state, &client, sdk_rt, created).await?;
     let provider_env = create_provider_environment(&client, sdk_rt, created).await?;
-    let vault_ids = platform_mcp_vault_ids(state, sdk_rt, created).await?;
+    let vault_ids = platform_mcp_vault_ids(state, created).await?;
     let provider_session = client
         .beta()
         .sessions()
@@ -63,7 +60,7 @@ pub(super) async fn provision_runtime_session(
         .await
         .map_err(agent_sdk_error)?;
     let provision = runtime_provision(
-        &created.runtime,
+        created,
         &provider_agent.id,
         Some(provider_session.id.clone()),
         &provider_agent.raw,
@@ -77,21 +74,21 @@ pub(super) async fn provision_runtime_session(
     persist_runtime_refs(pool, created, provision).await
 }
 
-fn runtime_client(state: &AppState, runtime: AgentRuntime, created: &CreatedRuntimeSession) -> Lap {
+fn runtime_client(state: &AppState, created: &CreatedRuntimeSession) -> Lap {
     let mut config = LapConfig::default();
-    match runtime {
+    match created.resolved.agent_runtime {
         AgentRuntime::ClaudeManagedAgents => {
-            config.anthropic_api_key = Some(created.credential.api_key.clone());
-            config.anthropic_base_url = created.credential.api_base.clone();
+            config.anthropic_api_key = Some(created.resolved.credential.api_key.clone());
+            config.anthropic_base_url = created.resolved.credential.api_base.clone();
         }
         AgentRuntime::Cursor => {
-            config.cursor_api_key = Some(created.credential.api_key.clone());
-            config.cursor_base_url = created.credential.api_base.clone();
+            config.cursor_api_key = Some(created.resolved.credential.api_key.clone());
+            config.cursor_base_url = created.resolved.credential.api_base.clone();
         }
         AgentRuntime::OpenCode => {
-            config.opencode_base_url = Some(created.credential.api_base.clone());
-            config.opencode_api_key = Some(created.credential.api_key.clone());
-            config.opencode_password = Some(created.credential.api_key.clone());
+            config.opencode_base_url = Some(created.resolved.credential.api_base.clone());
+            config.opencode_api_key = Some(created.resolved.credential.api_key.clone());
+            config.opencode_password = Some(created.resolved.credential.api_key.clone());
         }
     }
     Lap::with_http_client(config, state.http.clone())
@@ -135,10 +132,9 @@ async fn create_provider_agent(
 
 async fn platform_mcp_vault_ids(
     state: &AppState,
-    runtime: AgentRuntime,
     created: &CreatedRuntimeSession,
 ) -> Result<Option<Vec<String>>, GatewayError> {
-    if runtime != AgentRuntime::ClaudeManagedAgents {
+    if created.resolved.agent_runtime != AgentRuntime::ClaudeManagedAgents {
         return Ok(None);
     }
     if crate::http::platform_mcps::selected_platform_mcp_ids(&created.agent.config).is_empty() {
@@ -156,7 +152,8 @@ async fn platform_mcp_vault_ids(
         })?;
     let url = crate::http::platform_mcps::platform_mcp_url(state, &created.agent.id)?;
     let vault_id =
-        create_platform_mcp_vault(state, &created.credential.api_key, &url, token).await?;
+        create_platform_mcp_vault(state, &created.resolved.credential.api_key, &url, token)
+            .await?;
     Ok(Some(vec![vault_id]))
 }
 
@@ -234,21 +231,14 @@ async fn create_provider_environment(
 }
 
 fn runtime_provision(
-    runtime: &str,
+    created: &CreatedRuntimeSession,
     agent_id: &str,
     provider_session_id: Option<String>,
     raw: &Value,
     metadata: Value,
 ) -> RuntimeProvision {
-    let (provider_run_id, provider_url) = providers::runtime_registry()
-        .entry_for_id(runtime)
-        .map(|entry| {
-            (
-                entry.adapter.provider_run_id_from_agent_raw(raw),
-                entry.adapter.provider_url_from_agent_raw(raw),
-            )
-        })
-        .unwrap_or((None, None));
+    let provider_run_id = created.resolved.adapter.provider_run_id_from_agent_raw(raw);
+    let provider_url = created.resolved.adapter.provider_url_from_agent_raw(raw);
     RuntimeProvision {
         runtime_agent_id: agent_id.to_owned(),
         provider_session_id,
