@@ -8,8 +8,9 @@ pub async fn assert_human_approval(fixture: &AppFixture, agent_id: &str) {
 }
 
 async fn assert_accepts_approval(fixture: &AppFixture, agent_id: &str) {
-    let pending = spawn_approval_call(fixture, agent_id, 7, "approve deploy", "prod");
-    let approval_id = wait_for_approval_item(fixture, "approve deploy").await;
+    let session_id = "ses_approval_accept";
+    let pending = spawn_approval_call(fixture, agent_id, session_id, 7, "approve deploy", "prod");
+    let approval_id = wait_for_approval_item(fixture, "approve deploy", session_id).await;
     request_json(
         fixture.app.clone(),
         "POST",
@@ -25,8 +26,9 @@ async fn assert_accepts_approval(fixture: &AppFixture, agent_id: &str) {
 }
 
 async fn assert_rejects_with_feedback(fixture: &AppFixture, agent_id: &str) {
-    let pending = spawn_approval_call(fixture, agent_id, 8, "reject deploy", "prod");
-    let approval_id = wait_for_approval_item(fixture, "reject deploy").await;
+    let session_id = "ses_approval_reject";
+    let pending = spawn_approval_call(fixture, agent_id, session_id, 8, "reject deploy", "prod");
+    let approval_id = wait_for_approval_item(fixture, "reject deploy", session_id).await;
     request_json(
         fixture.app.clone(),
         "POST",
@@ -44,19 +46,21 @@ async fn assert_rejects_with_feedback(fixture: &AppFixture, agent_id: &str) {
 fn spawn_approval_call(
     fixture: &AppFixture,
     agent_id: &str,
+    session_id: &str,
     id: i32,
     title: &str,
     environment: &str,
 ) -> tokio::task::JoinHandle<Value> {
     let app = fixture.app.clone();
     let agent_id = agent_id.to_owned();
+    let session_id = session_id.to_owned();
     let title = title.to_owned();
     let environment = environment.to_owned();
     tokio::spawn(async move {
         request_json(
             app,
             "POST",
-            &format!("/mcp/platform/{agent_id}"),
+            &format!("/mcp/platform/{agent_id}?session_id={session_id}"),
             approval_call(id, &title, &environment),
         )
         .await
@@ -73,13 +77,14 @@ fn approval_call(id: i32, title: &str, environment: &str) -> Option<Value> {
             "arguments": {
                 "title": title,
                 "body": "Deploy production after smoke tests pass.",
+                "session_id": "$SESSION_ID",
                 "arguments": { "environment": environment }
             }
         }
     }))
 }
 
-async fn wait_for_approval_item(fixture: &AppFixture, title: &str) -> String {
+async fn wait_for_approval_item(fixture: &AppFixture, title: &str, session_id: &str) -> String {
     for _ in 0..20 {
         let inbox = request_json(
             fixture.app.clone(),
@@ -96,6 +101,7 @@ async fn wait_for_approval_item(fixture: &AppFixture, title: &str) -> String {
         if let Some(item) = found {
             let args = serde_json::from_str::<Value>(item["args_json"].as_str().unwrap()).unwrap();
             assert_eq!(args["environment"], json!("prod"));
+            assert_eq!(item["session_id"], json!(session_id));
             return item["id"].as_str().unwrap().to_owned();
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

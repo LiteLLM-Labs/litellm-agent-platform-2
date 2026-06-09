@@ -11,6 +11,7 @@ use super::required_str;
 pub async fn request_human_approval(
     pool: &PgPool,
     agent_id: &str,
+    session_id: Option<&str>,
     arguments: Value,
 ) -> Result<Value, GatewayError> {
     let title = required_str(&arguments, "title")?.to_owned();
@@ -20,7 +21,9 @@ pub async fn request_human_approval(
     let item = inbox::repository::create_approval(
         pool,
         title,
-        optional_str(&arguments, "session_id"),
+        session_id
+            .map(str::to_owned)
+            .or_else(|| optional_str(&arguments, "session_id")),
         Some(agent.name),
         optional_str(&arguments, "body"),
         arguments.get("arguments").cloned(),

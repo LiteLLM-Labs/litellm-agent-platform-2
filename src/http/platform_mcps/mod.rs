@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
@@ -46,6 +46,7 @@ pub fn platform_mcp_servers(
     state: &AppState,
     agent_id: &str,
     config: &Value,
+    session_id: Option<&str>,
 ) -> Result<Vec<Value>, GatewayError> {
     let ids = selected_platform_mcp_ids(config);
     if ids.is_empty() {
@@ -54,7 +55,7 @@ pub fn platform_mcp_servers(
     Ok(vec![json!({
         "name": PLATFORM_MCP_SERVER_NAME,
         "type": "url",
-        "url": platform_mcp_url(state, agent_id)?
+        "url": platform_mcp_url(state, agent_id, session_id)?
     })])
 }
 
@@ -74,7 +75,11 @@ pub fn platform_mcp_toolsets(config: &Value) -> Vec<Value> {
     })]
 }
 
-pub fn platform_mcp_url(state: &AppState, agent_id: &str) -> Result<String, GatewayError> {
+pub fn platform_mcp_url(
+    state: &AppState,
+    agent_id: &str,
+    session_id: Option<&str>,
+) -> Result<String, GatewayError> {
     let Some(base_url) = state
         .config
         .general_settings
@@ -87,11 +92,17 @@ pub fn platform_mcp_url(state: &AppState, agent_id: &str) -> Result<String, Gate
             "general_settings.public_base_url is required for platform MCPs".to_owned(),
         ));
     };
-    Ok(format!(
+    let url = format!(
         "{}/mcp/platform/{}",
         base_url.trim_end_matches('/'),
         agent_id
-    ))
+    );
+    Ok(match session_id {
+        Some(session_id) if !session_id.trim().is_empty() => {
+            format!("{url}?session_id={}", session_id.trim())
+        }
+        _ => url,
+    })
 }
 
 pub async fn list(
@@ -106,6 +117,7 @@ pub async fn serve(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(agent_id): Path<String>,
+    Query(query): Query<PlatformMcpQuery>,
     Json(request): Json<JsonRpcRequest>,
 ) -> Result<Json<Value>, GatewayError> {
     require_any_gateway_key(&headers, &state)?;
@@ -121,7 +133,14 @@ pub async fn serve(
             let Some(params) = request.params else {
                 return Ok(Json(rpc_error(request.id, -32602, "params are required")));
             };
-            let result = call_tool(state.clone(), pool, &agent_id, params).await?;
+            let result = call_tool(
+                state.clone(),
+                pool,
+                &agent_id,
+                query.session_id.as_deref(),
+                params,
+            )
+            .await?;
             json!({ "jsonrpc": "2.0", "id": request.id, "result": result })
         }
         "notifications/initialized" => json!({
@@ -138,6 +157,7 @@ async fn call_tool(
     state: Arc<AppState>,
     pool: &PgPool,
     agent_id: &str,
+    session_id: Option<&str>,
     params: Value,
 ) -> Result<Value, GatewayError> {
     let name = params
@@ -178,7 +198,7 @@ async fn call_tool(
             tools::run_sub_agent(state.clone(), pool.clone(), agent_id, arguments).await?
         }
         REQUEST_HUMAN_APPROVAL_MCP_ID => {
-            approval::request_human_approval(pool, agent_id, arguments).await?
+            approval::request_human_approval(pool, agent_id, session_id, arguments).await?
         }
         _ => {
             return Ok(json!({
@@ -242,4 +262,9 @@ pub struct JsonRpcRequest {
     pub id: Option<Value>,
     pub method: String,
     pub params: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PlatformMcpQuery {
+    pub session_id: Option<String>,
 }
