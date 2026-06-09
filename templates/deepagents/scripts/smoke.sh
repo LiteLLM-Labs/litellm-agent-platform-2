@@ -46,7 +46,7 @@ agent_json=$(curl -s "${HDR[@]}" -X POST "$BASE/v1/agents" -d "$(cat <<JSON
 {
   "name": "Smoke Test",
   "model": "$MODEL",
-  "system": "You are terse. Reply with exactly three words."
+  "system": "You have tools. When asked to call tools, call them before answering."
 }
 JSON
 )")
@@ -98,18 +98,35 @@ sse_pid=$!
 sleep 1
 
 step "7. POST /v1/sessions/$sid/events"
-curl -s "${HDR[@]}" -X POST "$BASE/v1/sessions/$sid/events" -d "$(cat <<'JSON'
+first_send=$(curl -s "${HDR[@]}" -X POST "$BASE/v1/sessions/$sid/events" -d "$(cat <<'JSON'
 {
   "events": [
-    { "type": "user.message", "content": [ { "type": "text", "text": "Say hello in three words." } ] }
+    { "type": "user.message", "content": [ { "type": "text", "text": "Call the ls tool on . and the glob tool for *.md. Then summarize briefly." } ] }
   ]
 }
 JSON
-)"
-echo
+)")
+echo "$first_send"
 
-step "8. captured SSE events"
-sleep "${SMOKE_WAIT_SECONDS:-18}"
+step "8. POST /v1/sessions/$sid/events while first turn is running"
+second_send=$(curl -s "${HDR[@]}" -X POST "$BASE/v1/sessions/$sid/events" -d "$(cat <<'JSON'
+{
+  "events": [
+    { "type": "user.message", "content": [ { "type": "text", "text": "Say queued follow-up received." } ] }
+  ]
+}
+JSON
+)")
+echo "$second_send"
+if ! printf '%s' "$second_send" | grep -q '"queued":true'; then
+  echo "FAIL: second send was not queued while session was running" >&2
+  kill "$sse_pid" 2>/dev/null || true
+  rm -f "$sse_tmp"
+  exit 1
+fi
+
+step "9. captured SSE events"
+sleep "${SMOKE_WAIT_SECONDS:-45}"
 kill "$sse_pid" 2>/dev/null || true
 wait "$sse_pid" 2>/dev/null || true
 if [ -s "$sse_tmp" ]; then
@@ -120,6 +137,16 @@ fi
 
 if ! grep -q "agent.message" "$sse_tmp"; then
   echo "FAIL: no agent.message event captured" >&2
+  rm -f "$sse_tmp"
+  exit 1
+fi
+if ! grep -q "agent.tool_use" "$sse_tmp"; then
+  echo "FAIL: no agent.tool_use event captured" >&2
+  rm -f "$sse_tmp"
+  exit 1
+fi
+if ! grep -q "agent.tool_result" "$sse_tmp"; then
+  echo "FAIL: no agent.tool_result event captured" >&2
   rm -f "$sse_tmp"
   exit 1
 fi

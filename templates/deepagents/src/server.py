@@ -1,12 +1,16 @@
 import json
 import os
 import queue
+import glob as globlib
 import sqlite3
+import subprocess
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -14,8 +18,10 @@ from pydantic import BaseModel
 
 try:
     from deepagents import create_deep_agent
+    from langchain_core.tools import tool
 except Exception:  # pragma: no cover - surfaced by /health
     create_deep_agent = None
+    tool = None
 
 
 PORT = int(os.environ.get("PORT", "8080"))
@@ -28,6 +34,7 @@ app = FastAPI(title="DeepAgents Anthropic Managed Agents bridge")
 state_lock = threading.Lock()
 run_queues: dict[str, "queue.Queue[dict[str, Any]]"] = {}
 active_runs: dict[str, bool] = {}
+pending_prompts: dict[str, "queue.Queue[str]"] = {}
 
 
 def now_ms() -> int:
@@ -303,12 +310,201 @@ def messages_from_update(update: Any) -> list[Any]:
     return messages
 
 
+def message_key(message: Any, fallback: str) -> str:
+    message_id = getattr(message, "id", None)
+    if isinstance(message_id, str) and message_id:
+        return message_id
+    return fallback
+
+
+def emit_message_events(
+    session_id: str,
+    message: Any,
+    model: str,
+    seen_text: set[str],
+    seen_tools: set[str],
+    seen_results: set[str],
+) -> bool:
+    emitted = False
+    for call in getattr(message, "tool_calls", None) or []:
+        call_id = call.get("id") or f"call_{uuid.uuid4().hex}"
+        if call_id in seen_tools:
+            continue
+        seen_tools.add(call_id)
+        append_event(
+            session_id,
+            "agent.tool_use",
+            {
+                "id": call_id,
+                "name": call.get("name"),
+                "input": call.get("args") or {},
+            },
+        )
+        emitted = True
+
+    tool_call_id = getattr(message, "tool_call_id", None)
+    if isinstance(tool_call_id, str) and tool_call_id and tool_call_id not in seen_results:
+        seen_results.add(tool_call_id)
+        append_event(
+            session_id,
+            "agent.tool_result",
+            {
+                "tool_use_id": tool_call_id,
+                "name": getattr(message, "name", None),
+                "content": [{"type": "text", "text": clip(message_text(message))}],
+            },
+        )
+        return True
+
+    text = message_text(message)
+    key = message_key(message, f"text_{len(seen_text)}_{hash(text)}")
+    if text and key not in seen_text and not getattr(message, "tool_calls", None):
+        seen_text.add(key)
+        append_event(
+            session_id,
+            "agent.message",
+            {"content": [{"type": "text", "text": text}], "model": model},
+        )
+        emitted = True
+    return emitted
+
+
 def normalize_model_for_deepagents(model: str) -> str:
     if model.startswith("anthropic/"):
         return "anthropic:" + model.split("/", 1)[1]
     if model.startswith("openai/"):
         return "openai:" + model.split("/", 1)[1]
     return model
+
+
+def clip(text: Any, limit: int = 20_000) -> str:
+    value = text if isinstance(text, str) else json_dumps(text)
+    if len(value) <= limit:
+        return value
+    return value[:limit] + f"\n... truncated {len(value) - limit} chars"
+
+
+def runtime_tools() -> list[Any]:
+    if tool is None:
+        return []
+
+    @tool
+    def bash(command: str, timeout_seconds: int = 20) -> str:
+        """Run a shell command and return stdout, stderr, and exit code."""
+        timeout = max(1, min(int(timeout_seconds or 20), 60))
+        try:
+            proc = subprocess.run(
+                command,
+                shell=True,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+            return clip(
+                {
+                    "exit_code": proc.returncode,
+                    "stdout": proc.stdout,
+                    "stderr": proc.stderr,
+                }
+            )
+        except subprocess.TimeoutExpired as exc:
+            return clip(
+                {
+                    "exit_code": 124,
+                    "stdout": exc.stdout or "",
+                    "stderr": f"command timed out after {timeout}s",
+                }
+            )
+
+    @tool
+    def ls(path: str = ".") -> str:
+        """List files and directories at a path."""
+        target = Path(path).expanduser()
+        try:
+            items = sorted(target.iterdir(), key=lambda item: (not item.is_dir(), item.name))[:200]
+            return clip(
+                [
+                    {
+                        "name": item.name,
+                        "path": str(item),
+                        "type": "directory" if item.is_dir() else "file",
+                    }
+                    for item in items
+                ]
+            )
+        except Exception as exc:
+            return f"ls failed: {exc}"
+
+    @tool
+    def glob(pattern: str, root: str = ".") -> str:
+        """Find paths matching a glob pattern under a root directory."""
+        matches = globlib.glob(str(Path(root) / pattern), recursive=True)
+        return clip(sorted(matches)[:500])
+
+    @tool
+    def grep(pattern: str, root: str = ".", include: str = "*") -> str:
+        """Search text files for a pattern and return matching lines."""
+        matches: list[dict[str, Any]] = []
+        paths = globlib.glob(str(Path(root) / "**" / include), recursive=True)
+        for path in paths[:2_000]:
+            file_path = Path(path)
+            if not file_path.is_file():
+                continue
+            try:
+                text = file_path.read_text(errors="ignore")
+            except Exception:
+                continue
+            for line_no, line in enumerate(text.splitlines(), start=1):
+                if pattern in line:
+                    matches.append({"path": path, "line": line_no, "text": line[:500]})
+                    if len(matches) >= 200:
+                        return clip(matches)
+        return clip(matches)
+
+    @tool
+    def read(path: str, max_bytes: int = 20_000) -> str:
+        """Read a text file."""
+        limit = max(1, min(int(max_bytes or 20_000), 100_000))
+        try:
+            return Path(path).read_text(errors="ignore")[:limit]
+        except Exception as exc:
+            return f"read failed: {exc}"
+
+    @tool
+    def write(path: str, content: str) -> str:
+        """Create or overwrite a text file."""
+        try:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            return f"wrote {len(content)} chars to {path}"
+        except Exception as exc:
+            return f"write failed: {exc}"
+
+    @tool
+    def edit(path: str, old: str, new: str) -> str:
+        """Replace text in a file."""
+        try:
+            target = Path(path)
+            text = target.read_text(errors="ignore")
+            if old not in text:
+                return "edit failed: old text not found"
+            target.write_text(text.replace(old, new, 1))
+            return f"edited {path}"
+        except Exception as exc:
+            return f"edit failed: {exc}"
+
+    @tool
+    def web_fetch(url: str) -> str:
+        """Fetch a URL and return response text."""
+        try:
+            request = UrlRequest(url, headers={"User-Agent": "deepagents-template/1.0"})
+            with urlopen(request, timeout=20) as response:
+                return clip(response.read(100_000).decode("utf-8", "replace"))
+        except (URLError, TimeoutError, ValueError) as exc:
+            return f"web_fetch failed: {exc}"
+
+    return [bash, ls, glob, grep, read, write, edit, web_fetch]
 
 
 def final_text_from_result(result: Any) -> str:
@@ -327,7 +523,7 @@ def build_agent(row: sqlite3.Row):
         raise RuntimeError("deepagents package is not importable")
     return create_deep_agent(
         model=normalize_model_for_deepagents(row["model"] or DEFAULT_MODEL),
-        tools=[],
+        tools=runtime_tools(),
         system_prompt=row["system"] or "You are a helpful assistant.",
     )
 
@@ -341,51 +537,64 @@ def run_agent(session_id: str, prompt: str) -> None:
     if not agent_row:
         append_event(session_id, "session.error", {"error": {"message": "agent not found"}})
         return
-    with state_lock:
-        active_runs[session_id] = True
-    set_session_status(session_id, "running")
-    append_event(session_id, "session.status_running", {})
-    emitted = False
-    try:
-        agent = build_agent(agent_row)
-        payload = {"messages": [{"role": "user", "content": prompt}]}
-        for chunk in agent.stream(payload, stream_mode="updates"):
-            for message in messages_from_update(chunk):
-                text = message_text(message)
-                if text:
-                    emitted = True
-                    append_event(
-                        session_id,
-                        "agent.message",
-                        {"content": [{"type": "text", "text": text}], "model": agent_row["model"]},
+    while True:
+        set_session_status(session_id, "running")
+        append_event(session_id, "session.status_running", {})
+        emitted = False
+        seen_text: set[str] = set()
+        seen_tools: set[str] = set()
+        seen_results: set[str] = set()
+        try:
+            agent = build_agent(agent_row)
+            payload = {"messages": [{"role": "user", "content": prompt}]}
+            for chunk in agent.stream(payload, stream_mode="updates"):
+                for message in messages_from_update(chunk):
+                    emitted = (
+                        emit_message_events(
+                            session_id,
+                            message,
+                            agent_row["model"],
+                            seen_text,
+                            seen_tools,
+                            seen_results,
+                        )
+                        or emitted
                     )
-        if not emitted:
+            if not emitted:
+                append_event(
+                    session_id,
+                    "agent.message",
+                    {
+                        "content": [{
+                            "type": "text",
+                            "text": "DeepAgents completed without emitting message text.",
+                        }],
+                        "model": agent_row["model"],
+                    },
+                )
             append_event(
                 session_id,
-                "agent.message",
-                {
-                    "content": [{
-                        "type": "text",
-                        "text": "DeepAgents completed without emitting message text.",
-                    }],
-                    "model": agent_row["model"],
-                },
+                "session.status_idle",
+                {"stop_reason": {"type": "end_turn"}},
             )
-        append_event(
-            session_id,
-            "session.status_idle",
-            {"stop_reason": {"type": "end_turn"}},
-        )
-        set_session_status(session_id, "idle")
-    except Exception as exc:
-        append_event(session_id, "session.error", {"error": {"message": str(exc)}})
-        set_session_status(session_id, "error")
-    finally:
+            set_session_status(session_id, "idle")
+        except Exception as exc:
+            append_event(session_id, "session.error", {"error": {"message": str(exc)}})
+            set_session_status(session_id, "error")
+            break
+
         with state_lock:
-            active_runs[session_id] = False
-            q = run_queues.get(session_id)
-        if q:
-            q.put({"event": "__done__", "data": {}})
+            pending = pending_prompts.setdefault(session_id, queue.Queue())
+            try:
+                prompt = pending.get_nowait()
+            except queue.Empty:
+                break
+
+    with state_lock:
+        active_runs[session_id] = False
+        q = run_queues.get(session_id)
+    if q:
+        q.put({"event": "__done__", "data": {}})
 
 
 @app.post("/v1/agents")
@@ -524,12 +733,15 @@ def send_events(session_id: str, input: SendEventsRequest) -> dict[str, Any]:
     if not prompt:
         raise HTTPException(status_code=400, detail="no user.message text")
     with state_lock:
-        if active_runs.get(session_id):
-            raise HTTPException(status_code=409, detail="session already running")
         run_queues.setdefault(session_id, queue.Queue())
+        pending_prompts.setdefault(session_id, queue.Queue())
+        if active_runs.get(session_id):
+            pending_prompts[session_id].put(prompt)
+            return JSONResponse(status_code=202, content={"ok": True, "queued": True})
+        active_runs[session_id] = True
     thread = threading.Thread(target=run_agent, args=(session_id, prompt), daemon=True)
     thread.start()
-    return JSONResponse(status_code=202, content={"ok": True})
+    return JSONResponse(status_code=202, content={"ok": True, "queued": False})
 
 
 @app.get("/v1/sessions/{session_id}/events")
