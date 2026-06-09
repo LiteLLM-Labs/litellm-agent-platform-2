@@ -304,4 +304,13 @@ LB=$(kubectl -n opensandbox-system get svc opencode-anthropic-server \
 curl -s http://$LB/health   # {"ok":true,"opencode":true}
 ```
 
-Then point the LAP SDK at `http://$LB` with model `claude-sonnet-4-6`.
+Then point the LAP SDK at `http://$LB` with model `claude-sonnet-4-6`, or add
+the EKS service in LAP under **AI Gateway** → **Agent Runtimes** with:
+
+- Alias: `opencode-eks-anthropic`
+- API Spec: `claude_managed_agents`
+- API Base: `http://$LB` or the HTTPS URL in front of the EKS load balancer
+- API Key: any non-empty placeholder, for example `fake-opencode-key`
+
+See the [LAP connection walkthrough](docs/eks-deployment.md#7-connect-from-lap)
+for screenshots showing runtime creation, runtime selection, and a chat session.
