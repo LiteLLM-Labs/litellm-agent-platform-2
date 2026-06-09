@@ -726,7 +726,8 @@ function ChatInner() {
     sessionRuntime,
     sessionStatus,
     sid,
-  , harnesses]);
+    harnesses,
+  ]);
 
   useEffect(() => {
     if (!sid || !sessionLoaded) return;
