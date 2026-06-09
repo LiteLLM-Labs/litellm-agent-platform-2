@@ -99,6 +99,8 @@ export function translateOpencodeEvent(raw, ctx) {
     // skipped: it fires for the echoed user message and again as the final
     // assistant duplicate, so emitting it would double-send and echo input.
     case "message.part.delta": {
+      const thinking = thinkingText(props);
+      if (thinking) return thinkingEvent(thinking, ctx.model);
       const text =
         props.delta?.text ||
         (typeof props.delta === "string" ? props.delta : "") ||
@@ -117,16 +119,19 @@ export function translateOpencodeEvent(raw, ctx) {
       // Text updates are skipped (deltas already streamed them).
       const part = props.part || {};
       if (part.type === "tool" || part.tool) {
-        return {
-          event: "agent.tool_use",
-          data: {
-            tool: part.tool ?? null,
-            input: part.state?.input ?? null,
-            status: part.state?.status ?? null,
-          },
-        };
+        return toolPartEvent(part, ctx);
       }
       return null;
+    }
+    case "agent.thinking":
+    case "agent.reasoning":
+    case "thinking":
+    case "thinking_delta":
+    case "reasoning":
+    case "reasoning-delta": {
+      const thinking = thinkingText(props, { allowBareDelta: true });
+      if (!thinking) return null;
+      return thinkingEvent(thinking, ctx.model);
     }
     case "session.status": {
       const status = props.status?.type;
@@ -159,15 +164,103 @@ export function translateOpencodeEvent(raw, ctx) {
         props.part?.type === "tool" ||
         (typeof raw.type === "string" && raw.type.includes("tool"));
       if (isTool) {
-        return {
-          event: "agent.tool_use",
-          data: {
-            tool: props.part?.tool ?? null,
-            input: props.part?.state?.input ?? null,
-          },
-        };
+        return toolPartEvent(props.part || props, ctx);
       }
       return null;
     }
   }
+}
+
+function toolPartEvent(part, ctx) {
+  const id = toolPartId(part, ctx);
+  const name = part.tool || part.name || "tool";
+  const state = part.state || {};
+  const status = state.status || part.status || null;
+  const rawInput = state.input ?? part.input;
+  const input = status === "pending" && isEmptyObject(rawInput) ? undefined : rawInput;
+  const output = state.output ?? state.result ?? part.output ?? part.result;
+  const error = state.error ?? part.error;
+
+  if (status === "completed" || error != null || output != null) {
+    const data = {
+      tool_use_id: id,
+      name,
+      tool: name,
+      content: toolResultContent(output, error),
+    };
+    if (output !== undefined) data.output = output;
+    if (error !== undefined) data.error = error;
+    return {
+      event: "agent.tool_result",
+      data,
+    };
+  }
+
+  const data = {
+    id,
+    name,
+    tool: name,
+    status,
+  };
+  if (input !== undefined) data.input = input;
+  return {
+    event: "agent.tool_use",
+    data,
+  };
+}
+
+function toolPartId(part, ctx) {
+  return (
+    part.id ||
+    part.toolCallID ||
+    part.tool_call_id ||
+    part.callID ||
+    part.messageID ||
+    `${ctx.sessionId || "session"}:${part.tool || part.name || "tool"}`
+  );
+}
+
+function toolResultContent(output, error) {
+  const value = error ?? output ?? "";
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") return [{ type: "text", text: value }];
+  return [{ type: "json", json: value }];
+}
+
+function isEmptyObject(value) {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 0
+  );
+}
+
+function thinkingText(props, { allowBareDelta = false } = {}) {
+  const partType = props.part?.type;
+  const isThinkingPart = partType === "thinking" || partType === "reasoning";
+  return (
+    props.text ||
+    props.thinking ||
+    props.reasoning ||
+    props.delta?.thinking ||
+    props.delta?.reasoning ||
+    (isThinkingPart && props.delta?.text) ||
+    (isThinkingPart && typeof props.delta === "string" ? props.delta : "") ||
+    (allowBareDelta && typeof props.delta === "string" ? props.delta : "") ||
+    props.part?.thinking ||
+    props.part?.reasoning ||
+    ""
+  );
+}
+
+function thinkingEvent(thinking, model) {
+  return {
+    event: "agent.thinking",
+    data: {
+      thinking,
+      content: [{ type: "thinking", text: thinking }],
+      model: model || null,
+    },
+  };
 }
