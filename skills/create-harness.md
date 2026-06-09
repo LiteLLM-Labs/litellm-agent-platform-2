@@ -293,17 +293,161 @@ Copy from `templates/opencode/docs/`, replacing `opencode-anthropic-server` → 
 
 ---
 
+## Step 5b: Wire into the LAP UI (if the runtime deserves its own dropdown entry)
+
+Templates that speak the Anthropic Managed Agents API spec (`claude_managed_agents`) need **no UI changes** — users just register a new runtime, select `claude_managed_agents` as the API spec, and point the base URL at the new server.
+
+If the runtime should appear as its own named option in the runtime creation dropdown (like opencode does), add it to **4 spots** in `src/ui/src/`:
+
+### 1. `app/runtimes/page.tsx` — add to `SPEC_DEFAULTS`
+
+```ts
+const SPEC_DEFAULTS: Record<string, string> = {
+  claude_managed_agents: "https://api.anthropic.com",
+  opencode: "http://127.0.0.1:4096",
+  <name>: "http://127.0.0.1:<default-port>",   // ← add
+};
+```
+
+### 2. `app/runtimes/page.tsx` — add to `API_SPEC_LABELS`
+
+```ts
+const API_SPEC_LABELS: Record<string, string> = {
+  claude_managed_agents: "Claude Managed Agents",
+  opencode: "OpenCode",
+  <name>: "<Display Name>",   // ← add
+};
+```
+
+### 3. `app/runtimes/page.tsx` — add `<SelectItem>` to the dropdown
+
+```tsx
+<SelectItem value="claude_managed_agents">Claude Managed Agents</SelectItem>
+<SelectItem value="opencode">OpenCode</SelectItem>
+<SelectItem value="<name>"><Display Name></SelectItem>  {/* ← add */}
+```
+
+### 4. `app/runtimes/page.tsx` — add to `harnessIconId`
+
+```ts
+function harnessIconId(alias: string): string {
+  if (alias === "claude_managed_agents") return "claude";
+  if (alias === "opencode") return "opencode";
+  if (alias === "<name>") return "<name>";   // ← add (if brand icon exists)
+  return "default";
+}
+```
+
+### 5. `components/brand-icons.tsx` — add brand icon (optional)
+
+If a logo SVG is available, import and register it:
+
+```ts
+import <Name>Icon from "./icons/<name>.svg";
+// ...
+export const brandIcons = {
+  opencode: OpenCodeIcon,
+  <name>: <Name>Icon,   // ← add
+};
+```
+
+If no icon is available, skip this step — `harnessIconId` falling through to `"default"` is fine.
+
+---
+
 ## Step 6: Verify
+
+### 6.1 Syntax and build
 
 ```bash
 node --check templates/<name>/src/index.mjs
 node --check templates/<name>/src/runtime.mjs
 docker build --platform linux/amd64 -t <name>-server-test templates/<name>/
+```
 
-# If you can run it locally:
-LITELLM_BASE_URL=... LITELLM_API_KEY=... node templates/<name>/src/index.mjs &
+### 6.2 Start the server locally
+
+```bash
+cd templates/<name>
+npm install
+LITELLM_BASE_URL=<gateway>/v1 LITELLM_API_KEY=<key> LITELLM_MODELS=claude-sonnet-4-6 \
+  node src/index.mjs
+```
+
+Confirm `GET http://localhost:8080/health` returns `{"ok":true,"<name>":true}`.
+
+### 6.3 Add to LAP as a runtime
+
+In the LAP UI: **AI Gateway → Agent Runtimes → Add Runtime**
+
+| Field | Value |
+|-------|-------|
+| Alias | `<name>-local` |
+| API Spec | `claude_managed_agents` (or `<name>` if you added a UI entry) |
+| API Base | `http://localhost:8080` |
+| API Key | any non-empty string (e.g. `test`) |
+
+Save it.
+
+### 6.4 Hello world test (API)
+
+Run the end-to-end test against the running server:
+
+```bash
+BASE=http://localhost:8080 MODEL=claude-sonnet-4-6
+
+# Health
+curl -s $BASE/health
+
+# Create agent
+AGENT_ID=$(curl -sf -X POST $BASE/v1/agents \
+  -H "Content-Type: application/json" \
+  -d '{"name":"test","model":"claude-sonnet-4-6","system":"You are helpful."}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+echo "agent: $AGENT_ID"
+
+# Create session
+SESSION_ID=$(curl -sf -X POST $BASE/v1/sessions \
+  -H "Content-Type: application/json" \
+  -d "{\"agent\":\"$AGENT_ID\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+echo "session: $SESSION_ID"
+
+# Open SSE stream
+SSE_LOG=$(mktemp)
+curl -sN $BASE/v1/sessions/$SESSION_ID/events/stream \
+  -H "Accept: text/event-stream" > $SSE_LOG &
+sleep 1
+
+# Send message
+curl -sf -X POST $BASE/v1/sessions/$SESSION_ID/events \
+  -H "Content-Type: application/json" \
+  -d '{"events":[{"type":"user.message","content":"say hello world"}]}' > /dev/null
+
+# Wait for idle and print reply
+for i in $(seq 1 60); do sleep 1; grep -qa 'session.status_idle' $SSE_LOG && break; done
+python3 -c "
+ev=None
+for l in open('$SSE_LOG'):
+    l=l.strip()
+    if l.startswith('event:'): ev=l[6:].strip()
+    elif l.startswith('data:') and ev=='agent.message':
+        import json
+        for b in json.loads(l[5:]).get('content',[]): print(b.get('text',''),end='')
+print()
+"
+kill %1 2>/dev/null; rm -f $SSE_LOG
+```
+
+Expected: a short reply from the model (e.g. `Hello, World! 👋`). If the reply is empty, check `session.error` events in the SSE log and server logs for the root cause.
+
+### 6.5 Hello world test via smoke script
+
+```bash
 BASE=http://localhost:8080 MODEL=claude-sonnet-4-6 templates/<name>/scripts/smoke.sh
 ```
+
+All steps should pass (health, agent create, session create, message send, `agent.message` received, `session.status_idle` received).
 
 ---
 
