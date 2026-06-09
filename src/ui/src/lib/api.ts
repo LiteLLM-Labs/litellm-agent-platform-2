@@ -224,7 +224,16 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 
 export async function listSessions(): Promise<OpencodeSession[]> {
   const res = await reqHarness("/session");
-  if (!res.headers.get("content-type")?.includes("application/json")) return [];
+  if (!res.ok) {
+    throw new ApiError(res.status, await res.text().catch(() => ""));
+  }
+  if (!res.headers.get("content-type")?.includes("application/json")) {
+    throw new ApiError(
+      res.status,
+      await res.text().catch(() => ""),
+      "Session list response was not JSON",
+    );
+  }
   const list = await jsonOrThrow<OpencodeSession[]>(res);
   return [...list].sort(
     (a, b) => (b.time?.created ?? 0) - (a.time?.created ?? 0),
@@ -411,11 +420,9 @@ export async function deleteProvider(providerId: string): Promise<void> {
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  try {
-    await reqHarness(`/session/${encodeURIComponent(id)}`, { method: "DELETE" });
-  } catch {
-    /* swallow */
-  }
+  await jsonOrThrow<boolean>(
+    await reqHarness(`/session/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  );
 }
 
 export interface LiteLLMHealth {
