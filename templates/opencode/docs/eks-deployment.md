@@ -300,7 +300,7 @@ curl -s http://$LB/health
 ```
 
 Point the LAP SDK at `http://$LB` with model `claude-sonnet-4-6`, or register
-the runtime in the LAP UI with the steps below.
+the runtime in the LAP UI with the [README walkthrough](../README.md#connect-from-lap).
 
 For a full end-to-end smoke test (agent → session → message → stream), use the included script:
 
@@ -309,49 +309,6 @@ BASE=http://$LB MODEL=claude-sonnet-4-6 ../scripts/smoke.sh
 ```
 
 See [`scripts/smoke.sh`](../scripts/smoke.sh) for what it covers.
-
----
-
-## 7. Connect from LAP
-
-After the EKS service is healthy, add it to the LiteLLM Agent Platform as a
-custom Anthropic Managed Agents runtime.
-
-### 7.1 Add the runtime
-
-In LAP, open **AI Gateway** → **Agent Runtimes** → **Add Runtime** and create a
-runtime with:
-
-| Field | Value |
-|-------|-------|
-| Alias | `opencode-eks-anthropic` |
-| API Spec | `claude_managed_agents` |
-| API Base | `http://$LB` or the HTTPS URL in front of the EKS load balancer |
-| API Key | Any non-empty placeholder, for example `fake-opencode-key` |
-
-The opencode template honors Anthropic-style request headers but does not
-validate this inbound key. LAP still needs a value so it can store a runtime
-credential.
-
-![Add Runtime dialog for the opencode EKS runtime](images/lap-add-runtime.png)
-
-### 7.2 Select the runtime
-
-Start a new LAP session, choose the saved agent you want to run, then select the
-`opencode-eks-anthropic` runtime. Use the Anthropic model route shown by the UI
-for this runtime.
-
-![LAP session composer with opencode-eks-anthropic selected](images/lap-select-runtime.png)
-
-### 7.3 Talk to the agent
-
-Send a first message. The session should open against the
-`opencode-eks-anthropic` runtime and stream assistant messages from the EKS
-deployment.
-
-![LAP chat session running through opencode-eks-anthropic](images/lap-chat-session.png)
-
----
 
 ## Troubleshooting
 

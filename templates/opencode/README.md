@@ -305,12 +305,43 @@ curl -s http://$LB/health   # {"ok":true,"opencode":true}
 ```
 
 Then point the LAP SDK at `http://$LB` with model `claude-sonnet-4-6`, or add
-the EKS service in LAP under **AI Gateway** → **Agent Runtimes** with:
+the EKS service in LAP with the steps below.
 
-- Alias: `opencode-eks-anthropic`
-- API Spec: `claude_managed_agents`
-- API Base: `http://$LB` or the HTTPS URL in front of the EKS load balancer
-- API Key: any non-empty placeholder, for example `fake-opencode-key`
+## Connect from LAP
 
-See the [LAP connection walkthrough](docs/eks-deployment.md#7-connect-from-lap)
-for screenshots showing runtime creation, runtime selection, and a chat session.
+After the EKS service is healthy, add it to the LiteLLM Agent Platform as a
+custom Anthropic Managed Agents runtime.
+
+### 1. Add the runtime
+
+In LAP, open **AI Gateway** → **Agent Runtimes** → **Add Runtime** and create a
+runtime with:
+
+| Field | Value |
+|-------|-------|
+| Alias | `opencode-eks-anthropic` |
+| API Spec | `claude_managed_agents` |
+| API Base | `http://$LB` or the HTTPS URL in front of the EKS load balancer |
+| API Key | Any non-empty placeholder, for example `fake-opencode-key` |
+
+The opencode template honors Anthropic-style request headers but does not
+validate this inbound key. LAP still needs a value so it can store a runtime
+credential.
+
+![Add Runtime dialog for the opencode EKS runtime](docs/images/lap-add-runtime.png)
+
+### 2. Select the runtime
+
+Start a new LAP session, choose the saved agent you want to run, then select the
+`opencode-eks-anthropic` runtime. Use the Anthropic model route shown by the UI
+for this runtime.
+
+![LAP session composer with opencode-eks-anthropic selected](docs/images/lap-select-runtime.png)
+
+### 3. Talk to the agent
+
+Send a first message. The session should open against the
+`opencode-eks-anthropic` runtime and stream assistant messages from the EKS
+deployment.
+
+![LAP chat session running through opencode-eks-anthropic](docs/images/lap-chat-session.png)
