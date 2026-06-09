@@ -5,7 +5,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
@@ -14,6 +14,8 @@ use crate::{
     proxy::{auth::master_key::require_any_gateway_key, state::AppState},
 };
 
+mod approval;
+mod catalog;
 mod definitions;
 mod factory;
 mod factory_slack;
@@ -34,66 +36,9 @@ pub const CONNECT_AGENT_TO_SLACK_MCP_ID: &str = "connect_agent_to_slack";
 pub const LIST_SLACK_AGENT_BINDINGS_MCP_ID: &str = "list_slack_agent_bindings";
 pub const LIST_SUB_AGENTS_MCP_ID: &str = "list_sub_agents";
 pub const RUN_SUB_AGENT_MCP_ID: &str = "run_sub_agent";
+pub const REQUEST_HUMAN_APPROVAL_MCP_ID: &str = "request_human_approval";
 
-#[derive(Debug, Clone, Serialize)]
-pub struct PlatformMcp {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
-}
-
-pub fn platform_mcps() -> Vec<PlatformMcp> {
-    vec![
-        PlatformMcp {
-            id: PLATFORM_SESSION_MCP_ID,
-            name: "Read platform session",
-            description: "Read persisted platform session messages for debugging and handoff.",
-        },
-        PlatformMcp {
-            id: SEND_PLATFORM_SESSION_MESSAGE_MCP_ID,
-            name: "Send platform session message",
-            description: "Send a user message into a platform session and resume that agent run.",
-        },
-        PlatformMcp {
-            id: AGENT_MEMORY_MCP_ID,
-            name: "Read/Write agent memory",
-            description: "List, read, and update DB-backed memory for a platform agent.",
-        },
-        PlatformMcp {
-            id: SEND_SLACK_MESSAGE_MCP_ID,
-            name: "Send Slack message",
-            description: "Send a channel message or DM from this agent's connected Slack bot.",
-        },
-        PlatformMcp {
-            id: CREATE_MANAGED_AGENT_MCP_ID,
-            name: "Create managed agent",
-            description: "Create a Claude managed agent from a Slack or platform request.",
-        },
-        PlatformMcp {
-            id: CONNECT_AGENT_TO_SLACK_MCP_ID,
-            name: "Connect agent to Slack",
-            description:
-                "Create a dedicated Slack app for a managed agent and return its install URL.",
-        },
-        PlatformMcp {
-            id: LIST_SLACK_AGENT_BINDINGS_MCP_ID,
-            name: "List Slack agent bindings",
-            description: "List channel bindings created by this platform agent factory.",
-        },
-        PlatformMcp {
-            id: LIST_SUB_AGENTS_MCP_ID,
-            name: "List sub-agents",
-            description: "List this agent's attached LAP sub-agents with IDs, names, and runtime.",
-        },
-        PlatformMcp {
-            id: RUN_SUB_AGENT_MCP_ID,
-            name: "Run sub-agent",
-            description:
-                "Run one of this agent's explicitly attached LAP sub-agents and return its session.",
-        },
-    ]
-}
-
+pub use catalog::{platform_mcps, PlatformMcp};
 pub use selection::selected_platform_mcp_ids;
 pub(crate) use selection::sub_agent_ids;
 
@@ -231,6 +176,9 @@ async fn call_tool(
         LIST_SUB_AGENTS_MCP_ID => tools::list_sub_agents(pool, agent_id).await?,
         RUN_SUB_AGENT_MCP_ID => {
             tools::run_sub_agent(state.clone(), pool.clone(), agent_id, arguments).await?
+        }
+        REQUEST_HUMAN_APPROVAL_MCP_ID => {
+            approval::request_human_approval(pool, agent_id, arguments).await?
         }
         _ => {
             return Ok(json!({

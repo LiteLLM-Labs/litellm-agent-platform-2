@@ -1,8 +1,8 @@
 use serde_json::{json, Value};
 
 use super::{
-    factory, session_management, AGENT_MEMORY_MCP_ID, LIST_SUB_AGENTS_MCP_ID, RUN_SUB_AGENT_MCP_ID,
-    SEND_SLACK_MESSAGE_MCP_ID,
+    factory, session_management, AGENT_MEMORY_MCP_ID, LIST_SUB_AGENTS_MCP_ID,
+    REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID,
 };
 
 pub fn tool_defs() -> Vec<Value> {
@@ -13,9 +13,39 @@ pub fn tool_defs() -> Vec<Value> {
         send_slack_message_tool(),
         list_sub_agents_tool(),
         run_sub_agent_tool(),
+        request_human_approval_tool(),
     ];
     tools.extend(factory::tool_defs());
     tools
+}
+
+fn request_human_approval_tool() -> Value {
+    json!({
+        "name": REQUEST_HUMAN_APPROVAL_MCP_ID,
+        "description": "Ask a human operator to approve, reject, or send feedback before continuing. The request appears in the Agent Inbox and this call returns the operator's decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short approval title shown in the inbox."
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Context, risk, and exact action the human should review."
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional LAP session ID so the inbox item can link back to the conversation."
+                },
+                "arguments": {
+                    "type": "object",
+                    "description": "Optional structured action arguments the human may edit before approving."
+                }
+            },
+            "required": ["title"]
+        }
+    })
 }
 
 fn list_sub_agents_tool() -> Value {

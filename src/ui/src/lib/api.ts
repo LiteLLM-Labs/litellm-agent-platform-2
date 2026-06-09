@@ -650,10 +650,25 @@ export interface PendingApproval {
   createdAt: number;
 }
 
+interface RawPendingApproval {
+  id: string;
+  tool?: string;
+  title?: string;
+  arguments?: Record<string, unknown>;
+  args_json?: string | null;
+  created_at?: number;
+  createdAt?: number;
+}
+
 export async function listApprovals(): Promise<PendingApproval[]> {
   const res = await req("/api/approvals");
-  const data = await jsonOrThrow<{ approvals: PendingApproval[] }>(res);
-  return data.approvals ?? [];
+  const data = await jsonOrThrow<{ approvals: RawPendingApproval[] }>(res);
+  return (data.approvals ?? []).map((approval) => ({
+    id: approval.id,
+    tool: approval.tool ?? approval.title ?? "approval",
+    arguments: approval.arguments ?? parseArgsJson(approval.args_json) ?? {},
+    createdAt: approval.createdAt ?? approval.created_at ?? 0,
+  }));
 }
 
 export async function acceptApproval(
@@ -700,10 +715,54 @@ export interface InboxItem {
   resolvedAt: number | null;
 }
 
+interface RawInboxItem {
+  id: string;
+  kind: InboxKind;
+  title: string;
+  session_id?: string | null;
+  sessionId?: string | null;
+  agent?: string | null;
+  body?: string | null;
+  args_json?: string | null;
+  args?: Record<string, unknown>;
+  status: InboxStatus;
+  feedback?: string | null;
+  created_at?: number;
+  createdAt?: number;
+  resolved_at?: number | null;
+  resolvedAt?: number | null;
+}
+
 export async function listInbox(filter: InboxFilter = "all"): Promise<InboxItem[]> {
   const res = await req(`/api/inbox?filter=${encodeURIComponent(filter)}`);
-  const data = await jsonOrThrow<{ items: InboxItem[] }>(res);
-  return data.items ?? [];
+  const data = await jsonOrThrow<{ items: RawInboxItem[] }>(res);
+  return (data.items ?? []).map(normalizeInboxItem);
+}
+
+function normalizeInboxItem(item: RawInboxItem): InboxItem {
+  return {
+    id: item.id,
+    kind: item.kind,
+    title: item.title,
+    sessionId: item.sessionId ?? item.session_id ?? null,
+    agent: item.agent ?? null,
+    body: item.body ?? null,
+    args: item.args ?? parseArgsJson(item.args_json),
+    status: item.status,
+    feedback: item.feedback ?? null,
+    createdAt: item.createdAt ?? item.created_at ?? 0,
+    resolvedAt: item.resolvedAt ?? item.resolved_at ?? null,
+  };
+}
+
+function parseArgsJson(argsJson?: string | null): Record<string, unknown> | undefined {
+  if (!argsJson) return undefined;
+  try {
+    const parsed = JSON.parse(argsJson);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Mark an inbox issue done. */
