@@ -2,6 +2,7 @@ pub mod admin;
 pub mod discover;
 pub mod proxy;
 pub mod public;
+pub mod settings;
 pub mod tools;
 pub mod user_credentials;
 

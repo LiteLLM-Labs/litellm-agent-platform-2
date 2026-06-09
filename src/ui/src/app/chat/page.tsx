@@ -33,10 +33,11 @@ import { Composer } from "@/components/composer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sidebar } from "@/components/sidebar";
 import { InspectorPanel } from "@/components/inspector-panel";
-import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, interruptSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel, listRuntimeEvents } from "@/lib/api";
+import { getMessages, getSession, createSession, deleteSession, subscribeRuntimeEvents, listModels, abortSession, interruptSession, listAgents, listApprovals, acceptApproval, rejectApproval, sendMessageWithRuntimeModel, listRuntimeEvents, listRuntimeHarnesses } from "@/lib/api";
 import type { PendingApproval, RuntimeAgentEvent } from "@/lib/api";
 import { ToolApprovalPanel } from "@/components/tool-approval-panel";
-import type { Agent, AgentRuntimeId, HarnessMessage } from "@/lib/types";
+import type { Agent, AgentRuntimeId, HarnessMessage, RuntimeHarness, BuiltinRuntimeId } from "@/lib/types";
+import { resolveApiSpec } from "@/lib/types";
 import type { Frame } from "@/components/inspector-panel";
 import SessionsPage from "../sessions/page";
 
@@ -72,11 +73,13 @@ function runtimeLabel(runtime?: string): string {
   return BUILTIN_AGENTS[runtime ?? ""] ?? runtime ?? "Claude Code";
 }
 
-function runtimeModelId(runtime?: AgentRuntimeId): string | null {
-  if (runtime === "claude_managed_agents") return "anthropic/*";
-  if (runtime === "cursor") return "cursor/*";
-  if (runtime === "gemini_antigravity") return "gemini/*";
-  if (runtime === "opencode") return "opencode/*";
+function runtimeModelId(alias?: string, harnesses: RuntimeHarness[] = []): string | null {
+  if (!alias) return null;
+  const spec = resolveApiSpec(alias, harnesses);
+  if (spec === "claude_managed_agents") return "anthropic/*";
+  if (spec === "cursor") return "cursor/*";
+  if (spec === "gemini_antigravity") return "gemini/*";
+  if (spec === "opencode") return "opencode/*";
   return null;
 }
 
@@ -454,6 +457,7 @@ function ChatInner() {
   const [runtimeStreamVersion, setRuntimeStreamVersion] = useState(0);
   const [sessionHarness, setSessionHarness] = useState<string>("claude-code");
   const [sessionRuntime, setSessionRuntime] = useState<AgentRuntimeId | undefined>();
+  const [harnesses, setHarnesses] = useState<RuntimeHarness[]>([]);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [providerSessionId, setProviderSessionId] = useState<string | undefined>();
   const [providerUrl, setProviderUrl] = useState<string | undefined>();
@@ -513,9 +517,9 @@ function ChatInner() {
   }, [messages, queuedPrompts, runtimeMessages, sessionRuntime, sid]);
   const hasStarted = Boolean(displayMessages && displayMessages.length > 0);
   const modelOptions = useMemo(() => {
-    const runtimeModel = runtimeModelId(sessionRuntime);
+    const runtimeModel = runtimeModelId(sessionRuntime, harnesses);
     return runtimeModel ? [runtimeModel, ...models.filter((item) => item !== runtimeModel)] : models;
-  }, [models, sessionRuntime]);
+  }, [models, sessionRuntime, harnesses]);
 
   const onCopyPrompt = useCallback(() => {
     if (!activePrompt) return;
@@ -535,9 +539,9 @@ function ChatInner() {
   }, []);
 
   useEffect(() => {
-    const runtimeModel = runtimeModelId(sessionRuntime);
+    const runtimeModel = runtimeModelId(sessionRuntime, harnesses);
     if (runtimeModel) setModel(runtimeModel);
-  }, [models, sessionRuntime]);
+  }, [models, sessionRuntime, harnesses]);
 
   // Fetch session metadata to get the locked agent
   useEffect(() => {
@@ -572,6 +576,7 @@ function ChatInner() {
   // Fetch saved agents for dropdown
   useEffect(() => {
     listAgents().then(setSavedAgents).catch(() => {});
+    listRuntimeHarnesses().then(setHarnesses).catch(() => {});
   }, []);
 
   const onHarnessChange = useCallback(async (next: string) => {
@@ -670,12 +675,13 @@ function ChatInner() {
       text,
       model,
       runtime: sessionRuntime,
+      apiSpec: resolveApiSpec(sessionRuntime ?? "", harnesses),
     }).catch((err) => {
       if (activeSessionRef.current !== sid) return;
       setError(err instanceof Error ? err.message : String(err));
       setSessionStatus("idle");
     });
-  }, [model, queueRuntimePrompt, sessionRuntime, sessionStatus, sid]);
+  }, [model, queueRuntimePrompt, sessionRuntime, sessionStatus, sid, harnesses]);
 
   const cancelQueuedPrompt = useCallback((id: string) => {
     setQueuedPrompts((current) => current.filter((prompt) => prompt.id !== id));
@@ -700,6 +706,7 @@ function ChatInner() {
         text: prompt.text,
         model,
         runtime: sessionRuntime,
+        apiSpec: resolveApiSpec(sessionRuntime ?? "", harnesses),
       });
       if (activeSessionRef.current === sid) {
         setRuntimeStreamVersion((version) => version + 1);
@@ -715,6 +722,7 @@ function ChatInner() {
     }
   }, [
     beginRuntimeTurn,
+    harnesses,
     interruptingQueuedPromptId,
     model,
     queuedPrompts,
@@ -761,6 +769,7 @@ function ChatInner() {
         text: autostartPrompt,
         model,
         runtime: sessionRuntime,
+        apiSpec: resolveApiSpec(sessionRuntime ?? "", harnesses),
       })
         .then(() => {
           if (activeSessionRef.current !== sid) return;
@@ -778,7 +787,7 @@ function ChatInner() {
       cancelled = true;
       unsub?.();
     };
-  }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, runtimeStreamVersion]);
+  }, [sid, sessionLoaded, refetch, appendRuntimeEvent, mergeRuntimeEventsAndStatus, autostartPrompt, beginRuntimeTurn, model, router, sessionRuntime, runtimeStreamVersion, harnesses]);
 
   useEffect(() => {
     if (!sid || !sessionRuntime || sessionStatus !== "busy") return;

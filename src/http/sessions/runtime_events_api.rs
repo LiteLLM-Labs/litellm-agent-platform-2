@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 
 use crate::{
+    agents::runs::AgentRunStatus,
     callbacks::events::CallbackEventPayload,
     db::managed_agents::{runtime_events, sessions},
     errors::GatewayError,
@@ -42,8 +43,9 @@ pub async fn runtime_events(
     let runtime = row.runtime.as_deref().ok_or_else(|| {
         GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
-    let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, pool, &row).await?;
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await?;
+    let client = runtime_sdk_client(&resolved)?;
+    register_runtime_session(&client, pool, &row, &resolved).await?;
     let provider_stream = client
         .beta()
         .sessions()
@@ -53,19 +55,42 @@ pub async fn runtime_events(
         .map_err(agent_sdk_error)?;
     let stream_pool = pool.clone();
     let stream_session_id = row.id.clone();
+    let stream_state = state.clone();
     let callbacks = state.callbacks.clone();
     let body_stream = async_stream::stream! {
         futures_util::pin_mut!(provider_stream);
+        let mut terminal_status = None;
+        let mut terminal_error = None;
         while let Some(event) = provider_stream.next().await {
             match event {
                 Ok(event) => {
+                    if let Some(status) = terminal_event_status(&event) {
+                        terminal_status = Some(status);
+                        if status == "error" {
+                            terminal_error = Some(provider_error_message(&event));
+                        }
+                    }
                     emit_runtime_event(&callbacks, &stream_session_id, &event).await;
                     yield provider_event_line(Ok(event));
                 }
-                Err(error) => yield provider_event_line::<AgentEvent>(Err(error)),
+                Err(error) => {
+                    terminal_status = Some("error");
+                    terminal_error = Some(error.to_string());
+                    yield provider_event_line::<AgentEvent>(Err(error));
+                }
             }
         }
-        let _ = sessions::repository::set_status(&stream_pool, &stream_session_id, "idle").await;
+        if let Some(status) = terminal_status {
+            let _ = sessions::repository::set_status(&stream_pool, &stream_session_id, status).await;
+            match status {
+                "idle" => stream_state.agent_runs.update_status(&stream_session_id, AgentRunStatus::Completed),
+                "error" => stream_state.agent_runs.set_error(
+                    &stream_session_id,
+                    terminal_error.unwrap_or_else(|| "managed agent interaction failed".to_owned()),
+                ),
+                _ => {}
+            }
+        }
     };
     Response::builder()
         .header("content-type", "text/event-stream")
@@ -94,8 +119,9 @@ pub async fn runtime_event_list(
     let runtime = row.runtime.as_deref().ok_or_else(|| {
         GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
-    let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, pool, &row).await?;
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await?;
+    let client = runtime_sdk_client(&resolved)?;
+    register_runtime_session(&client, pool, &row, &resolved).await?;
     let events = client
         .beta()
         .sessions()
@@ -116,8 +142,9 @@ pub(crate) async fn runtime_event_stream_for_session(
     let runtime = row.runtime.as_deref().ok_or_else(|| {
         GatewayError::InvalidConfig("session is not a runtime session".to_owned())
     })?;
-    let client = runtime_sdk_client(state, runtime).await?;
-    register_runtime_session(&client, pool, &row).await?;
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, state, runtime).await?;
+    let client = runtime_sdk_client(&resolved)?;
+    register_runtime_session(&client, pool, &row, &resolved).await?;
     client
         .beta()
         .sessions()
@@ -136,6 +163,28 @@ fn require_events_master_key(
         return Ok(());
     }
     require_master_key(headers, configured)
+}
+
+fn terminal_event_status(event: &AgentEvent) -> Option<&'static str> {
+    match event.event_type.as_str() {
+        "session.status_idle" => Some("idle"),
+        "session.error" => Some("error"),
+        _ => None,
+    }
+}
+
+fn provider_error_message(event: &AgentEvent) -> String {
+    event
+        .data
+        .get("error")
+        .and_then(|error| {
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .or_else(|| error.as_str())
+        })
+        .unwrap_or("managed agent interaction failed")
+        .to_owned()
 }
 
 async fn emit_runtime_event<T: serde::Serialize>(

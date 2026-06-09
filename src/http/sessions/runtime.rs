@@ -13,25 +13,20 @@ use crate::{
         },
     },
     errors::GatewayError,
-    http::agent_runtimes::RuntimeCredential,
     proxy::{credential_crypto, state::AppState},
-    sdk::providers,
 };
 
 use super::{
     runtime_provision::provision_runtime_session,
-    runtime_sdk::{
-        agent_sdk_error, provider_run_id, register_runtime_session, runtime_sdk_client,
-        send_events_params,
-    },
+    runtime_sdk::{agent_sdk_error, register_runtime_session, send_events_params},
     storage::persist_message,
     types::{CreateSessionRequest, SessionResponse},
 };
 
 pub(super) struct CreatedRuntimeSession {
     pub(super) runtime: String,
+    pub(super) resolved: crate::http::runtime_resolution::ResolvedRuntime,
     pub(super) agent: ManagedAgentRow,
-    pub(super) credential: RuntimeCredential,
     pub(super) environment: Value,
     pub(super) initial_user_prompt: Option<String>,
     pub(super) prompt: String,
@@ -54,12 +49,12 @@ pub(super) async fn create_runtime_session(
             return Err(error);
         }
     };
+    state.agent_runs.track_run(&created.agent.id, &row.id);
     if row.provider_run_id.is_none() {
         if let Some(prompt) = created.initial_user_prompt.as_deref() {
             execute_runtime_prompt(state.clone(), pool, row.clone(), prompt.to_owned()).await?;
         }
     }
-    state.agent_runs.track_run(&created.agent.id, &row.id);
     Ok(SessionResponse::from(row))
 }
 
@@ -110,12 +105,13 @@ async fn create_runtime_session_row(
     pool: &PgPool,
     input: CreateSessionRequest,
 ) -> Result<CreatedRuntimeSession, GatewayError> {
-    let runtime = validated_runtime(&input)?;
+    let alias = input.runtime.as_deref().unwrap_or_default();
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, state, alias).await?;
+    let runtime = resolved.alias.clone();
     let mut agent = load_agent(pool, &input).await?;
     agent.system =
         crate::db::managed_agents::skills::compose::compose_agent_system_prompt(pool, &agent)
             .await?;
-    let credential = crate::http::agent_runtimes::load_credential(state, &runtime).await?;
     let stored_environment = input.environment.clone().unwrap_or_else(|| json!({}));
     let title = input.title.clone().unwrap_or_else(|| agent.name.clone());
     let initial_user_prompt = input
@@ -143,8 +139,8 @@ async fn create_runtime_session_row(
     let prompt = runtime_prompt(input.prompt, &agent);
     Ok(CreatedRuntimeSession {
         runtime,
+        resolved,
         agent,
-        credential,
         environment: provision_environment,
         initial_user_prompt,
         prompt,
@@ -161,8 +157,9 @@ pub(super) async fn execute_runtime_prompt(
     let runtime = row.runtime.as_deref().ok_or_else(|| {
         GatewayError::InvalidConfig("runtime session is missing runtime".to_owned())
     })?;
-    let client = runtime_sdk_client(&state, runtime).await?;
-    register_runtime_session(&client, pool, &row).await?;
+    let resolved = crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await?;
+    let client = super::runtime_sdk::lap_from_credential(&resolved)?;
+    register_runtime_session(&client, pool, &row, &resolved).await?;
     state
         .agent_runs
         .update_status(&row.id, crate::agents::runs::AgentRunStatus::Running);
@@ -173,33 +170,50 @@ pub(super) async fn execute_runtime_prompt(
         .send(&row.id, send_events_params(prompt))
         .await
         .map_err(agent_sdk_error)?;
-    if let Some(run_id) = provider_run_id(runtime, &sent.raw) {
+    if let Some(run_id) = resolved.adapter.provider_run_id_from_agent_raw(&sent.raw) {
         let status = provider_run_status(&sent.raw);
         sessions::repository::set_provider_run(pool, &row.id, &run_id, status).await?;
-        if status == "idle" {
-            state
-                .agent_runs
-                .update_status(&row.id, crate::agents::runs::AgentRunStatus::Completed);
-        }
+        update_agent_run_status(&state, &row.id, status, &sent.raw);
     }
-    persist_send_response_events(pool, runtime, &row.id, &sent.raw).await?;
+    persist_send_response_events(pool, &resolved, &row.id, &sent.raw).await?;
     Ok(())
 }
 
 async fn persist_send_response_events(
     pool: &PgPool,
-    runtime: &str,
+    resolved: &crate::http::runtime_resolution::ResolvedRuntime,
     session_id: &str,
     raw: &Value,
 ) -> Result<(), GatewayError> {
-    let events = providers::runtime_registry()
-        .entry_for_id(runtime)
-        .map(|entry| entry.adapter.events_from_send_response_raw(raw))
-        .unwrap_or_default();
+    let events = resolved.adapter.events_from_send_response_raw(raw);
     for event in events {
         runtime_events::repository::append(pool, session_id, event).await?;
     }
     Ok(())
+}
+
+fn update_agent_run_status(state: &AppState, session_id: &str, status: &str, raw: &Value) {
+    match status {
+        "idle" => state
+            .agent_runs
+            .update_status(session_id, crate::agents::runs::AgentRunStatus::Completed),
+        "error" => state
+            .agent_runs
+            .set_error(session_id, provider_error_message(raw)),
+        _ => {}
+    }
+}
+
+fn provider_error_message(raw: &Value) -> String {
+    raw.get("error")
+        .and_then(|error| {
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .or_else(|| error.as_str())
+        })
+        .unwrap_or("managed agent interaction failed")
+        .to_owned()
 }
 
 fn provider_run_status(raw: &Value) -> &'static str {
@@ -207,17 +221,6 @@ fn provider_run_status(raw: &Value) -> &'static str {
         Some("completed") => "idle",
         Some("failed" | "cancelled" | "incomplete" | "budget_exceeded") => "error",
         _ => "running",
-    }
-}
-
-fn validated_runtime(input: &CreateSessionRequest) -> Result<String, GatewayError> {
-    let runtime = input.runtime.clone().unwrap_or_default();
-    if providers::runtime_registry().validate_id(&runtime) {
-        Ok(runtime)
-    } else {
-        Err(GatewayError::InvalidJsonMessage(format!(
-            "unsupported runtime: {runtime}"
-        )))
     }
 }
 

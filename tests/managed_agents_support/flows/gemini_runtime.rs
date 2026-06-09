@@ -30,7 +30,11 @@ async fn mount_create_agent(gemini: &MockServer) {
             "base_agent": "antigravity-preview-05-2026",
             "system_instruction": "Reply to hi with a concise greeting.",
             "description": "Gemini runtime test agent.",
-            "tools": [{ "type": "code_execution" }],
+            "tools": [
+                { "type": "code_execution" },
+                { "type": "google_search" },
+                { "type": "url_context" }
+            ],
             "base_environment": "remote"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -38,7 +42,11 @@ async fn mount_create_agent(gemini: &MockServer) {
             "base_agent": "antigravity-preview-05-2026",
             "system_instruction": "Reply to hi with a concise greeting.",
             "description": "Gemini runtime test agent.",
-            "tools": [{ "type": "code_execution" }]
+            "tools": [
+                { "type": "code_execution" },
+                { "type": "google_search" },
+                { "type": "url_context" }
+            ]
         })))
         .mount(gemini)
         .await;
@@ -93,8 +101,7 @@ async fn create_gemini_agent(fixture: &AppFixture) -> String {
             "runtime": "gemini_antigravity",
             "model": "antigravity-preview-05-2026",
             "system": "Reply to hi with a concise greeting.",
-            "description": "Gemini runtime test agent.",
-            "tools": [{ "type": "code_execution" }]
+            "description": "Gemini runtime test agent."
         })),
     )
     .await;

@@ -1,14 +1,17 @@
 mod stream;
 
+use std::{collections::HashSet, time::Duration};
+
+use async_stream::try_stream;
 use futures_util::stream as futures_stream;
 use serde_json::{json, Map, Value};
 
 use crate::sdk::agents::{
-    response_fields::id, AgentEventStream, AgentRuntime, AgentSdkError, AgentWorkspace,
-    CreateAgentParams, CreateEnvironmentParams, CreateSessionParams, DeleteAgentParams,
-    DeleteAgentResponse, Environment, GetAgentParams, Lap, ListAgentsParams, ManagedAgent,
-    ManagedAgentList, SendEventsParams, SendEventsResponse, Session, SessionContext,
-    GEMINI_ANTIGRAVITY,
+    response_fields::id, AgentEventStream, AgentModel, AgentRuntime, AgentSdkError,
+    AgentWorkspace, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
+    DeleteAgentParams, DeleteAgentResponse, Environment, GetAgentParams, Lap, ListAgentsParams,
+    ManagedAgent, ManagedAgentList, SendEventsParams, SendEventsResponse, Session,
+    SessionContext, GEMINI_ANTIGRAVITY,
 };
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
 use stream::{events_from_interaction, list_events_from_interaction};
@@ -214,15 +217,28 @@ impl RuntimeAdapter for GeminiAntigravityRuntime {
             let Some(interaction_id) = context.interaction_id else {
                 return Ok(Box::pin(futures_stream::empty()) as AgentEventStream);
             };
-            let raw = client
-                .get(
-                    AgentRuntime::GeminiAntigravity,
-                    &format!("/v1beta/interactions/{interaction_id}"),
-                )
-                .await?;
-            Ok(Box::pin(futures_stream::iter(
-                events_from_interaction(&raw).into_iter().map(Ok),
-            )) as AgentEventStream)
+            let polling_client = client.clone();
+            let stream = try_stream! {
+                let mut seen = HashSet::new();
+                loop {
+                    let raw = polling_client
+                        .get(
+                            AgentRuntime::GeminiAntigravity,
+                            &format!("/v1beta/interactions/{interaction_id}"),
+                        )
+                        .await?;
+                    for event in events_from_interaction(&raw) {
+                        if seen.insert(event_key(&event)) {
+                            yield event;
+                        }
+                    }
+                    if interaction_is_terminal(&raw) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            };
+            Ok(Box::pin(stream) as AgentEventStream)
         })
     }
 
@@ -255,9 +271,10 @@ struct GeminiContext {
 
 fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> {
     let options = params.lap_provider_options.clone();
+    let base_agent = model_id(&params.model);
     let mut body = Map::new();
     body.insert("id".to_owned(), Value::String(agent_id(&params.name)));
-    body.insert("base_agent".to_owned(), Value::String(BASE_AGENT_ID.to_owned()));
+    body.insert("base_agent".to_owned(), Value::String(base_agent));
     if !params.system.trim().is_empty() {
         body.insert(
             "system_instruction".to_owned(),
@@ -277,6 +294,18 @@ fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> 
         body.extend(options);
     }
     Ok(Value::Object(body))
+}
+
+fn model_id(model: &AgentModel) -> String {
+    let id = match model {
+        AgentModel::Id(id) => id.trim(),
+        AgentModel::Config(config) => config.id.trim(),
+    };
+    if id.is_empty() {
+        BASE_AGENT_ID.to_owned()
+    } else {
+        id.to_owned()
+    }
 }
 
 fn agent_id(name: &str) -> String {
@@ -308,13 +337,25 @@ fn base_environment(workspace: Option<AgentWorkspace>) -> Value {
     if workspace.repository.trim().is_empty() {
         return Value::String(DEFAULT_ENVIRONMENT_ID.to_owned());
     }
+    let repository = workspace.repository;
+    let ref_name = workspace.ref_name;
+    let mut source = json!({
+        "type": "repository",
+        "source": repository,
+        "target": "/workspace/repo"
+    });
+    if let Some(ref_name) = ref_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|ref_name| !ref_name.is_empty())
+    {
+        if let Some(source) = source.as_object_mut() {
+            source.insert("ref".to_owned(), Value::String(ref_name.to_owned()));
+        }
+    }
     json!({
         "type": "remote",
-        "sources": [{
-            "type": "repository",
-            "source": workspace.repository,
-            "target": "/workspace/repo"
-        }]
+        "sources": [source]
     })
 }
 
@@ -463,4 +504,15 @@ fn list_agents_path(params: ListAgentsParams) -> String {
     } else {
         format!("/v1beta/agents?{}", query.join("&"))
     }
+}
+
+fn interaction_is_terminal(raw: &Value) -> bool {
+    matches!(
+        raw.get("status").and_then(Value::as_str),
+        Some("completed" | "failed" | "cancelled" | "incomplete" | "budget_exceeded") | None
+    )
+}
+
+fn event_key(event: &crate::sdk::agents::AgentEvent) -> String {
+    serde_json::to_string(event).unwrap_or_else(|_| event.event_type.clone())
 }

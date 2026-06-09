@@ -32,6 +32,7 @@ use slack_mock::mock_slack;
 
 pub struct AppFixture {
     pub app: axum::Router,
+    pub state: Arc<AppState>,
     pub(crate) pool: PgPool,
     _e2b: MockServer,
     pub slack: MockServer,
@@ -47,8 +48,10 @@ impl AppFixture {
         reset_tables(&pool).await;
         let e2b = mock_e2b().await;
         let slack = mock_slack().await;
+        let state = build_state(pool.clone(), e2b.uri(), slack.uri());
         Some(Self {
-            app: router(build_state(pool.clone(), e2b.uri(), slack.uri())),
+            app: router(state.clone()),
+            state,
             pool,
             _e2b: e2b,
             slack,
@@ -59,7 +62,7 @@ impl AppFixture {
 fn build_state(pool: PgPool, e2b_api_base: String, slack_api_base_url: String) -> Arc<AppState> {
     let config = GatewayConfig {
         model_list: Vec::new(),
-        mcp_servers: HashMap::new(),
+        mcp_servers: Default::default(),
         general_settings: GeneralSettings {
             master_key: Some("sk-local".to_owned()),
             public_base_url: Some("http://localhost".to_owned()),
@@ -88,7 +91,7 @@ fn empty_router() -> ModelRouter {
     ModelRouter::from_config(
         &GatewayConfig {
             model_list: Vec::new(),
-            mcp_servers: HashMap::new(),
+            mcp_servers: Default::default(),
             general_settings: GeneralSettings::default(),
             slack: Default::default(),
             agents: Vec::new(),

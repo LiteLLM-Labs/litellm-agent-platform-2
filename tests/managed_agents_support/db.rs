@@ -18,6 +18,7 @@ pub async fn reset_tables(pool: &PgPool) {
           "LiteLLM_ManagedAgentsTable",
           "LiteLLM_ManagedAgentSessionsTable",
           "LiteLLM_ManagedAgentSkillsTable",
+          "LiteLLM_GatewaySettingsTable",
           "LiteLLM_SavedAgentsTable"
         CASCADE
         "#,

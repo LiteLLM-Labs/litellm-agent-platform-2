@@ -16,7 +16,11 @@ export interface OpencodeSession {
   [k: string]: unknown;
 }
 
-export type AgentRuntimeId = "claude_managed_agents" | "cursor" | "gemini_antigravity" | "opencode";
+export type AgentRuntimeId = string;
+export type BuiltinRuntimeId = "claude_managed_agents" | "cursor" | "gemini_antigravity" | "opencode";
+export function isBuiltinRuntime(id: string): id is BuiltinRuntimeId {
+  return id === "claude_managed_agents" || id === "cursor" || id === "gemini_antigravity" || id === "opencode";
+}
 
 export interface AgentRuntimeTool {
   id: string;
@@ -35,6 +39,30 @@ export interface AgentRuntime {
   connected: boolean;
   api_base?: string | null;
   masked_api_key?: string | null;
+}
+
+export interface RuntimeHarness {
+  alias: string;
+  api_spec: BuiltinRuntimeId;
+  display_name: string;
+  api_base: string;
+  is_default: boolean;
+  connected: boolean;
+  masked_api_key?: string | null;
+  tools: AgentRuntimeTool[];
+}
+
+export function resolveApiSpec(
+  alias: string,
+  harnesses: RuntimeHarness[],
+): BuiltinRuntimeId | null {
+  if (alias === "claude_managed_agents" || alias === "cursor" || alias === "gemini_antigravity" || alias === "opencode") {
+    return alias as BuiltinRuntimeId;
+  }
+  // Return null when harnesses haven't loaded yet or alias is unknown — callers
+  // must treat null as "spec not yet known" rather than silently routing to a
+  // default spec that may be wrong for this alias.
+  return harnesses.find((h) => h.alias === alias)?.api_spec ?? null;
 }
 
 export interface MessageInfo {

@@ -18,6 +18,7 @@ mod execution;
 mod runtime;
 mod runtime_events_api;
 mod runtime_inputs;
+mod runtime_mcp_validation;
 mod runtime_provision;
 mod runtime_sdk;
 mod storage;
@@ -166,14 +167,21 @@ pub async fn abort(
     let pool = db(&state, &headers)?;
     if let Ok(Some(row)) = sessions::repository::get(pool, &session_id).await {
         if let Some(runtime) = row.runtime.as_deref() {
-            if let Ok(client) = runtime_sdk_client(&state, runtime).await {
-                if register_runtime_session(&client, pool, &row).await.is_ok() {
-                    let _ = client
-                        .beta()
-                        .sessions()
-                        .events()
-                        .interrupt(&session_id)
-                        .await;
+            if let Ok(resolved) =
+                crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await
+            {
+                if let Ok(client) = runtime_sdk_client(&resolved) {
+                    if register_runtime_session(&client, pool, &row, &resolved)
+                        .await
+                        .is_ok()
+                    {
+                        let _ = client
+                            .beta()
+                            .sessions()
+                            .events()
+                            .interrupt(&session_id)
+                            .await;
+                    }
                 }
             }
         }
@@ -204,10 +212,18 @@ pub async fn interrupt(
     let Some(runtime) = row.runtime.as_deref() else {
         return Ok(StatusCode::NO_CONTENT);
     };
-    let Ok(client) = runtime_sdk_client(&state, runtime).await else {
+    let Ok(resolved) =
+        crate::http::runtime_resolution::resolve_runtime(pool, &state, runtime).await
+    else {
         return Ok(StatusCode::NO_CONTENT);
     };
-    if register_runtime_session(&client, pool, &row).await.is_ok() {
+    let Ok(client) = runtime_sdk_client(&resolved) else {
+        return Ok(StatusCode::NO_CONTENT);
+    };
+    if register_runtime_session(&client, pool, &row, &resolved)
+        .await
+        .is_ok()
+    {
         let _ = client
             .beta()
             .sessions()

@@ -10,7 +10,9 @@ import type {
   OpencodeSession,
   PlatformMcp,
   Rule,
+
   Routine,
+  RuntimeHarness,
   Skill,
   SpendLog,
   VaultKeyEntry,
@@ -309,6 +311,48 @@ export async function deleteAgentRuntimeCredential(runtime: AgentRuntimeId): Pro
   );
 }
 
+export async function listRuntimeHarnesses(): Promise<RuntimeHarness[]> {
+  const res = await req("/api/runtime-harnesses");
+  const data = await jsonOrThrow<{ harnesses: RuntimeHarness[] }>(res);
+  return data.harnesses;
+}
+
+export async function createRuntimeHarness(input: {
+  alias: string;
+  api_spec: string;
+  api_base: string;
+  api_key: string;
+}): Promise<RuntimeHarness[]> {
+  const res = await req("/api/runtime-harnesses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await jsonOrThrow<{ harnesses: RuntimeHarness[] }>(res);
+  return data.harnesses;
+}
+
+export async function updateRuntimeHarness(
+  alias: string,
+  input: { api_key?: string; api_base?: string },
+): Promise<RuntimeHarness[]> {
+  const res = await req(`/api/runtime-harnesses/${encodeURIComponent(alias)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await jsonOrThrow<{ harnesses: RuntimeHarness[] }>(res);
+  return data.harnesses;
+}
+
+export async function deleteRuntimeHarness(alias: string): Promise<void> {
+  await jsonOrThrow(
+    await req(`/api/runtime-harnesses/${encodeURIComponent(alias)}`, {
+      method: "DELETE",
+    }),
+  );
+}
+
 export async function listAgents(): Promise<Agent[]> {
   const res = await req("/api/agents");
   const data = await jsonOrThrow<{ agents: Agent[] }>(res);
@@ -500,16 +544,21 @@ export async function sendMessageWithRuntimeModel(opts: {
   sessionId: string;
   text: string;
   model: string;
-  runtime?: AgentRuntimeId | "claude_agents";
+  runtime?: string;
+  apiSpec?: string | null;  // resolved api_spec; null = harnesses not yet loaded
 }): Promise<void> {
+  // Branch on api_spec (not the raw alias) so custom Cursor/OpenCode harnesses get the right route prefix
+  const spec = opts.apiSpec ?? opts.runtime;
   const model =
-    opts.runtime === "claude_managed_agents" || opts.runtime === "claude_agents"
+    spec === "claude_managed_agents" || spec === "claude_agents"
       ? "anthropic/*"
-      : opts.runtime === "cursor"
+      : spec === "cursor"
         ? "cursor/*"
-        : opts.runtime === "gemini_antigravity"
+        : spec === "gemini_antigravity"
           ? "gemini/*"
-        : opts.model;
+          : spec === "opencode"
+            ? "opencode/*"
+            : opts.model;
   return sendMessage({ sessionId: opts.sessionId, text: opts.text, model });
 }
 
@@ -657,10 +706,25 @@ export interface PendingApproval {
   createdAt: number;
 }
 
+interface RawPendingApproval {
+  id: string;
+  tool?: string;
+  title?: string;
+  arguments?: Record<string, unknown>;
+  args_json?: string | null;
+  created_at?: number;
+  createdAt?: number;
+}
+
 export async function listApprovals(): Promise<PendingApproval[]> {
   const res = await req("/api/approvals");
-  const data = await jsonOrThrow<{ approvals: PendingApproval[] }>(res);
-  return data.approvals ?? [];
+  const data = await jsonOrThrow<{ approvals: RawPendingApproval[] }>(res);
+  return (data.approvals ?? []).map((approval) => ({
+    id: approval.id,
+    tool: approval.tool ?? approval.title ?? "approval",
+    arguments: approval.arguments ?? parseArgsJson(approval.args_json) ?? {},
+    createdAt: approval.createdAt ?? approval.created_at ?? 0,
+  }));
 }
 
 export async function acceptApproval(
@@ -707,10 +771,54 @@ export interface InboxItem {
   resolvedAt: number | null;
 }
 
+interface RawInboxItem {
+  id: string;
+  kind: InboxKind;
+  title: string;
+  session_id?: string | null;
+  sessionId?: string | null;
+  agent?: string | null;
+  body?: string | null;
+  args_json?: string | null;
+  args?: Record<string, unknown>;
+  status: InboxStatus;
+  feedback?: string | null;
+  created_at?: number;
+  createdAt?: number;
+  resolved_at?: number | null;
+  resolvedAt?: number | null;
+}
+
 export async function listInbox(filter: InboxFilter = "all"): Promise<InboxItem[]> {
   const res = await req(`/api/inbox?filter=${encodeURIComponent(filter)}`);
-  const data = await jsonOrThrow<{ items: InboxItem[] }>(res);
-  return data.items ?? [];
+  const data = await jsonOrThrow<{ items: RawInboxItem[] }>(res);
+  return (data.items ?? []).map(normalizeInboxItem);
+}
+
+function normalizeInboxItem(item: RawInboxItem): InboxItem {
+  return {
+    id: item.id,
+    kind: item.kind,
+    title: item.title,
+    sessionId: item.sessionId ?? item.session_id ?? null,
+    agent: item.agent ?? null,
+    body: item.body ?? null,
+    args: item.args ?? parseArgsJson(item.args_json),
+    status: item.status,
+    feedback: item.feedback ?? null,
+    createdAt: item.createdAt ?? item.created_at ?? 0,
+    resolvedAt: item.resolvedAt ?? item.resolved_at ?? null,
+  };
+}
+
+function parseArgsJson(argsJson?: string | null): Record<string, unknown> | undefined {
+  if (!argsJson) return undefined;
+  try {
+    const parsed = JSON.parse(argsJson);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Mark an inbox issue done. */
@@ -916,6 +1024,27 @@ export interface McpToolDef {
   name: string;
   description?: string | null;
   inputSchema?: unknown;
+}
+
+export interface McpProxyBaseUrlSetting {
+  proxy_base_url: string | null;
+  source: "database" | "config" | "unset";
+}
+
+export async function getMcpProxyBaseUrl(): Promise<McpProxyBaseUrlSetting> {
+  const res = await req("/v1/mcp/settings/proxy-base-url");
+  return jsonOrThrow<McpProxyBaseUrlSetting>(res);
+}
+
+export async function saveMcpProxyBaseUrl(
+  proxyBaseUrl: string | null,
+): Promise<McpProxyBaseUrlSetting> {
+  const res = await req("/v1/mcp/settings/proxy-base-url", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ proxy_base_url: proxyBaseUrl }),
+  });
+  return jsonOrThrow<McpProxyBaseUrlSetting>(res);
 }
 
 /** List the tools exposed by an existing (saved) MCP server. */

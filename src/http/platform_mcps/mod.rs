@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
@@ -14,6 +14,8 @@ use crate::{
     proxy::{auth::master_key::require_any_gateway_key, state::AppState},
 };
 
+mod approval;
+mod catalog;
 mod definitions;
 mod factory;
 mod factory_slack;
@@ -34,66 +36,9 @@ pub const CONNECT_AGENT_TO_SLACK_MCP_ID: &str = "connect_agent_to_slack";
 pub const LIST_SLACK_AGENT_BINDINGS_MCP_ID: &str = "list_slack_agent_bindings";
 pub const LIST_SUB_AGENTS_MCP_ID: &str = "list_sub_agents";
 pub const RUN_SUB_AGENT_MCP_ID: &str = "run_sub_agent";
+pub const REQUEST_HUMAN_APPROVAL_MCP_ID: &str = "request_human_approval";
 
-#[derive(Debug, Clone, Serialize)]
-pub struct PlatformMcp {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub description: &'static str,
-}
-
-pub fn platform_mcps() -> Vec<PlatformMcp> {
-    vec![
-        PlatformMcp {
-            id: PLATFORM_SESSION_MCP_ID,
-            name: "Read platform session",
-            description: "Read persisted platform session messages for debugging and handoff.",
-        },
-        PlatformMcp {
-            id: SEND_PLATFORM_SESSION_MESSAGE_MCP_ID,
-            name: "Send platform session message",
-            description: "Send a user message into a platform session and resume that agent run.",
-        },
-        PlatformMcp {
-            id: AGENT_MEMORY_MCP_ID,
-            name: "Read/Write agent memory",
-            description: "List, read, and update DB-backed memory for a platform agent.",
-        },
-        PlatformMcp {
-            id: SEND_SLACK_MESSAGE_MCP_ID,
-            name: "Send Slack message",
-            description: "Send a channel message or DM from this agent's connected Slack bot.",
-        },
-        PlatformMcp {
-            id: CREATE_MANAGED_AGENT_MCP_ID,
-            name: "Create managed agent",
-            description: "Create a Claude managed agent from a Slack or platform request.",
-        },
-        PlatformMcp {
-            id: CONNECT_AGENT_TO_SLACK_MCP_ID,
-            name: "Connect agent to Slack",
-            description:
-                "Create a dedicated Slack app for a managed agent and return its install URL.",
-        },
-        PlatformMcp {
-            id: LIST_SLACK_AGENT_BINDINGS_MCP_ID,
-            name: "List Slack agent bindings",
-            description: "List channel bindings created by this platform agent factory.",
-        },
-        PlatformMcp {
-            id: LIST_SUB_AGENTS_MCP_ID,
-            name: "List sub-agents",
-            description: "List this agent's attached LAP sub-agents with IDs, names, and runtime.",
-        },
-        PlatformMcp {
-            id: RUN_SUB_AGENT_MCP_ID,
-            name: "Run sub-agent",
-            description:
-                "Run one of this agent's explicitly attached LAP sub-agents and return its session.",
-        },
-    ]
-}
-
+pub use catalog::{platform_mcps, PlatformMcp};
 pub use selection::selected_platform_mcp_ids;
 pub(crate) use selection::sub_agent_ids;
 
@@ -101,6 +46,7 @@ pub fn platform_mcp_servers(
     state: &AppState,
     agent_id: &str,
     config: &Value,
+    session_id: Option<&str>,
 ) -> Result<Vec<Value>, GatewayError> {
     let ids = selected_platform_mcp_ids(config);
     if ids.is_empty() {
@@ -109,7 +55,7 @@ pub fn platform_mcp_servers(
     Ok(vec![json!({
         "name": PLATFORM_MCP_SERVER_NAME,
         "type": "url",
-        "url": platform_mcp_url(state, agent_id)?
+        "url": platform_mcp_url(state, agent_id, session_id)?
     })])
 }
 
@@ -129,24 +75,23 @@ pub fn platform_mcp_toolsets(config: &Value) -> Vec<Value> {
     })]
 }
 
-pub fn platform_mcp_url(state: &AppState, agent_id: &str) -> Result<String, GatewayError> {
-    let Some(base_url) = state
-        .config
-        .general_settings
-        .public_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return Err(GatewayError::InvalidConfig(
-            "general_settings.public_base_url is required for platform MCPs".to_owned(),
-        ));
-    };
-    Ok(format!(
+pub fn platform_mcp_url(
+    state: &AppState,
+    agent_id: &str,
+    session_id: Option<&str>,
+) -> Result<String, GatewayError> {
+    let base_url = proxy_base_url(state)?;
+    let url = format!(
         "{}/mcp/platform/{}",
         base_url.trim_end_matches('/'),
         agent_id
-    ))
+    );
+    Ok(match session_id {
+        Some(session_id) if !session_id.trim().is_empty() => {
+            format!("{url}?session_id={}", session_id.trim())
+        }
+        _ => url,
+    })
 }
 
 pub async fn list(
@@ -161,6 +106,7 @@ pub async fn serve(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(agent_id): Path<String>,
+    Query(query): Query<PlatformMcpQuery>,
     Json(request): Json<JsonRpcRequest>,
 ) -> Result<Json<Value>, GatewayError> {
     require_any_gateway_key(&headers, &state)?;
@@ -176,7 +122,14 @@ pub async fn serve(
             let Some(params) = request.params else {
                 return Ok(Json(rpc_error(request.id, -32602, "params are required")));
             };
-            let result = call_tool(state.clone(), pool, &agent_id, params).await?;
+            let result = call_tool(
+                state.clone(),
+                pool,
+                &agent_id,
+                query.session_id.as_deref(),
+                params,
+            )
+            .await?;
             json!({ "jsonrpc": "2.0", "id": request.id, "result": result })
         }
         "notifications/initialized" => json!({
@@ -193,6 +146,7 @@ async fn call_tool(
     state: Arc<AppState>,
     pool: &PgPool,
     agent_id: &str,
+    session_id: Option<&str>,
     params: Value,
 ) -> Result<Value, GatewayError> {
     let name = params
@@ -232,6 +186,9 @@ async fn call_tool(
         RUN_SUB_AGENT_MCP_ID => {
             tools::run_sub_agent(state.clone(), pool.clone(), agent_id, arguments).await?
         }
+        REQUEST_HUMAN_APPROVAL_MCP_ID => {
+            approval::request_human_approval(pool, agent_id, session_id, arguments).await?
+        }
         _ => {
             return Ok(json!({
                 "isError": true,
@@ -254,19 +211,15 @@ pub(crate) fn required_str<'a>(value: &'a Value, field: &str) -> Result<&'a str,
 }
 
 pub(super) fn public_base_url(state: &AppState) -> Result<String, GatewayError> {
-    state
-        .config
-        .general_settings
-        .public_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            GatewayError::InvalidConfig(
-                "general_settings.public_base_url is required for platform MCPs".to_owned(),
-            )
-        })
+    proxy_base_url(state)
+}
+
+fn proxy_base_url(state: &AppState) -> Result<String, GatewayError> {
+    state.resolved_mcp_proxy_base_url().ok_or_else(|| {
+        GatewayError::InvalidConfig(
+            "mcp_servers.proxy_base_url is required for platform MCPs".to_owned(),
+        )
+    })
 }
 
 fn rpc_error(id: Option<Value>, code: i32, message: &str) -> Value {
@@ -294,4 +247,9 @@ pub struct JsonRpcRequest {
     pub id: Option<Value>,
     pub method: String,
     pub params: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PlatformMcpQuery {
+    pub session_id: Option<String>,
 }

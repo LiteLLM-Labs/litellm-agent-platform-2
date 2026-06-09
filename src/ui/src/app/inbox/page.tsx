@@ -162,8 +162,13 @@ export default function InboxPage() {
   const onAccept = useCallback(
     async (id: string, args: Record<string, unknown>) => {
       setBusy(true);
+      const sessionId = items?.find((item) => item.id === id)?.sessionId ?? null;
       try {
         await acceptApproval(id, args);
+        if (sessionId) {
+          router.push(`/chat/?id=${encodeURIComponent(sessionId)}`);
+          return;
+        }
         await load(tab);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -171,14 +176,19 @@ export default function InboxPage() {
         setBusy(false);
       }
     },
-    [load, tab],
+    [items, load, router, tab],
   );
 
   const onReject = useCallback(
     async (id: string, feedback: string) => {
       setBusy(true);
+      const sessionId = items?.find((item) => item.id === id)?.sessionId ?? null;
       try {
         await rejectApproval(id, feedback);
+        if (sessionId) {
+          router.push(`/chat/?id=${encodeURIComponent(sessionId)}`);
+          return;
+        }
         await load(tab);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -186,7 +196,7 @@ export default function InboxPage() {
         setBusy(false);
       }
     },
-    [load, tab],
+    [items, load, router, tab],
   );
 
   const onResolve = useCallback(

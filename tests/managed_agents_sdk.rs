@@ -274,6 +274,7 @@ async fn creates_gemini_agent_and_invokes_interaction() {
                 "sources": [{
                     "type": "repository",
                     "source": "https://github.com/acme/app",
+                    "ref": "feature/gemini",
                     "target": "/workspace/repo"
                 }]
             }
@@ -345,7 +346,7 @@ async fn creates_gemini_agent_and_invokes_interaction() {
             env_vars: None,
             workspace: Some(AgentWorkspace {
                 repository: "https://github.com/acme/app".to_owned(),
-                ref_name: None,
+                ref_name: Some("feature/gemini".to_owned()),
                 auto_create_pr: false,
             }),
             metadata: None,
