@@ -184,7 +184,7 @@ function SessionsStart() {
                   name: title,
                   owner_id: "default",
                   description: `Started from ${runtimeLabel(selectedRuntime ?? runtimeForSession)} landing prompt.`,
-                  model: modelForApiSpec(runtimeSpec),
+                  model: runtimeSpec ? modelForApiSpec(runtimeSpec) : "claude-sonnet-4-6",
                   runtime: runtimeForSession,
                   harness: "claude-code",
                   system: "You are a helpful managed agent. Use available tools when they help complete the user's request.",
@@ -337,7 +337,7 @@ function SessionsStart() {
                 </SelectContent>
               </Select>
               <span className="hidden rounded-full border border-border bg-card px-3 py-1.5 font-mono text-xs text-muted-foreground 2xl:inline">
-                {selectedAgentIsConfigured ? "agent/*" : runtimeRoutePrefix(resolveApiSpec(runtime, harnesses))}
+                {selectedAgentIsConfigured ? "agent/*" : runtimeRoutePrefix(resolveApiSpec(runtime, harnesses) ?? "")}
               </span>
               <Button variant="ghost" size="icon-sm" disabled aria-label="Voice input (coming soon)" className="ml-auto hidden text-[#5d5a55] 2xl:inline-flex">
                 <Mic className="size-4" />

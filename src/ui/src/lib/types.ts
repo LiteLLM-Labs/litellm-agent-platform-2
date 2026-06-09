@@ -52,11 +52,17 @@ export interface RuntimeHarness {
   tools: AgentRuntimeTool[];
 }
 
-export function resolveApiSpec(alias: string, harnesses: RuntimeHarness[]): BuiltinRuntimeId {
+export function resolveApiSpec(
+  alias: string,
+  harnesses: RuntimeHarness[],
+): BuiltinRuntimeId | null {
   if (alias === "claude_managed_agents" || alias === "cursor" || alias === "opencode") {
     return alias as BuiltinRuntimeId;
   }
-  return harnesses.find((h) => h.alias === alias)?.api_spec ?? "claude_managed_agents";
+  // Return null when harnesses haven't loaded yet or alias is unknown — callers
+  // must treat null as "spec not yet known" rather than silently routing to a
+  // default spec that may be wrong for this alias.
+  return harnesses.find((h) => h.alias === alias)?.api_spec ?? null;
 }
 
 export interface MessageInfo {

@@ -545,7 +545,7 @@ export async function sendMessageWithRuntimeModel(opts: {
   text: string;
   model: string;
   runtime?: string;
-  apiSpec?: string;  // resolved api_spec for custom aliases
+  apiSpec?: string | null;  // resolved api_spec; null = harnesses not yet loaded
 }): Promise<void> {
   // Branch on api_spec (not the raw alias) so custom Cursor/OpenCode harnesses get the right route prefix
   const spec = opts.apiSpec ?? opts.runtime;

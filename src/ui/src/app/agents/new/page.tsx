@@ -915,7 +915,7 @@ function AgentDraftControls({
           </div>
         </div>
 
-        {harnesses.length > 1 && (
+        {harnesses.length >= 1 && (
           <div className="grid gap-1.5">
             <Label className="text-[#c9c0b1]">Runtime</Label>
             <Select
