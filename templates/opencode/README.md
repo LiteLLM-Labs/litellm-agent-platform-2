@@ -66,6 +66,98 @@ let mut stream = lap.beta().sessions().events().stream(&session.id).await?;
 
 > opencode, driven through the Anthropic Managed Agents SDK path, by changing only `api_base`/`api_key`.
 
+## Calling with the LAP SDK
+
+Full end-to-end example using the LiteLLM Agent Platform Rust SDK (`litellm_rust`).
+The **only** server-specific config is `anthropic_base_url` + `anthropic_api_key`;
+everything else is the SDK's normal `claude_managed_agents` flow.
+
+```rust
+use litellm_rust::sdk::agents::{
+    AgentModel, AgentRuntime, CreateAgentParams, CreateEnvironmentParams,
+    CreateSessionParams, Lap, LapConfig, SendEventsParams,
+};
+use futures_util::StreamExt;
+use serde_json::json;
+
+// 1. Point the SDK at this server (key is accepted loosely).
+let lap = Lap::new(LapConfig {
+    anthropic_api_key: Some("any-key".into()),
+    anthropic_base_url: "https://<this-server>".into(), // e.g. http://localhost:8080
+    ..LapConfig::default()
+});
+
+// 2. Create an agent. Use the gateway provider id in the model, e.g. "litellm/<model>".
+let agent = lap.beta().agents().create(CreateAgentParams {
+    lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
+    lap_provider_options: None,
+    name: "Demo".into(),
+    model: AgentModel::from("litellm/claude-sonnet-4-5"),
+    system: "You are a terse assistant.".into(),
+    description: None,
+    tools: Vec::new(),
+    mcp_servers: Vec::new(),   // e.g. [{ "name": "deepwiki", "url": "https://mcp.deepwiki.com/mcp" }]
+    env_vars: None,
+    workspace: None,
+    metadata: None,
+}).await?;
+
+// 3. Environment (a named workspace; config is optional).
+let env = lap.beta().environments().create(CreateEnvironmentParams {
+    lap_agent_runtime: AgentRuntime::ClaudeManagedAgents,
+    name: "demo-env".into(),
+    config: json!({}),
+    description: None,
+    scope: None,
+}).await?;
+
+// 4. Session bound to the agent (this provisions opencode for it).
+let session = lap.beta().sessions().create(CreateSessionParams {
+    agent: agent.id.clone(),
+    environment_id: env.id.clone(),
+    title: "demo session".into(),
+    lap_agent_runtime: Some(AgentRuntime::ClaudeManagedAgents),
+    metadata: None,
+    vault_ids: None,
+    resources: None,
+}).await?;
+
+// 5. Send a user message.
+lap.beta().sessions().events().send(&session.id, SendEventsParams {
+    events: vec![json!({
+        "type": "user.message",
+        "content": [{ "type": "text", "text": "Name the three primary colors." }]
+    })],
+}).await?;
+
+// 6. Stream the reply (Anthropic event types: agent.message, session.status_*, agent.tool_use, ...).
+let mut stream = lap.beta().sessions().events().stream(&session.id).await?;
+while let Some(Ok(event)) = stream.next().await {
+    if event.event_type == "agent.message" {
+        if let Some(blocks) = event.data.get("content").and_then(|c| c.as_array()) {
+            for b in blocks {
+                if let Some(t) = b.get("text").and_then(|t| t.as_str()) { print!("{t}"); }
+            }
+        }
+    }
+    if event.event_type == "session.status_idle" { break; }
+}
+```
+
+A runnable version lives at `tests/opencode_anthropic_server_live.rs` in the
+parent repo (a `#[ignore]`d live test). With the server running:
+
+```bash
+OPENCODE_ANTHROPIC_BASE=http://localhost:8080 \
+OPENCODE_ANTHROPIC_MODEL=litellm/claude-sonnet-4-5 \
+cargo test --test opencode_anthropic_server_live -- --ignored --nocapture
+# -> [live] >>> ASSISTANT SAID: Red, yellow, blue.
+```
+
+LAP itself needs **no** opencode-specific code — register this server's URL/key
+as a `claude_managed_agents` runtime credential and the existing agent/session
+flow drives it.
+
 ## API reference
 
 Base URL defaults to `http://localhost:8080`. All `/v1/*` calls honor `x-api-key`, `anthropic-version`, and `anthropic-beta: managed-agents-2026-04-01` (the API key is accepted loosely for the demo).
