@@ -78,7 +78,9 @@ export async function startOpencode({ port = 4096, cwd, env } = {}) {
 
   return await new Promise((resolve, reject) => {
     let settled = false;
-    const deadline = Date.now() + 30_000;
+    // Generous deadline: on small/cold instances opencode can take a while to
+    // become healthy (it installs provider adapters like @ai-sdk/anthropic).
+    const deadline = Date.now() + 120_000;
 
     proc.on("error", (err) => {
       if (settled) return;

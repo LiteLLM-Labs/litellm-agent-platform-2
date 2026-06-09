@@ -56,9 +56,34 @@ if (LITELLM_BASE_URL && LITELLM_API_KEY) {
 }
 
 const ocOpts = { port: OC_PORT, cwd: WORKDIR };
-console.log(`[boot] starting opencode on port ${OC_PORT} (cwd=${WORKDIR})`);
-let oc = await startOpencode(ocOpts);
-console.log(`[boot] opencode ready at ${oc.baseUrl}`);
+
+// Start opencode in the BACKGROUND so the web server can bind its port
+// immediately (platforms like Render kill a service that doesn't open a port
+// during boot). Handlers call ensureOpencode() and wait for readiness on demand.
+let oc = null;
+let ocStarting = null;
+function ensureOpencode() {
+  if (oc) return Promise.resolve(oc);
+  if (!ocStarting) {
+    ocStarting = (async () => {
+      console.log(`[boot] starting opencode on port ${OC_PORT} (cwd=${WORKDIR})`);
+      oc = await startOpencode(ocOpts);
+      console.log(`[boot] opencode ready at ${oc.baseUrl}`);
+      return oc;
+    })().catch((e) => {
+      ocStarting = null; // allow a later retry on the next request
+      throw e;
+    });
+  }
+  return ocStarting;
+}
+async function ocBase() {
+  return (await ensureOpencode()).baseUrl;
+}
+// kick off boot; failures are non-fatal (retried on demand) so the web port stays open.
+ensureOpencode().catch((e) =>
+  console.error("[boot] opencode start failed (will retry on demand):", e.message)
+);
 
 // opencode loads agents + mcp at boot only (no hot-reload), so after writing a
 // new/updated agent's config to disk we reboot the child to pick it up. Serialised
@@ -66,6 +91,7 @@ console.log(`[boot] opencode ready at ${oc.baseUrl}`);
 let rebootChain = Promise.resolve();
 function rebootOpencode() {
   rebootChain = rebootChain.then(async () => {
+    await ensureOpencode();
     oc = await restartOpencode(oc, ocOpts);
     console.log(`[reboot] opencode reloaded at ${oc.baseUrl}`);
   });
@@ -109,7 +135,7 @@ const wrap = (fn) => (req, res) =>
 app.get("/health", wrap(async (_req, res) => {
   let opencode = false;
   try {
-    const r = await ocFetch(oc.baseUrl, "/global/health", {});
+    const r = await ocFetch(await ocBase(), "/global/health", {});
     opencode = !!r?.ok;
   } catch {
     opencode = false;
@@ -179,7 +205,7 @@ app.post("/v1/sessions", wrap(async (req, res) => {
   const row = store.getAgent(req.body?.agent);
   if (!row) return res.status(400).json({ error: "unknown agent" });
 
-  const r = await ocFetch(oc.baseUrl, "/session", {
+  const r = await ocFetch(await ocBase(), "/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: req.body.title || row.name + " session" }),
@@ -215,7 +241,7 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
   const parts = partsFromEvents(req.body?.events || []);
   if (!parts.length) return res.status(400).json({ error: "no user.message parts" });
 
-  const r = await ocFetch(oc.baseUrl, `/session/${req.params.id}/prompt_async`, {
+  const r = await ocFetch(await ocBase(), `/session/${req.params.id}/prompt_async`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -238,7 +264,7 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
 
 // Interrupt the in-flight turn — proxies opencode's session abort.
 app.post("/v1/sessions/:id/abort", wrap(async (req, res) => {
-  const r = await ocFetch(oc.baseUrl, `/session/${req.params.id}/abort`, {
+  const r = await ocFetch(await ocBase(), `/session/${req.params.id}/abort`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
@@ -266,7 +292,7 @@ app.get("/v1/sessions/:id/events/stream", wrap(async (req, res) => {
   req.on("close", () => controller.abort());
 
   try {
-    const upstream = await ocFetch(oc.baseUrl, "/event", { signal: controller.signal });
+    const upstream = await ocFetch(await ocBase(), "/event", { signal: controller.signal });
     if (!upstream.ok || !upstream.body) {
       res.write(
         `event: session.error\ndata: ${JSON.stringify({
@@ -320,7 +346,7 @@ app.get("/v1/sessions/:id/events/stream", wrap(async (req, res) => {
 }));
 
 // ---- listen + lifecycle ---------------------------------------------------
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`[boot] agent server listening on :${PORT}`);
 });
 
