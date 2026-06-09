@@ -2,6 +2,21 @@
 
 Exposes [opencode](https://opencode.ai) through the Anthropic Managed Agents API spec. Point the LAP SDK at this server — change only `api_base`/`api_key`, no new integration code.
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ GKE / EKS                                                                   │
+│                                                                             │
+│  ┌─────────────────────┐        ┌───────────────────────┐   ┌────────────┐ │
+│  │                     │        │    Agent Server       │   │            │ │
+│  │  Agent Control      │───────▶│                       │──▶│  Sandbox   │ │
+│  │  Plane (LAP)        │        │  opencode + Claude    │   │            │ │
+│  │                     │        │        Code           │   │            │ │
+│  └─────────────────────┘        └───────────────────────┘   └────────────┘ │
+│                                                                             │
+│                         All in their environment.                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ## Quickstart
 
 ### Docker
