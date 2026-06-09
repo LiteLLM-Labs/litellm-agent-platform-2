@@ -5,7 +5,7 @@
 # environment create, session create, an SSE stream, and a user.message round-trip.
 #
 # Usage:
-#   BASE=http://localhost:8080 MODEL=anthropic/claude-sonnet-4-5 ./scripts/smoke.sh
+#   BASE=http://localhost:8080 MODEL=claude-sonnet-4-6 ./scripts/smoke.sh
 #
 # Make it executable first:  chmod +x scripts/smoke.sh
 #
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 BASE="${BASE:-http://localhost:8080}"
-MODEL="${MODEL:-anthropic/claude-sonnet-4-5}"
+MODEL="${MODEL:-claude-sonnet-4-6}"
 
 # Anthropic Managed Agents headers. The api key is accepted loosely for the demo.
 HDR=(
