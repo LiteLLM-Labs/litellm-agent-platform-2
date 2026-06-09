@@ -12,6 +12,7 @@ use super::{
     resources::Beta,
     responses::{ensure_success, response_json},
     runtime_config::{configured_http_client, runtime_configs, RuntimeConfig},
+    session_context::SessionContext,
     types::{AgentRuntime, AgentSdkError, LapConfig, ManagedSessionRef},
 };
 use crate::sdk::{providers, providers::base::runtime::RuntimeAdapter};
@@ -26,14 +27,6 @@ struct Inner {
     runtimes: HashMap<AgentRuntime, RuntimeConfig>,
     session_contexts: Mutex<HashMap<String, SessionContext>>,
     cursor_run_ids: Mutex<HashMap<String, String>>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct SessionContext {
-    pub(crate) runtime: AgentRuntime,
-    pub(crate) provider_session_id: Option<String>,
-    pub(crate) agent_id: Option<String>,
-    pub(crate) run_id: Option<String>,
 }
 
 impl Lap {
@@ -278,29 +271,5 @@ impl Lap {
                 run_id: None,
             },
         )
-    }
-}
-
-impl SessionContext {
-    pub(crate) fn cursor(agent_id: String, run_id: Option<String>) -> Self {
-        Self {
-            runtime: AgentRuntime::Cursor,
-            provider_session_id: Some(agent_id.clone()),
-            agent_id: Some(agent_id),
-            run_id,
-        }
-    }
-
-    pub(crate) fn gemini(
-        environment_id: String,
-        agent_id: String,
-        interaction_id: Option<String>,
-    ) -> Self {
-        Self {
-            runtime: AgentRuntime::GeminiAntigravity,
-            provider_session_id: Some(environment_id),
-            agent_id: Some(agent_id),
-            run_id: interaction_id,
-        }
     }
 }

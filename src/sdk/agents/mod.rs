@@ -4,17 +4,18 @@ mod resources;
 pub(crate) mod response_fields;
 pub(crate) mod responses;
 mod runtime_config;
+mod session_context;
 mod session_events;
 mod types;
 
 pub use client::Lap;
-pub(crate) use client::SessionContext;
 pub use events::{
     parse_sse, AgentEvent, AgentEventKind, AgentEventPayload, AgentEventStream, AgentMessageData,
     AgentToolResultData, AgentToolUseData, SessionErrorData, SessionIdleData, SessionStatusData,
     SseParser,
 };
 pub use resources::{Agents, Beta, Environments, SessionEvents, Sessions};
+pub(crate) use session_context::SessionContext;
 pub use types::{
     AgentModel, AgentModelConfig, AgentRuntime, AgentRuntimeCatalogEntry, AgentSdkError,
     AgentWorkspace, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,

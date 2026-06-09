@@ -1,24 +1,25 @@
+mod agent;
+mod interaction;
 mod stream;
 
 use std::{collections::HashSet, time::Duration};
 
 use async_stream::try_stream;
 use futures_util::stream as futures_stream;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use crate::sdk::agents::{
-    response_fields::id, AgentEventStream, AgentModel, AgentRuntime, AgentSdkError,
-    AgentWorkspace, CreateAgentParams, CreateEnvironmentParams, CreateSessionParams,
-    DeleteAgentParams, DeleteAgentResponse, Environment, GetAgentParams, Lap, ListAgentsParams,
-    ManagedAgent, ManagedAgentList, SendEventsParams, SendEventsResponse, Session,
-    SessionContext, GEMINI_ANTIGRAVITY,
+    response_fields::id, AgentEventStream, AgentRuntime, AgentSdkError, CreateAgentParams,
+    CreateEnvironmentParams, CreateSessionParams, DeleteAgentParams, DeleteAgentResponse,
+    Environment, GetAgentParams, Lap, ListAgentsParams, ManagedAgent, ManagedAgentList,
+    SendEventsParams, SendEventsResponse, Session, SessionContext, GEMINI_ANTIGRAVITY,
 };
 use crate::sdk::providers::base::runtime::{AdapterFuture, RuntimeAdapter};
+use agent::{create_agent_body, list_agents_path, managed_agent};
+use interaction::{event_key, gemini_context, interaction_body, interaction_is_terminal};
 use stream::{events_from_interaction, list_events_from_interaction};
 
-const BASE_AGENT_ID: &str = "antigravity-preview-05-2026";
-const DEFAULT_ENVIRONMENT_ID: &str = "remote";
-const SUPPORTED_TOOL_TYPES: &[&str] = &["code_execution", "google_search", "url_context"];
+pub(super) const DEFAULT_ENVIRONMENT_ID: &str = "remote";
 
 pub(crate) const RUNTIME_ID: &str = GEMINI_ANTIGRAVITY;
 
@@ -263,147 +264,6 @@ impl RuntimeAdapter for GeminiAntigravityRuntime {
     }
 }
 
-struct GeminiContext {
-    agent_id: String,
-    environment_id: String,
-    interaction_id: Option<String>,
-}
-
-fn create_agent_body(params: CreateAgentParams) -> Result<Value, AgentSdkError> {
-    let options = params.lap_provider_options.clone();
-    let base_agent = model_id(&params.model);
-    let mut body = Map::new();
-    body.insert("id".to_owned(), Value::String(agent_id(&params.name)));
-    body.insert("base_agent".to_owned(), Value::String(base_agent));
-    if !params.system.trim().is_empty() {
-        body.insert(
-            "system_instruction".to_owned(),
-            Value::String(params.system),
-        );
-    }
-    if let Some(description) = params.description {
-        body.insert("description".to_owned(), Value::String(description));
-    }
-    let tools = supported_tools(params.tools);
-    if !tools.is_empty() {
-        body.insert("tools".to_owned(), Value::Array(tools));
-    }
-    let base_environment = base_environment(params.workspace);
-    body.insert("base_environment".to_owned(), base_environment);
-    if let Some(Value::Object(options)) = options {
-        body.extend(options);
-    }
-    Ok(Value::Object(body))
-}
-
-fn model_id(model: &AgentModel) -> String {
-    let id = match model {
-        AgentModel::Id(id) => id.trim(),
-        AgentModel::Config(config) => config.id.trim(),
-    };
-    if id.is_empty() {
-        BASE_AGENT_ID.to_owned()
-    } else {
-        id.to_owned()
-    }
-}
-
-fn agent_id(name: &str) -> String {
-    let mut id = String::new();
-    let mut last_was_dash = false;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            id.push(ch.to_ascii_lowercase());
-            last_was_dash = false;
-        } else if !last_was_dash && !id.is_empty() {
-            id.push('-');
-            last_was_dash = true;
-        }
-    }
-    while id.ends_with('-') {
-        id.pop();
-    }
-    if id.is_empty() {
-        "lap-agent".to_owned()
-    } else {
-        id
-    }
-}
-
-fn base_environment(workspace: Option<AgentWorkspace>) -> Value {
-    let Some(workspace) = workspace else {
-        return Value::String(DEFAULT_ENVIRONMENT_ID.to_owned());
-    };
-    if workspace.repository.trim().is_empty() {
-        return Value::String(DEFAULT_ENVIRONMENT_ID.to_owned());
-    }
-    let repository = workspace.repository;
-    let ref_name = workspace.ref_name;
-    let mut source = json!({
-        "type": "repository",
-        "source": repository,
-        "target": "/workspace/repo"
-    });
-    if let Some(ref_name) = ref_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|ref_name| !ref_name.is_empty())
-    {
-        if let Some(source) = source.as_object_mut() {
-            source.insert("ref".to_owned(), Value::String(ref_name.to_owned()));
-        }
-    }
-    json!({
-        "type": "remote",
-        "sources": [source]
-    })
-}
-
-fn supported_tools(tools: Vec<Value>) -> Vec<Value> {
-    tools
-        .into_iter()
-        .filter(|tool| {
-            tool.get("type")
-                .and_then(Value::as_str)
-                .is_some_and(|tool_type| SUPPORTED_TOOL_TYPES.contains(&tool_type))
-        })
-        .collect()
-}
-
-fn managed_agent(raw: Value) -> Result<ManagedAgent, AgentSdkError> {
-    Ok(ManagedAgent {
-        id: id(&raw)?,
-        version: None,
-        name: raw
-            .get("display_name")
-            .or_else(|| raw.get("name"))
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        description: raw
-            .get("description")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        model: raw
-            .get("base_agent")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        system: raw
-            .get("system_instruction")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        tools: raw
-            .get("tools")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
-        mcp_servers: Vec::new(),
-        metadata: None,
-        created_at: None,
-        updated_at: None,
-        raw,
-    })
-}
-
 fn environment_id(config: Value) -> String {
     config
         .as_str()
@@ -415,104 +275,4 @@ fn environment_id(config: Value) -> String {
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| DEFAULT_ENVIRONMENT_ID.to_owned())
-}
-
-fn interaction_body(
-    context: &GeminiContext,
-    params: &SendEventsParams,
-) -> Result<Value, AgentSdkError> {
-    let mut body = Map::new();
-    body.insert("agent".to_owned(), Value::String(context.agent_id.clone()));
-    body.insert("input".to_owned(), input_from_events(&params.events)?);
-    body.insert(
-        "environment".to_owned(),
-        Value::String(context.environment_id.clone()),
-    );
-    body.insert("store".to_owned(), Value::Bool(true));
-    if let Some(interaction_id) = &context.interaction_id {
-        body.insert(
-            "previous_interaction_id".to_owned(),
-            Value::String(interaction_id.clone()),
-        );
-    }
-    Ok(Value::Object(body))
-}
-
-fn input_from_events(events: &[Value]) -> Result<Value, AgentSdkError> {
-    let mut parts = Vec::new();
-    for event in events {
-        if event.get("type").and_then(Value::as_str) != Some("user.message") {
-            continue;
-        }
-        match event.get("content") {
-            Some(Value::String(text)) => parts.push(json!({ "type": "text", "text": text })),
-            Some(Value::Array(content)) => {
-                for item in content {
-                    if let Some(text) = item.as_str() {
-                        parts.push(json!({ "type": "text", "text": text }));
-                    } else if item.is_object() {
-                        parts.push(item.clone());
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    if parts.is_empty() {
-        return Err(AgentSdkError::InvalidRequest(
-            "gemini_antigravity requires at least one user.message content block".to_owned(),
-        ));
-    }
-    if parts.len() == 1 {
-        if let Some(text) = parts[0].get("text").and_then(Value::as_str) {
-            return Ok(Value::String(text.to_owned()));
-        }
-    }
-    Ok(Value::Array(parts))
-}
-
-fn gemini_context(client: &Lap, session_id: &str) -> Result<GeminiContext, AgentSdkError> {
-    let context = client.context_for_session(session_id)?;
-    let agent_id = context
-        .as_ref()
-        .and_then(|context| context.agent_id.clone())
-        .ok_or_else(|| {
-            AgentSdkError::InvalidRequest(
-                "gemini_antigravity session is missing provider agent id".to_owned(),
-            )
-        })?;
-    Ok(GeminiContext {
-        agent_id,
-        environment_id: context
-            .as_ref()
-            .and_then(|context| context.provider_session_id.clone())
-            .unwrap_or_else(|| DEFAULT_ENVIRONMENT_ID.to_owned()),
-        interaction_id: context.and_then(|context| context.run_id),
-    })
-}
-
-fn list_agents_path(params: ListAgentsParams) -> String {
-    let mut query = Vec::new();
-    if let Some(page_size) = params.page_size {
-        query.push(format!("pageSize={page_size}"));
-    }
-    if let Some(page_token) = params.page_token {
-        query.push(format!("pageToken={page_token}"));
-    }
-    if query.is_empty() {
-        "/v1beta/agents".to_owned()
-    } else {
-        format!("/v1beta/agents?{}", query.join("&"))
-    }
-}
-
-fn interaction_is_terminal(raw: &Value) -> bool {
-    matches!(
-        raw.get("status").and_then(Value::as_str),
-        Some("completed" | "failed" | "cancelled" | "incomplete" | "budget_exceeded") | None
-    )
-}
-
-fn event_key(event: &crate::sdk::agents::AgentEvent) -> String {
-    serde_json::to_string(event).unwrap_or_else(|_| event.event_type.clone())
 }

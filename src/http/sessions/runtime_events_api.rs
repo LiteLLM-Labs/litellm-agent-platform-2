@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{Path, Query, State},
     http::HeaderMap,
     response::Response,
@@ -55,9 +55,27 @@ pub async fn runtime_events(
         .map_err(agent_sdk_error)?;
     let stream_pool = pool.clone();
     let stream_session_id = row.id.clone();
-    let stream_state = state.clone();
-    let callbacks = state.callbacks.clone();
-    let body_stream = async_stream::stream! {
+    let body_stream = provider_body_stream(
+        provider_stream,
+        stream_pool,
+        stream_session_id,
+        state.clone(),
+    );
+    Response::builder()
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .body(Body::from_stream(body_stream))
+        .map_err(|error| GatewayError::SandboxError(error.to_string()))
+}
+
+fn provider_body_stream(
+    provider_stream: AgentEventStream,
+    stream_pool: PgPool,
+    stream_session_id: String,
+    stream_state: Arc<AppState>,
+) -> impl futures_util::Stream<Item = Result<Bytes, Infallible>> {
+    let callbacks = stream_state.callbacks.clone();
+    async_stream::stream! {
         futures_util::pin_mut!(provider_stream);
         let mut terminal_status = None;
         let mut terminal_error = None;
@@ -91,12 +109,7 @@ pub async fn runtime_events(
                 _ => {}
             }
         }
-    };
-    Response::builder()
-        .header("content-type", "text/event-stream")
-        .header("cache-control", "no-cache")
-        .body(Body::from_stream(body_stream))
-        .map_err(|error| GatewayError::SandboxError(error.to_string()))
+    }
 }
 
 pub async fn runtime_event_list(
