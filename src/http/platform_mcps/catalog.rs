@@ -2,9 +2,9 @@ use serde::Serialize;
 
 use super::{
     AGENT_MEMORY_MCP_ID, CHECK_HUMAN_APPROVAL_MCP_ID, CONNECT_AGENT_TO_SLACK_MCP_ID,
-    CREATE_MANAGED_AGENT_MCP_ID, LIST_SLACK_AGENT_BINDINGS_MCP_ID, LIST_SUB_AGENTS_MCP_ID,
-    PLATFORM_SESSION_MCP_ID, REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID,
-    SEND_PLATFORM_SESSION_MESSAGE_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID,
+    CREATE_MANAGED_AGENT_MCP_ID, EDIT_AGENT_SKILL_MCP_ID, LIST_SLACK_AGENT_BINDINGS_MCP_ID,
+    LIST_SUB_AGENTS_MCP_ID, PLATFORM_SESSION_MCP_ID, REQUEST_HUMAN_APPROVAL_MCP_ID,
+    RUN_SUB_AGENT_MCP_ID, SEND_PLATFORM_SESSION_MESSAGE_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID,
 };
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -33,6 +33,11 @@ const CATALOG: &[PlatformMcp] = &[
         id: AGENT_MEMORY_MCP_ID,
         name: "Read/Write agent memory",
         description: "List, read, and update DB-backed memory for a platform agent.",
+    },
+    PlatformMcp {
+        id: EDIT_AGENT_SKILL_MCP_ID,
+        name: "Edit agent skill",
+        description: "List, read, and update DB-backed skills attached to this agent.",
     },
     PlatformMcp {
         id: SEND_SLACK_MESSAGE_MCP_ID,

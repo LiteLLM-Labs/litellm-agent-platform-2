@@ -23,6 +23,7 @@ pub(crate) mod factory_slack_app;
 mod factory_slack_manifest;
 mod selection;
 mod session_management;
+mod skill;
 mod slack;
 mod tools;
 
@@ -30,6 +31,7 @@ pub const PLATFORM_SESSION_MCP_ID: &str = "read_platform_session";
 pub const SEND_PLATFORM_SESSION_MESSAGE_MCP_ID: &str = "send_platform_session_message";
 pub const AGENT_MEMORY_MCP_ID: &str = "agent_memory";
 pub const SEND_SLACK_MESSAGE_MCP_ID: &str = "send_slack_message";
+pub const EDIT_AGENT_SKILL_MCP_ID: &str = "edit_agent_skill";
 pub const PLATFORM_MCP_SERVER_NAME: &str = "platform";
 pub const CREATE_MANAGED_AGENT_MCP_ID: &str = "create_managed_agent";
 pub const CONNECT_AGENT_TO_SLACK_MCP_ID: &str = "connect_agent_to_slack";
@@ -171,6 +173,7 @@ async fn call_tool(
             .await?
         }
         AGENT_MEMORY_MCP_ID => tools::agent_memory(pool, agent_id, arguments).await?,
+        EDIT_AGENT_SKILL_MCP_ID => skill::edit_agent_skill(pool, agent_id, arguments).await?,
         SEND_SLACK_MESSAGE_MCP_ID => {
             slack::send_message(state.as_ref(), pool, agent_id, arguments).await?
         }
