@@ -6,7 +6,6 @@ use wiremock::{
 
 use super::super::{request_json, request_json_raw, AppFixture};
 
-const GEMINI_AGENT_ID: &str = "gemini-runtime-agent";
 const GEMINI_INTERACTION_ID: &str = "interaction_111";
 
 pub async fn exercise_gemini_runtime_session(fixture: &AppFixture) {
@@ -21,12 +20,13 @@ pub async fn exercise_gemini_runtime_session(fixture: &AppFixture) {
 }
 
 async fn mount_create_agent(gemini: &MockServer) {
+    let gemini_agent_id = expected_gemini_agent_id();
     Mock::given(method("POST"))
         .and(path("/v1beta/agents"))
         .and(header("x-goog-api-key", "gemini-test"))
         .and(header("api-revision", "2026-05-20"))
         .and(body_json(json!({
-            "id": GEMINI_AGENT_ID,
+            "id": gemini_agent_id,
             "base_agent": "antigravity-preview-05-2026",
             "system_instruction": "Reply to hi with a concise greeting.",
             "description": "Gemini runtime test agent.",
@@ -38,7 +38,7 @@ async fn mount_create_agent(gemini: &MockServer) {
             "base_environment": "remote"
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id": GEMINI_AGENT_ID,
+            "id": gemini_agent_id,
             "base_agent": "antigravity-preview-05-2026",
             "system_instruction": "Reply to hi with a concise greeting.",
             "description": "Gemini runtime test agent.",
@@ -53,12 +53,13 @@ async fn mount_create_agent(gemini: &MockServer) {
 }
 
 async fn mount_interaction(gemini: &MockServer) {
+    let gemini_agent_id = expected_gemini_agent_id();
     Mock::given(method("POST"))
         .and(path("/v1beta/interactions"))
         .and(header("x-goog-api-key", "gemini-test"))
         .and(header("api-revision", "2026-05-20"))
         .and(body_json(json!({
-            "agent": GEMINI_AGENT_ID,
+            "agent": gemini_agent_id,
             "input": "hi",
             "environment": "remote",
             "store": true
@@ -166,4 +167,28 @@ fn interaction() -> Value {
             "content": [{ "type": "text", "text": "Hi from Gemini." }]
         }]
     })
+}
+
+fn expected_gemini_agent_id() -> String {
+    let payload = json!({
+        "description": "Gemini runtime test agent.",
+        "environment": {},
+        "model": "antigravity-preview-05-2026",
+        "system": "Reply to hi with a concise greeting.",
+        "tools": [
+            { "type": "code_execution" },
+            { "type": "google_search" },
+            { "type": "url_context" }
+        ],
+    });
+    format!("gemini-runtime-agent-{}", stable_hash(&payload.to_string()))
+}
+
+fn stable_hash(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
