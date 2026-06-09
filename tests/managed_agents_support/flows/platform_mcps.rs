@@ -34,7 +34,8 @@ async fn assert_catalog(fixture: &AppFixture) {
             "list_slack_agent_bindings",
             "list_sub_agents",
             "run_sub_agent",
-            "request_human_approval"
+            "request_human_approval",
+            "check_human_approval"
         ]
     );
 }

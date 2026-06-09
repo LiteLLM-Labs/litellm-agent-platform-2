@@ -37,6 +37,7 @@ pub const LIST_SLACK_AGENT_BINDINGS_MCP_ID: &str = "list_slack_agent_bindings";
 pub const LIST_SUB_AGENTS_MCP_ID: &str = "list_sub_agents";
 pub const RUN_SUB_AGENT_MCP_ID: &str = "run_sub_agent";
 pub const REQUEST_HUMAN_APPROVAL_MCP_ID: &str = "request_human_approval";
+pub const CHECK_HUMAN_APPROVAL_MCP_ID: &str = "check_human_approval";
 
 pub use catalog::{platform_mcps, PlatformMcp};
 pub use selection::selected_platform_mcp_ids;
@@ -189,6 +190,7 @@ async fn call_tool(
         REQUEST_HUMAN_APPROVAL_MCP_ID => {
             approval::request_human_approval(pool, agent_id, session_id, arguments).await?
         }
+        CHECK_HUMAN_APPROVAL_MCP_ID => approval::check_human_approval(pool, arguments).await?,
         _ => {
             return Ok(json!({
                 "isError": true,

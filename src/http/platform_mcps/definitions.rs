@@ -1,8 +1,9 @@
 use serde_json::{json, Value};
 
 use super::{
-    factory, session_management, AGENT_MEMORY_MCP_ID, LIST_SUB_AGENTS_MCP_ID,
-    REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID, SEND_SLACK_MESSAGE_MCP_ID,
+    factory, session_management, AGENT_MEMORY_MCP_ID, CHECK_HUMAN_APPROVAL_MCP_ID,
+    LIST_SUB_AGENTS_MCP_ID, REQUEST_HUMAN_APPROVAL_MCP_ID, RUN_SUB_AGENT_MCP_ID,
+    SEND_SLACK_MESSAGE_MCP_ID,
 };
 
 pub fn tool_defs() -> Vec<Value> {
@@ -14,6 +15,7 @@ pub fn tool_defs() -> Vec<Value> {
         list_sub_agents_tool(),
         run_sub_agent_tool(),
         request_human_approval_tool(),
+        check_human_approval_tool(),
     ];
     tools.extend(factory::tool_defs());
     tools
@@ -22,7 +24,7 @@ pub fn tool_defs() -> Vec<Value> {
 fn request_human_approval_tool() -> Value {
     json!({
         "name": REQUEST_HUMAN_APPROVAL_MCP_ID,
-        "description": "Ask a human operator to approve, reject, or send feedback before continuing. The request appears in the Agent Inbox and this call returns the operator's decision.",
+        "description": "Create an async human approval request in the Agent Inbox. This call returns immediately with a pending approval_id; continue other safe work or call check_human_approval later.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -44,6 +46,23 @@ fn request_human_approval_tool() -> Value {
                 }
             },
             "required": ["title"]
+        }
+    })
+}
+
+fn check_human_approval_tool() -> Value {
+    json!({
+        "name": CHECK_HUMAN_APPROVAL_MCP_ID,
+        "description": "Check whether a previously filed human approval request is pending, accepted, rejected, or missing.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "approval_id": {
+                    "type": "string",
+                    "description": "Approval ID returned by request_human_approval."
+                }
+            },
+            "required": ["approval_id"]
         }
     })
 }
