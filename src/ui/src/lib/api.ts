@@ -515,6 +515,10 @@ export async function abortSession(id: string): Promise<void> {
   await reqHarness(`/session/${encodeURIComponent(id)}/abort`, { method: "POST" });
 }
 
+export async function interruptSession(id: string): Promise<void> {
+  await reqHarness(`/session/${encodeURIComponent(id)}/interrupt`, { method: "POST" });
+}
+
 export async function listModels(): Promise<string[]> {
   const res = await req("/v1/models");
   if (!res.ok) return [];
