@@ -7,6 +7,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+// Serialize all opencode.json reads+writes so concurrent agent registrations
+// don't clobber each other's models (last-write-wins race condition).
+let _jsonQueue = Promise.resolve();
+function withJsonLock(fn) {
+  const next = _jsonQueue.then(fn, fn);
+  _jsonQueue = next.then(() => {}, () => {});
+  return next;
+}
+
 const execFileP = promisify(execFile);
 
 // opencode only scans custom agents (`.opencode/agent/*.md`) and per-project
@@ -38,41 +47,49 @@ export async function restartOpencode(handle, opts) {
 // calls through a LiteLLM gateway (via opencode's native Anthropic adapter,
 // which POSTs to {baseURL}/messages). Models are addressed as "<id>/<model>".
 // Merges into any existing config (preserves mcp). No-op if baseURL/apiKey unset.
-export async function writeProviderConfig(cwd, { id = "litellm", name = "LiteLLM", baseURL, apiKey, models = [] }) {
-  if (!baseURL || !apiKey) return;
-  const file = path.join(cwd, "opencode.json");
-  let obj = {};
-  try {
-    obj = JSON.parse(await readFile(file, "utf8"));
-  } catch {
-    obj = {};
-  }
-  obj.provider = obj.provider || {};
-  obj.provider[id] = {
-    npm: "@ai-sdk/anthropic",
-    name,
-    options: { baseURL, apiKey },
-    models: Object.fromEntries(models.map((m) => [m, {}])),
-  };
-  await mkdir(cwd, { recursive: true });
-  await writeFile(file, JSON.stringify(obj, null, 2));
+export function writeProviderConfig(cwd, { id = "litellm", name = "LiteLLM", baseURL, apiKey, models = [] }) {
+  if (!baseURL || !apiKey) return Promise.resolve();
+  return withJsonLock(async () => {
+    const file = path.join(cwd, "opencode.json");
+    let obj = {};
+    try {
+      obj = JSON.parse(await readFile(file, "utf8"));
+    } catch {
+      obj = {};
+    }
+    obj.provider = obj.provider || {};
+    // Merge: preserve any models added by ensureProviderModel so a restart
+    // doesn't wipe model entries registered for agents already in SQLite.
+    const existing = obj.provider[id]?.models || {};
+    obj.provider[id] = {
+      npm: "@ai-sdk/anthropic",
+      name,
+      options: { baseURL, apiKey },
+      models: { ...existing, ...Object.fromEntries(models.map((m) => [m, {}])) },
+    };
+    await mkdir(cwd, { recursive: true });
+    await writeFile(file, JSON.stringify(obj, null, 2));
+  });
 }
 
-export async function ensureProviderModel(cwd, { providerID, modelID }) {
-  if (!providerID || !modelID) return;
-  const file = path.join(cwd, "opencode.json");
-  let obj = {};
-  try {
-    obj = JSON.parse(await readFile(file, "utf8"));
-  } catch {
-    obj = {};
-  }
-  const provider = obj.provider?.[providerID];
-  if (!provider) return;
-  provider.models = provider.models || {};
-  provider.models[modelID] = provider.models[modelID] || {};
-  await mkdir(cwd, { recursive: true });
-  await writeFile(file, JSON.stringify(obj, null, 2));
+export function ensureProviderModel(cwd, { providerID, modelID }) {
+  if (!providerID || !modelID) return Promise.resolve();
+  return withJsonLock(async () => {
+    const file = path.join(cwd, "opencode.json");
+    let obj = {};
+    try {
+      obj = JSON.parse(await readFile(file, "utf8"));
+    } catch {
+      obj = {};
+    }
+    const provider = obj.provider?.[providerID];
+    if (!provider) return;
+    provider.models = provider.models || {};
+    if (provider.models[modelID]) return; // already registered, skip write
+    provider.models[modelID] = {};
+    await mkdir(cwd, { recursive: true });
+    await writeFile(file, JSON.stringify(obj, null, 2));
+  });
 }
 
 // Spawns `opencode serve`, returns once health check passes.
@@ -174,7 +191,8 @@ export async function provisionAgent(cwd, agent) {
 // Rebuild the `mcp` section of <cwd>/opencode.json from the union of all agents'
 // mcp_servers. Replacing (not merging) avoids servers from one agent leaking
 // into later sessions. Preserves other config (provider, etc.).
-export async function writeMcpConfig(cwd, agents) {
+export function writeMcpConfig(cwd, agents) {
+  return withJsonLock(async () => {
   const configPath = path.join(cwd, "opencode.json");
   let obj = {};
   try {
@@ -202,25 +220,27 @@ export async function writeMcpConfig(cwd, agents) {
   obj.mcp = mcp;
   await mkdir(cwd, { recursive: true });
   await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
+  }); // end withJsonLock
 }
 
 // Wire a sandbox-exec MCP server into opencode.json and DENY native bash/edit so
 // the agent runs commands/files through the sandbox (src/sandbox-mcp.mjs) instead
 // of the host. Called at boot when a sandbox provider is configured.
-export async function writeSandboxConfig(cwd, { command, env }) {
-  const configPath = path.join(cwd, "opencode.json");
-  let obj = {};
-  try {
-    obj = JSON.parse(await readFile(configPath, "utf8"));
-  } catch {
-    obj = {};
-  }
-  obj.mcp = obj.mcp || {};
-  obj.mcp.sandbox = { type: "local", command, enabled: true, environment: env, timeout: 120_000 };
-  // Global permission: no native shell / file edits; the sandbox_* tools are allowed.
-  obj.permission = { ...(obj.permission || {}), bash: "deny", edit: "deny", "sandbox_*": "allow" };
-  await mkdir(cwd, { recursive: true });
-  await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
+export function writeSandboxConfig(cwd, { command, env }) {
+  return withJsonLock(async () => {
+    const configPath = path.join(cwd, "opencode.json");
+    let obj = {};
+    try {
+      obj = JSON.parse(await readFile(configPath, "utf8"));
+    } catch {
+      obj = {};
+    }
+    obj.mcp = obj.mcp || {};
+    obj.mcp.sandbox = { type: "local", command, enabled: true, environment: env, timeout: 120_000 };
+    obj.permission = { ...(obj.permission || {}), bash: "deny", edit: "deny", "sandbox_*": "allow" };
+    await mkdir(cwd, { recursive: true });
+    await writeFile(configPath, JSON.stringify(obj, null, 2), "utf8");
+  });
 }
 
 // Thin proxy helper to the opencode child. Returns the raw fetch Response.
