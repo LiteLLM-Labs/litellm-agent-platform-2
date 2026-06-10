@@ -3,7 +3,7 @@
 // per session, and translates opencode SSE -> Anthropic event shapes.
 import express from "express";
 import crypto from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 
 import { createStore } from "./store.mjs";
 import {
@@ -135,6 +135,43 @@ function rebootOpencode() {
 ensureOpencode().catch((e) =>
   console.error("[boot] opencode start failed (will retry on demand):", e.message)
 );
+
+function startCaptureLoop(sessionId, model) {
+  (async () => {
+    try {
+      const upstream = await ocFetch(await ocBase(), "/event", {});
+      if (!upstream.ok || !upstream.body) return;
+      const decoder = new TextDecoder();
+      let buffer = "";
+      for await (const chunk of upstream.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const data = block
+            .split("\n")
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).trim())
+            .join("");
+          if (!data) continue;
+          let ev;
+          try { ev = JSON.parse(data); } catch { continue; }
+          const out = translateOpencodeEvent(ev, { sessionId, model });
+          if (!out) continue;
+          const props = ev.properties || ev;
+          const eventId = props.id ?? null;
+          store.insertSessionEvent(sessionId, out, eventId);
+          if (out.event === "session.status_idle" || out.event === "session.error") return;
+        }
+      }
+    } catch (err) {
+      if (err?.name !== "AbortError") {
+        console.error(`[capture] ${sessionId}:`, err.message);
+      }
+    }
+  })();
+}
 
 // In-memory environments registry (envId -> config).
 const environments = new Map();
@@ -283,6 +320,12 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
   const parts = partsFromEvents(req.body?.events || []);
   if (!parts.length) return res.status(400).json({ error: "no user.message parts" });
 
+  const userEventId = "usr_" + crypto.randomBytes(12).toString("hex");
+  store.insertSessionEvent(req.params.id, {
+    event: "user.message",
+    data: { content: parts },
+  }, userEventId);
+
   const r = await ocFetch(await ocBase(), `/session/${req.params.id}/prompt_async`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -301,6 +344,7 @@ app.post("/v1/sessions/:id/events", wrap(async (req, res) => {
       .json({ error: `opencode prompt failed (${r.status})`, detail: detail.slice(0, 500) });
   }
 
+  startCaptureLoop(req.params.id, agent?.model || null);
   res.status(202).json({ ok: true });
 }));
 
@@ -314,9 +358,8 @@ app.post("/v1/sessions/:id/abort", wrap(async (req, res) => {
   res.status(r.ok ? 200 : r.status).json({ aborted: r.ok });
 }));
 
-// Historical events (stub).
-app.get("/v1/sessions/:id/events", wrap(async (_req, res) => {
-  res.json({ data: [] });
+app.get("/v1/sessions/:id/events", wrap(async (req, res) => {
+  res.json({ data: store.listSessionEvents(req.params.id) });
 }));
 
 // Live SSE stream: opencode events -> Anthropic event shapes.
@@ -373,6 +416,9 @@ app.get("/v1/sessions/:id/events/stream", wrap(async (req, res) => {
 
         const out = translateOpencodeEvent(ev, { sessionId: req.params.id, model });
         if (out && out.event) {
+          const props2 = ev.properties || ev;
+          const eventId2 = props2.id ?? null;
+          store.insertSessionEvent(req.params.id, out, eventId2);
           res.write(`event: ${out.event}\ndata: ${JSON.stringify(out.data)}\n\n`);
         }
       }
@@ -386,6 +432,12 @@ app.get("/v1/sessions/:id/events/stream", wrap(async (req, res) => {
     try { res.end(); } catch {}
   }
 }));
+
+// ---- QA UI ----------------------------------------------------------------
+app.get("/qa", (_req, res) => {
+  const html = readFileSync(new URL("../../qa.html", import.meta.url), "utf8");
+  res.type("html").send(html);
+});
 
 // ---- listen + lifecycle ---------------------------------------------------
 const server = app.listen(PORT, "0.0.0.0", () => {

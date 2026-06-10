@@ -58,6 +58,15 @@ export function createStore(dbPath) {
       agent_id TEXT,
       created_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS session_events (
+      seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      event_id   TEXT,
+      event_json TEXT NOT NULL,
+      UNIQUE(session_id, event_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_se_session
+      ON session_events(session_id, seq);
   `);
 
   const stmts = {
@@ -150,6 +159,28 @@ export function createStore(dbPath) {
     stmts.unbind.run(sessionId);
   }
 
+  function insertSessionEvent(sessionId, eventObj, eventId) {
+    const json = JSON.stringify(eventObj);
+    if (eventId != null) {
+      db.prepare(`
+        INSERT OR IGNORE INTO session_events (session_id, event_id, event_json)
+        VALUES (?, ?, ?)
+      `).run(sessionId, eventId, json);
+    } else {
+      db.prepare(`
+        INSERT INTO session_events (session_id, event_json)
+        VALUES (?, ?)
+      `).run(sessionId, json);
+    }
+  }
+
+  function listSessionEvents(sessionId) {
+    return db
+      .prepare(`SELECT event_json FROM session_events WHERE session_id = ? ORDER BY seq ASC`)
+      .all(sessionId)
+      .map((r) => JSON.parse(r.event_json));
+  }
+
   return {
     createAgent,
     getAgent,
@@ -159,5 +190,7 @@ export function createStore(dbPath) {
     bindSession,
     getSessionAgent,
     unbindSession,
+    insertSessionEvent,
+    listSessionEvents,
   };
 }
