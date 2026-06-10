@@ -6,10 +6,12 @@ pub const CLAUDE_MANAGED_AGENTS: &str = "claude_managed_agents";
 pub const CURSOR: &str = "cursor";
 pub const GEMINI_ANTIGRAVITY: &str = "gemini_antigravity";
 pub const OPENCODE: &str = "opencode";
+pub const ELASTIC_AGENT_BUILDER: &str = "elastic_agent_builder";
 pub const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 pub const DEFAULT_CURSOR_BASE_URL: &str = "https://api.cursor.com";
 pub const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 pub const DEFAULT_OPENCODE_BASE_URL: &str = "http://127.0.0.1:4096";
+pub const DEFAULT_ELASTIC_BASE_URL: &str = "http://localhost:5601";
 pub const GEMINI_API_REVISION: &str = "2026-05-20";
 pub const MANAGED_AGENTS_BETA: &str = "managed-agents-2026-04-01";
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -20,6 +22,7 @@ pub enum AgentRuntime {
     Cursor,
     GeminiAntigravity,
     OpenCode,
+    ElasticAgentBuilder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +34,7 @@ pub struct AgentRuntimeCatalogEntry {
 }
 
 impl AgentRuntime {
-    pub const CATALOG: [AgentRuntimeCatalogEntry; 4] = [
+    pub const CATALOG: [AgentRuntimeCatalogEntry; 5] = [
         AgentRuntimeCatalogEntry {
             runtime: Self::ClaudeManagedAgents,
             id: CLAUDE_MANAGED_AGENTS,
@@ -56,6 +59,12 @@ impl AgentRuntime {
             name: "OpenCode",
             default_api_base: DEFAULT_OPENCODE_BASE_URL,
         },
+        AgentRuntimeCatalogEntry {
+            runtime: Self::ElasticAgentBuilder,
+            id: ELASTIC_AGENT_BUILDER,
+            name: "Elastic Agent Builder",
+            default_api_base: DEFAULT_ELASTIC_BASE_URL,
+        },
     ];
 
     pub fn catalog() -> &'static [AgentRuntimeCatalogEntry] {
@@ -68,6 +77,7 @@ impl AgentRuntime {
             Self::Cursor => CURSOR,
             Self::GeminiAntigravity => GEMINI_ANTIGRAVITY,
             Self::OpenCode => OPENCODE,
+            Self::ElasticAgentBuilder => ELASTIC_AGENT_BUILDER,
         }
     }
 
@@ -97,6 +107,7 @@ impl TryFrom<&str> for AgentRuntime {
             CURSOR => Ok(Self::Cursor),
             GEMINI_ANTIGRAVITY => Ok(Self::GeminiAntigravity),
             OPENCODE => Ok(Self::OpenCode),
+            ELASTIC_AGENT_BUILDER => Ok(Self::ElasticAgentBuilder),
             runtime => Err(AgentSdkError::UnsupportedRuntime(runtime.to_owned())),
         }
     }

@@ -23,6 +23,7 @@ enum RuntimeAuth {
         password: Option<String>,
         bearer_token: Option<String>,
     },
+    ElasticApiKey(String),
 }
 
 impl RuntimeConfig {
@@ -51,6 +52,11 @@ impl RuntimeConfig {
                     None => request,
                 },
             },
+            // Kibana requires `Authorization: ApiKey <key>` plus the `kbn-xsrf`
+            // header on every mutating request to the Agent Builder APIs.
+            RuntimeAuth::ElasticApiKey(api_key) => request
+                .header(header::AUTHORIZATION, format!("ApiKey {api_key}"))
+                .header("kbn-xsrf", "true"),
         }
     }
 
@@ -104,6 +110,15 @@ pub(super) fn runtime_configs(config: LapConfig) -> HashMap<AgentRuntime, Runtim
                     password: config.opencode_password,
                     bearer_token: config.opencode_api_key,
                 },
+            },
+        );
+    }
+    if let Some(api_key) = config.elastic_api_key {
+        runtimes.insert(
+            AgentRuntime::ElasticAgentBuilder,
+            RuntimeConfig {
+                base_url: config.elastic_base_url.trim_end_matches('/').to_owned(),
+                auth: RuntimeAuth::ElasticApiKey(api_key),
             },
         );
     }

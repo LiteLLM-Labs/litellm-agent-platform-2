@@ -11,9 +11,9 @@ pub use errors::AgentSdkError;
 mod runtime;
 pub use runtime::{
     AgentRuntime, AgentRuntimeCatalogEntry, ANTHROPIC_VERSION, CLAUDE_MANAGED_AGENTS, CURSOR,
-    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_CURSOR_BASE_URL, DEFAULT_GEMINI_BASE_URL,
-    DEFAULT_OPENCODE_BASE_URL, GEMINI_ANTIGRAVITY, GEMINI_API_REVISION, MANAGED_AGENTS_BETA,
-    OPENCODE,
+    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_CURSOR_BASE_URL, DEFAULT_ELASTIC_BASE_URL,
+    DEFAULT_GEMINI_BASE_URL, DEFAULT_OPENCODE_BASE_URL, ELASTIC_AGENT_BUILDER, GEMINI_ANTIGRAVITY,
+    GEMINI_API_REVISION, MANAGED_AGENTS_BETA, OPENCODE,
 };
 
 #[derive(Debug, Clone)]
@@ -28,6 +28,11 @@ pub struct LapConfig {
     pub opencode_base_url: Option<String>,
     pub opencode_username: String,
     pub opencode_password: Option<String>,
+    pub elastic_api_key: Option<String>,
+    pub elastic_base_url: String,
+    /// Runtime-level default Elastic agent ID, used when an agent does not
+    /// specify its own `elastic_agent_id`.
+    pub elastic_default_agent_id: Option<String>,
 }
 
 impl LapConfig {
@@ -58,6 +63,14 @@ impl LapConfig {
             ..Self::default()
         }
     }
+
+    pub fn elastic(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        Self {
+            elastic_api_key: Some(api_key.into()),
+            elastic_base_url: base_url.into(),
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for LapConfig {
@@ -73,6 +86,9 @@ impl Default for LapConfig {
             opencode_base_url: None,
             opencode_username: "opencode".to_owned(),
             opencode_password: None,
+            elastic_api_key: None,
+            elastic_base_url: DEFAULT_ELASTIC_BASE_URL.to_owned(),
+            elastic_default_agent_id: None,
         }
     }
 }

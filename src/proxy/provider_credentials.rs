@@ -13,11 +13,13 @@ pub const CURSOR_PROVIDER_ID: &str = "cursor";
 pub const GEMINI_PROVIDER_ID: &str = "gemini";
 pub const OPENCODE_PROVIDER_ID: &str = "opencode";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+pub const ELASTIC_PROVIDER_ID: &str = "elastic";
 const DEFAULT_ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 const DEFAULT_CURSOR_BASE_URL: &str = "https://api.cursor.com";
 const DEFAULT_GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 const DEFAULT_OPENCODE_BASE_URL: &str = "http://127.0.0.1:4096";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com";
+const DEFAULT_ELASTIC_BASE_URL: &str = "http://localhost:5601";
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProviderCatalogEntry {
@@ -69,6 +71,13 @@ pub const PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
         name: "OpenCode",
         description: "OpenCode server sessions through the local runtime API",
         default_base_url: DEFAULT_OPENCODE_BASE_URL,
+        category: ProviderCategory::Runtime,
+    },
+    ProviderCatalogEntry {
+        id: ELASTIC_PROVIDER_ID,
+        name: "Elastic Agent Builder",
+        description: "Elastic Agent Builder agents through the Kibana converse API",
+        default_base_url: DEFAULT_ELASTIC_BASE_URL,
         category: ProviderCategory::Runtime,
     },
 ];

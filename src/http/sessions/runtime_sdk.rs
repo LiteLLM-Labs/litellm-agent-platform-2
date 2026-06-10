@@ -41,6 +41,10 @@ pub(super) fn lap_from_credential(
             config.opencode_api_key = Some(resolved.credential.api_key.clone());
             config.opencode_password = Some(resolved.credential.api_key.clone());
         }
+        AgentRuntime::ElasticAgentBuilder => {
+            config.elastic_api_key = Some(resolved.credential.api_key.clone());
+            config.elastic_base_url = resolved.credential.api_base.clone();
+        }
     }
     Ok(Lap::new(config))
 }

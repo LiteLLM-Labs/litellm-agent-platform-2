@@ -15,11 +15,14 @@ use crate::{
         credential_crypto,
         provider_credentials::{
             self, ProviderCredentialInput, ANTHROPIC_PROVIDER_ID, CURSOR_PROVIDER_ID,
-            GEMINI_PROVIDER_ID, OPENCODE_PROVIDER_ID,
+            ELASTIC_PROVIDER_ID, GEMINI_PROVIDER_ID, OPENCODE_PROVIDER_ID,
         },
         state::AppState,
     },
-    sdk::agents::{AgentRuntime, CLAUDE_MANAGED_AGENTS, CURSOR, GEMINI_ANTIGRAVITY, OPENCODE},
+    sdk::agents::{
+        AgentRuntime, CLAUDE_MANAGED_AGENTS, CURSOR, ELASTIC_AGENT_BUILDER, GEMINI_ANTIGRAVITY,
+        OPENCODE,
+    },
 };
 
 use super::agent_runtime_tools::{runtime_tools, RuntimeTool};
@@ -251,6 +254,7 @@ fn credential_provider_id(runtime: &str) -> Result<&'static str, GatewayError> {
         CURSOR => Ok(CURSOR_PROVIDER_ID),
         GEMINI_ANTIGRAVITY => Ok(GEMINI_PROVIDER_ID),
         OPENCODE => Ok(OPENCODE_PROVIDER_ID),
+        ELASTIC_AGENT_BUILDER => Ok(ELASTIC_PROVIDER_ID),
         _ => Err(GatewayError::InvalidConfig(format!(
             "no credential provider for runtime: {runtime}"
         ))),
