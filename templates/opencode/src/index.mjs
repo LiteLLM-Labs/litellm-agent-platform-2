@@ -3,7 +3,7 @@
 // per session, and translates opencode SSE -> Anthropic event shapes.
 import express from "express";
 import crypto from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 
 import { createStore } from "./store.mjs";
 import {
@@ -432,6 +432,12 @@ app.get("/v1/sessions/:id/events/stream", wrap(async (req, res) => {
     try { res.end(); } catch {}
   }
 }));
+
+// ---- QA UI ----------------------------------------------------------------
+app.get("/qa", (_req, res) => {
+  const html = readFileSync(new URL("../../qa.html", import.meta.url), "utf8");
+  res.type("html").send(html);
+});
 
 // ---- listen + lifecycle ---------------------------------------------------
 const server = app.listen(PORT, "0.0.0.0", () => {

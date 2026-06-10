@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Opencode Wrapper QA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #e6edf3; font-size: 13px; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #161b22; border-bottom: 1px solid #30363d; }
+  header h1 { font-size: 14px; font-weight: 600; color: #58a6ff; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #6e7681; flex-shrink: 0; }
+  .dot.ok { background: #3fb950; }
+  .dot.err { background: #f85149; }
+  .layout { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 45px); }
+  .sidebar { background: #161b22; border-right: 1px solid #30363d; overflow-y: auto; display: flex; flex-direction: column; gap: 0; }
+  .panel { border-bottom: 1px solid #30363d; }
+  .panel-title { padding: 10px 14px; font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; background: #0d1117; cursor: pointer; user-select: none; display: flex; justify-content: space-between; }
+  .panel-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  label { font-size: 11px; color: #8b949e; }
+  input, textarea, select {
+    width: 100%; padding: 6px 8px; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; color: #e6edf3; font-family: inherit; font-size: 12px; resize: vertical;
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: #58a6ff; }
+  button {
+    padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer;
+    font-family: inherit; font-size: 12px; font-weight: 500; transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: #238636; color: #fff; }
+  .btn-blue { background: #1f6feb; color: #fff; }
+  .btn-red { background: #da3633; color: #fff; }
+  .btn-ghost { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; }
+  .id-badge { font-size: 10px; color: #58a6ff; background: #1f2937; padding: 3px 6px; border-radius: 4px; word-break: break-all; line-height: 1.4; }
+  .main { display: flex; flex-direction: column; overflow: hidden; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #30363d; background: #161b22; }
+  .tab { padding: 10px 18px; cursor: pointer; font-size: 12px; color: #8b949e; border-bottom: 2px solid transparent; }
+  .tab.active { color: #e6edf3; border-bottom-color: #58a6ff; }
+  .tab-content { flex: 1; overflow: hidden; display: none; flex-direction: column; }
+  .tab-content.active { display: flex; }
+  .toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; background: #161b22; border-bottom: 1px solid #30363d; }
+  .toolbar-label { font-size: 11px; color: #8b949e; flex: 1; }
+  .event-log { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+  .event-row { display: flex; gap: 8px; align-items: flex-start; padding: 4px 6px; border-radius: 4px; }
+  .event-row:hover { background: #161b22; }
+  .event-type { flex-shrink: 0; width: 160px; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 3px; text-align: center; }
+  .ev-agent-message    { background: #1f3a52; color: #79c0ff; }
+  .ev-agent-thinking   { background: #2d2a1e; color: #e3b341; }
+  .ev-agent-tool-use   { background: #1e2f1e; color: #56d364; }
+  .ev-agent-tool-result{ background: #1e1e2f; color: #b88af8; }
+  .ev-session-idle     { background: #1a2f1a; color: #3fb950; }
+  .ev-session-error    { background: #2f1a1a; color: #f85149; }
+  .ev-session-running  { background: #1a1f2f; color: #58a6ff; }
+  .ev-user-message     { background: #1e2a1e; color: #7ee787; }
+  .ev-other            { background: #21262d; color: #8b949e; }
+  .event-data { flex: 1; font-size: 11px; color: #8b949e; word-break: break-all; white-space: pre-wrap; }
+  .event-data .text { color: #e6edf3; }
+  .event-data .meta { color: #484f58; font-size: 10px; }
+  .diff-panel { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0; overflow: hidden; }
+  .diff-col { display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid #30363d; }
+  .diff-col:last-child { border-right: none; }
+  .diff-header { padding: 10px 14px; background: #161b22; border-bottom: 1px solid #30363d; font-size: 11px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+  .badge-green { background: #1f3d1f; color: #3fb950; }
+  .badge-red { background: #3d1f1f; color: #f85149; }
+  .badge-blue { background: #1f2f3d; color: #58a6ff; }
+  .empty { color: #484f58; font-style: italic; padding: 20px; text-align: center; }
+  .status-bar { padding: 4px 14px; background: #010409; border-top: 1px solid #30363d; font-size: 10px; color: #484f58; display: flex; gap: 16px; }
+  .verify-result { padding: 10px 14px; font-size: 12px; border-top: 1px solid #30363d; background: #161b22; }
+  .verify-result.pass { color: #3fb950; }
+  .verify-result.fail { color: #f85149; }
+  .spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot" id="serverDot"></div>
+  <h1>Opencode Wrapper QA</h1>
+  <span id="serverStatus" style="font-size:11px;color:#8b949e;">checking…</span>
+  <span style="flex:1"></span>
+  <button class="btn-ghost" onclick="checkHealth()" style="padding:4px 10px;font-size:11px;">refresh</button>
+</header>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+
+    <!-- Agent -->
+    <div class="panel">
+      <div class="panel-title">1. Agent</div>
+      <div class="panel-body">
+        <label>Name</label>
+        <input id="agentName" value="qa-agent" />
+        <label>Model</label>
+        <input id="agentModel" value="claude-sonnet-4-6" />
+        <label>System prompt</label>
+        <textarea id="agentSystem" rows="3">You are a helpful assistant. Keep responses short.</textarea>
+        <div class="row">
+          <button class="btn-primary" onclick="createAgent()">Create agent</button>
+        </div>
+        <div id="agentId" class="id-badge" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Session -->
+    <div class="panel">
+      <div class="panel-title">2. Session</div>
+      <div class="panel-body">
+        <label>Agent ID (auto-filled)</label>
+        <input id="sessionAgentId" placeholder="agt_…" />
+        <div class="row">
+          <button class="btn-primary" onclick="createSession()">Create session</button>
+        </div>
+        <div id="sessionId" class="id-badge" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Prompt -->
+    <div class="panel">
+      <div class="panel-title">3. Submit Prompt</div>
+      <div class="panel-body">
+        <label>Session ID (auto-filled)</label>
+        <input id="promptSessionId" placeholder="ses_…" />
+        <label>Message</label>
+        <textarea id="promptText" rows="3">Say hello in exactly 5 words.</textarea>
+        <div class="row">
+          <button class="btn-blue" onclick="submitPrompt()">Submit</button>
+          <button class="btn-ghost" onclick="abortSession()">Abort</button>
+        </div>
+        <div id="promptStatus" style="font-size:11px;color:#8b949e;margin-top:2px;"></div>
+      </div>
+    </div>
+
+    <!-- Stream control -->
+    <div class="panel">
+      <div class="panel-title">4. Stream Controls</div>
+      <div class="panel-body">
+        <div class="row">
+          <button class="btn-blue" onclick="startStream()" id="btnStream">Connect stream</button>
+          <button class="btn-red" onclick="stopStream()" id="btnStop" disabled>Disconnect</button>
+        </div>
+        <div class="row">
+          <button class="btn-ghost" onclick="fetchHistory()">Fetch history</button>
+          <button class="btn-ghost" onclick="runVerify()">Verify parity</button>
+        </div>
+        <div class="row">
+          <button class="btn-ghost" onclick="clearAll()">Clear logs</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('stream')">Live Stream</div>
+      <div class="tab" onclick="switchTab('history')">Persisted History</div>
+      <div class="tab" onclick="switchTab('diff')">Verify Parity</div>
+    </div>
+
+    <!-- Stream tab -->
+    <div class="tab-content active" id="tab-stream">
+      <div class="toolbar">
+        <span class="toolbar-label" id="streamLabel">Not connected</span>
+        <span id="streamCount" style="font-size:11px;color:#58a6ff;"></span>
+      </div>
+      <div class="event-log" id="streamLog">
+        <div class="empty">Connect stream to see live events</div>
+      </div>
+    </div>
+
+    <!-- History tab -->
+    <div class="tab-content" id="tab-history">
+      <div class="toolbar">
+        <span class="toolbar-label" id="historyLabel">No history loaded</span>
+        <button class="btn-ghost" onclick="fetchHistory()" style="padding:4px 10px;font-size:11px;">Fetch</button>
+      </div>
+      <div class="event-log" id="historyLog">
+        <div class="empty">Click "Fetch history" to load persisted events</div>
+      </div>
+    </div>
+
+    <!-- Diff tab -->
+    <div class="tab-content" id="tab-diff">
+      <div class="diff-panel">
+        <div class="diff-col">
+          <div class="diff-header">
+            Live (streamed) <span id="liveCount" class="badge badge-blue">0</span>
+          </div>
+          <div class="event-log" id="diffLive">
+            <div class="empty">Connect stream first</div>
+          </div>
+        </div>
+        <div class="diff-col">
+          <div class="diff-header">
+            Persisted (GET /events) <span id="storedCount" class="badge badge-blue">0</span>
+          </div>
+          <div class="event-log" id="diffStored">
+            <div class="empty">Fetch history first</div>
+          </div>
+        </div>
+      </div>
+      <div class="verify-result" id="verifyResult" style="display:none"></div>
+    </div>
+
+    <div class="status-bar">
+      <span id="sb-server">server: –</span>
+      <span id="sb-agent">agent: –</span>
+      <span id="sb-session">session: –</span>
+      <span id="sb-stream">stream: idle</span>
+      <span id="sb-events">events: 0 live / 0 stored</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = '';  // same origin
+
+// State
+let agentId = null;
+let sessionId = null;
+let evtSource = null;
+let liveEvents = [];
+let storedEvents = [];
+
+// ---- Health ------------------------------------------------------------------
+async function checkHealth() {
+  try {
+    const r = await fetch(`${BASE}/health`);
+    const j = await r.json();
+    document.getElementById('serverDot').className = 'dot ' + (j.ok ? 'ok' : 'err');
+    document.getElementById('serverStatus').textContent =
+      `server: ${j.ok ? 'ok' : 'err'} | opencode: ${j.opencode ? 'ready' : 'starting…'}`;
+    sb('sb-server', `server:${j.ok?'ok':'err'} oc:${j.opencode?'ready':'starting'}`);
+  } catch(e) {
+    document.getElementById('serverDot').className = 'dot err';
+    document.getElementById('serverStatus').textContent = 'unreachable';
+  }
+}
+
+// ---- Agent -------------------------------------------------------------------
+async function createAgent() {
+  const body = {
+    name: v('agentName'),
+    model: v('agentModel'),
+    system: v('agentSystem'),
+  };
+  try {
+    const r = await fetch(`${BASE}/v1/agents`, {
+      method: 'POST',
+      headers: {'content-type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    if (!r.ok) { toast('Agent create failed: ' + JSON.stringify(j)); return; }
+    agentId = j.id;
+    show('agentId', agentId);
+    set('sessionAgentId', agentId);
+    sb('sb-agent', 'agent: ' + agentId.slice(0,14) + '…');
+    toast('Agent created: ' + agentId, 'ok');
+  } catch(e) { toast('Error: ' + e.message); }
+}
+
+// ---- Session -----------------------------------------------------------------
+async function createSession() {
+  const aid = v('sessionAgentId') || agentId;
+  if (!aid) { toast('Need an agent ID'); return; }
+  try {
+    const r = await fetch(`${BASE}/v1/sessions`, {
+      method: 'POST',
+      headers: {'content-type':'application/json'},
+      body: JSON.stringify({ agent: aid }),
+    });
+    const j = await r.json();
+    if (!r.ok) { toast('Session create failed: ' + JSON.stringify(j)); return; }
+    sessionId = j.id;
+    show('sessionId', sessionId);
+    set('promptSessionId', sessionId);
+    liveEvents = [];
+    storedEvents = [];
+    updateCounts();
+    sb('sb-session', 'session: ' + sessionId.slice(0,16) + '…');
+    toast('Session: ' + sessionId, 'ok');
+  } catch(e) { toast('Error: ' + e.message); }
+}
+
+// ---- Prompt ------------------------------------------------------------------
+async function submitPrompt() {
+  const sid = v('promptSessionId') || sessionId;
+  if (!sid) { toast('Need a session ID'); return; }
+  const text = v('promptText');
+  if (!text) { toast('Need a message'); return; }
+  set('promptStatus', '⏳ submitting…');
+  try {
+    const r = await fetch(`${BASE}/v1/sessions/${sid}/events`, {
+      method: 'POST',
+      headers: {'content-type':'application/json'},
+      body: JSON.stringify({ events: [{ type: 'user.message', content: text }] }),
+    });
+    const j = await r.json();
+    if (!r.ok) { set('promptStatus', '✗ ' + JSON.stringify(j)); return; }
+    set('promptStatus', '✓ 202 accepted — background capture started');
+  } catch(e) { set('promptStatus', '✗ ' + e.message); }
+}
+
+async function abortSession() {
+  const sid = v('promptSessionId') || sessionId;
+  if (!sid) return;
+  await fetch(`${BASE}/v1/sessions/${sid}/abort`, { method: 'POST', headers: {'content-type':'application/json'}, body: '{}' });
+  set('promptStatus', 'aborted');
+}
+
+// ---- Stream ------------------------------------------------------------------
+function startStream() {
+  const sid = v('promptSessionId') || sessionId;
+  if (!sid) { toast('Need a session ID'); return; }
+  if (evtSource) evtSource.close();
+  liveEvents = [];
+  clearLog('streamLog');
+  clearLog('diffLive');
+
+  const url = `${BASE}/v1/sessions/${sid}/events/stream`;
+  evtSource = new EventSource(url);
+  document.getElementById('streamLabel').textContent = 'Connecting to ' + sid.slice(0,20) + '…';
+  document.getElementById('btnStream').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  sb('sb-stream', 'stream: connecting');
+
+  const EVENTS = [
+    'agent.message','agent.thinking','agent.tool_use','agent.tool_result',
+    'session.status_idle','session.status_running','session.error','user.message'
+  ];
+  EVENTS.forEach(evt => {
+    evtSource.addEventListener(evt, (e) => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { data = e.data; }
+      const ev = { event: evt, data };
+      liveEvents.push(ev);
+      appendEventRow('streamLog', ev);
+      appendEventRow('diffLive', ev);
+      updateCounts();
+      if (evt === 'session.status_idle' || evt === 'session.error') {
+        document.getElementById('streamLabel').textContent =
+          `✓ Terminal event: ${evt} (${liveEvents.length} total)`;
+        sb('sb-stream', 'stream: done (' + evt + ')');
+      }
+    });
+  });
+
+  evtSource.onerror = () => {
+    document.getElementById('streamLabel').textContent = 'Stream disconnected';
+    sb('sb-stream', 'stream: disconnected');
+    document.getElementById('btnStream').disabled = false;
+  };
+  evtSource.onopen = () => {
+    document.getElementById('streamLabel').textContent = 'Streaming ' + sid.slice(0,20) + '…';
+    sb('sb-stream', 'stream: live');
+  };
+}
+
+function stopStream() {
+  if (evtSource) { evtSource.close(); evtSource = null; }
+  document.getElementById('btnStream').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  sb('sb-stream', 'stream: idle');
+}
+
+// ---- History -----------------------------------------------------------------
+async function fetchHistory() {
+  const sid = v('promptSessionId') || sessionId;
+  if (!sid) { toast('Need a session ID'); return; }
+  try {
+    const r = await fetch(`${BASE}/v1/sessions/${sid}/events`);
+    const j = await r.json();
+    storedEvents = j.data || [];
+    clearLog('historyLog');
+    clearLog('diffStored');
+    if (storedEvents.length === 0) {
+      document.getElementById('historyLog').innerHTML = '<div class="empty">No events stored yet</div>';
+      document.getElementById('diffStored').innerHTML = '<div class="empty">No events stored yet</div>';
+    } else {
+      storedEvents.forEach(ev => {
+        appendEventRow('historyLog', ev);
+        appendEventRow('diffStored', ev);
+      });
+    }
+    document.getElementById('historyLabel').textContent =
+      `${storedEvents.length} event${storedEvents.length===1?'':'s'} from GET /v1/sessions/${sid}/events`;
+    updateCounts();
+  } catch(e) { toast('Fetch error: ' + e.message); }
+}
+
+// ---- Verify ------------------------------------------------------------------
+function runVerify() {
+  switchTab('diff');
+  const live = liveEvents.length;
+  const stored = storedEvents.length;
+  const el = document.getElementById('verifyResult');
+  el.style.display = 'block';
+
+  if (live === 0 && stored === 0) {
+    el.className = 'verify-result';
+    el.textContent = 'No events to compare. Submit a prompt, connect stream, then fetch history.';
+    return;
+  }
+
+  const liveTypes = liveEvents.map(e => e.event);
+  const storedTypes = storedEvents.map(e => e.event);
+
+  const liveHasTerminal = liveTypes.some(t => t === 'session.status_idle' || t === 'session.error');
+  const storedHasTerminal = storedTypes.some(t => t === 'session.status_idle' || t === 'session.error');
+  const liveHasUser = liveTypes.includes('user.message');
+  const storedHasUser = storedTypes.includes('user.message');
+  const countMatch = live === stored;
+
+  const issues = [];
+  if (!storedHasUser) issues.push('✗ user.message missing from stored history');
+  if (liveHasTerminal && !storedHasTerminal) issues.push('✗ terminal event in live stream but missing from stored history');
+  if (!liveHasTerminal && storedHasTerminal) issues.push('✗ terminal event in stored but not seen in live stream');
+  if (!countMatch) issues.push(`⚠ count mismatch: ${live} live vs ${stored} stored (expected equal)`);
+
+  if (issues.length === 0) {
+    el.className = 'verify-result pass';
+    el.innerHTML = `✓ PASS — ${stored} events stored, user.message present` +
+      (storedHasTerminal ? ', terminal event present' : '') +
+      (countMatch ? ', counts match' : '');
+  } else {
+    el.className = 'verify-result fail';
+    el.innerHTML = issues.join('<br>');
+  }
+}
+
+// ---- Helpers -----------------------------------------------------------------
+function v(id) { return document.getElementById(id).value.trim(); }
+function set(id, val) { const el = document.getElementById(id); if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.value = val; else el.textContent = val; }
+function show(id, val) { const el = document.getElementById(id); el.style.display = 'block'; el.textContent = val; }
+function sb(id, val) { document.getElementById(id).textContent = val; }
+
+function clearLog(id) {
+  document.getElementById(id).innerHTML = '';
+}
+
+function appendEventRow(logId, ev) {
+  const log = document.getElementById(logId);
+  const empty = log.querySelector('.empty');
+  if (empty) empty.remove();
+
+  const row = document.createElement('div');
+  row.className = 'event-row';
+
+  const typeEl = document.createElement('div');
+  typeEl.className = 'event-type ' + eventClass(ev.event);
+  typeEl.textContent = ev.event;
+
+  const dataEl = document.createElement('div');
+  dataEl.className = 'event-data';
+  dataEl.appendChild(renderEventData(ev));
+
+  row.appendChild(typeEl);
+  row.appendChild(dataEl);
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderEventData(ev) {
+  const frag = document.createDocumentFragment();
+  const d = ev.data || {};
+
+  if (ev.event === 'agent.message' || ev.event === 'user.message') {
+    const text = (d.content || []).map(c => c.text || '').join('');
+    if (text) {
+      const s = document.createElement('span');
+      s.className = 'text';
+      s.textContent = text.length > 200 ? text.slice(0, 200) + '…' : text;
+      frag.appendChild(s);
+    }
+  } else if (ev.event === 'agent.thinking') {
+    const t = d.thinking || '';
+    const s = document.createElement('span');
+    s.className = 'text';
+    s.textContent = (t.length > 150 ? t.slice(0, 150) + '…' : t);
+    frag.appendChild(s);
+  } else if (ev.event === 'agent.tool_use') {
+    const s = document.createElement('span');
+    s.textContent = d.name || d.tool || '?';
+    s.style.color = '#56d364';
+    frag.appendChild(s);
+    if (d.status) {
+      const st = document.createElement('span');
+      st.className = 'meta';
+      st.textContent = ' [' + d.status + ']';
+      frag.appendChild(st);
+    }
+  } else if (ev.event === 'agent.tool_result') {
+    const s = document.createElement('span');
+    s.textContent = d.name || d.tool || '?';
+    s.style.color = '#b88af8';
+    frag.appendChild(s);
+  } else if (ev.event === 'session.status_idle') {
+    const s = document.createElement('span');
+    s.className = 'text';
+    s.textContent = '⏹ done';
+    frag.appendChild(s);
+  } else if (ev.event === 'session.error') {
+    const s = document.createElement('span');
+    s.style.color = '#f85149';
+    s.textContent = d.error?.message || 'error';
+    frag.appendChild(s);
+  } else {
+    const s = document.createElement('span');
+    s.className = 'meta';
+    s.textContent = JSON.stringify(d).slice(0, 120);
+    frag.appendChild(s);
+  }
+
+  // Show stable IDs if present
+  const ids = ['id','messageID','partID'].filter(k => d[k]);
+  if (ids.length) {
+    const m = document.createElement('span');
+    m.className = 'meta';
+    m.textContent = '  ' + ids.map(k => k + ':' + String(d[k]).slice(0,8)).join(' ');
+    frag.appendChild(m);
+  }
+
+  return frag;
+}
+
+function eventClass(evt) {
+  return {
+    'agent.message': 'ev-agent-message',
+    'agent.thinking': 'ev-agent-thinking',
+    'agent.tool_use': 'ev-agent-tool-use',
+    'agent.tool_result': 'ev-agent-tool-result',
+    'session.status_idle': 'ev-session-idle',
+    'session.status_running': 'ev-session-running',
+    'session.error': 'ev-session-error',
+    'user.message': 'ev-user-message',
+  }[evt] || 'ev-other';
+}
+
+function updateCounts() {
+  const l = liveEvents.length, s = storedEvents.length;
+  document.getElementById('streamCount').textContent = l ? l + ' events' : '';
+  document.getElementById('liveCount').textContent = l;
+  document.getElementById('storedCount').textContent = s;
+  sb('sb-events', `events: ${l} live / ${s} stored`);
+  document.getElementById('liveCount').className = 'badge ' + (l > 0 ? 'badge-green' : 'badge-blue');
+  document.getElementById('storedCount').className = 'badge ' + (s > 0 ? 'badge-green' : 'badge-blue');
+}
+
+function clearAll() {
+  liveEvents = [];
+  storedEvents = [];
+  ['streamLog','historyLog','diffLive','diffStored'].forEach(id => {
+    document.getElementById(id).innerHTML = '<div class="empty">Cleared</div>';
+  });
+  document.getElementById('verifyResult').style.display = 'none';
+  updateCounts();
+  set('promptStatus', '');
+}
+
+function toast(msg, type) {
+  set('promptStatus', msg);
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['stream','history','diff'];
+    t.className = 'tab' + (names[i] === name ? ' active' : '');
+  });
+  document.querySelectorAll('.tab-content').forEach((c, i) => {
+    const names = ['stream','history','diff'];
+    c.className = 'tab-content' + (names[i] === name ? ' active' : '');
+  });
+}
+
+// Init
+checkHealth();
+setInterval(checkHealth, 30000);
+</script>
+</body>
+</html>
